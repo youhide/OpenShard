@@ -1,4 +1,4 @@
-//! The six trades: their recipe lists, and the headers that name them.
+//! The seven trades: their recipe lists, and the headers that name them.
 //!
 //! Each `Def*.cs` in ServUO is a recipe table plus a short header of overrides —
 //! the main skill, the chance floor, the exceptional curve, the sound, and what
@@ -18,6 +18,7 @@
 pub mod alchemy;
 pub mod blacksmithy;
 pub mod carpentry;
+pub mod cooking;
 pub mod fletching;
 pub mod tailoring;
 pub mod tinkering;
@@ -55,14 +56,54 @@ mod tests {
         Graphic,
         Hue,
     };
-    use openshard_state::item_definition as find_item_definition;
     use openshard_state::item_definition::{
         LEATHER,
         METAL,
         WOOD,
     };
+    use openshard_state::{
+        AddonKind,
+        item_definition as find_item_definition,
+    };
 
     use super::*;
+
+    #[test]
+    fn every_oven_deed_keeps_its_installation_kind() {
+        let ovens: Vec<_> = carpentry::RECIPES
+            .iter()
+            .filter_map(|recipe| recipe.addon)
+            .collect();
+        assert_eq!(
+            ovens,
+            vec![
+                AddonKind::StoneOvenEast,
+                AddonKind::StoneOvenSouth,
+                AddonKind::ElvenOvenSouth,
+                AddonKind::ElvenOvenEast,
+            ]
+        );
+    }
+
+    /// An addon recipe's output *is* the deed that installs it: a row naming one
+    /// kind and installing another would craft a scroll that opens somebody
+    /// else's oven, and both halves are hand-written data.
+    #[test]
+    fn an_addon_recipe_outputs_its_own_addon_s_deed() {
+        for system in SYSTEMS {
+            for recipe in system.recipes {
+                let Some(addon) = recipe.addon else {
+                    continue;
+                };
+                assert_eq!(
+                    recipe.kind,
+                    Some(addon.deed_kind()),
+                    "{addon:?} is crafted as {:?}",
+                    recipe.kind
+                );
+            }
+        }
+    }
 
     #[test]
     fn every_trade_has_exactly_one_system() {
@@ -258,6 +299,21 @@ mod tests {
                 material: MaterialRule::Any,
             })
         ));
+    }
+
+    #[test]
+    fn grapes_of_wrath_and_the_enchanted_apple_keep_cookings_raised_chance_floor() {
+        // ServUO's `DefCooking.GetChanceAtMin` special-cases these two at 50%
+        // although the trade itself starts every other recipe at 0%.
+        let cooking = system(SystemId::new(6)).expect("cooking");
+        for graphic in [0x2FD7, 0x2FD8] {
+            let recipe = cooking
+                .recipes
+                .iter()
+                .find(|recipe| recipe.graphic.0 == graphic)
+                .unwrap_or_else(|| panic!("{graphic:#06X} recipe"));
+            assert_eq!(recipe.min_chance, Some(500), "{graphic:#06X}");
+        }
     }
 
     #[test]

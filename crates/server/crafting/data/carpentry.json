@@ -1293,9 +1293,12 @@
       ]
     },
     {
+      "kind": 110,
       "graphic": "0x14F0",
       "name": 1044345,
+      "addon": "stone_oven_east",
       "group": 7,
+      "output_material": "none",
       "skills": [{ "skill": "Carpentry", "min": 684, "max": 934 }, { "skill": "Tinkering", "min": 500, "max": 550 }],
       "resources": [
         { "graphic": "0x1BD7", "amount": 85, "name": 1044041, "message": 1044351, "from_axis": true },
@@ -1303,13 +1306,42 @@
       ]
     },
     {
+      "kind": 111,
       "graphic": "0x14F0",
       "name": 1044346,
+      "addon": "stone_oven_south",
       "group": 7,
+      "output_material": "none",
       "skills": [{ "skill": "Carpentry", "min": 684, "max": 934 }, { "skill": "Tinkering", "min": 500, "max": 550 }],
       "resources": [
         { "graphic": "0x1BD7", "amount": 85, "name": 1044041, "message": 1044351, "from_axis": true },
         { "graphic": "0x1BF2", "amount": 125, "name": 1044036, "message": 1044037 }
+      ]
+    },
+    {
+      "kind": 112,
+      "graphic": "0x14F0",
+      "name": 1073394,
+      "addon": "elven_oven_south",
+      "group": 7,
+      "output_material": "none",
+      "never_exceptional": true,
+      "skills": [{ "skill": "Carpentry", "min": 850, "max": 1100 }],
+      "resources": [
+        { "graphic": "0x1BD7", "amount": 80, "name": 1044041, "message": 1044351, "from_axis": true }
+      ]
+    },
+    {
+      "kind": 113,
+      "graphic": "0x14F0",
+      "name": 1073395,
+      "addon": "elven_oven_east",
+      "group": 7,
+      "output_material": "none",
+      "never_exceptional": true,
+      "skills": [{ "skill": "Carpentry", "min": 850, "max": 1100 }],
+      "resources": [
+        { "graphic": "0x1BD7", "amount": 80, "name": 1044041, "message": 1044351, "from_axis": true }
       ]
     },
     {

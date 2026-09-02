@@ -125,6 +125,9 @@ struct Row {
     /// audited into the item-definition registry.
     #[serde(default)]
     kind:               Option<u32>,
+    /// The house addon encoded by an otherwise generic deed result.
+    #[serde(default)]
+    addon:              Option<AddonRow>,
     /// The item art produced.
     graphic:            String,
     /// Its name, for the gump.
@@ -151,6 +154,10 @@ struct Row {
     /// Tenths knocked off the "can you attempt this at all" gate.
     #[serde(default)]
     min_skill_offset:   i32,
+    /// This recipe's own chance-at-min floor, in per-mille, overriding the
+    /// system's — ServUO's `GetChanceAtMin(CraftItem)` special-casing a recipe.
+    #[serde(default)]
+    min_chance:         Option<u32>,
     /// Whether an exceptional one carries its maker's name.
     #[serde(default)]
     markable:           bool,
@@ -167,6 +174,39 @@ struct Row {
     skills:             Vec<SkillRow>,
     /// What it eats.
     resources:          Vec<ResRow>,
+}
+
+/// A house addon recipe marker.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AddonRow {
+    StoneOvenEast,
+    StoneOvenSouth,
+    ElvenOvenEast,
+    ElvenOvenSouth,
+}
+
+impl AddonRow {
+    fn expr(&self) -> &'static str {
+        match self {
+            Self::StoneOvenEast => "openshard_state::AddonKind::StoneOvenEast",
+            Self::StoneOvenSouth => "openshard_state::AddonKind::StoneOvenSouth",
+            Self::ElvenOvenEast => "openshard_state::AddonKind::ElvenOvenEast",
+            Self::ElvenOvenSouth => "openshard_state::AddonKind::ElvenOvenSouth",
+        }
+    }
+
+    /// The registered item-kind id of this addon's deed —
+    /// `openshard_state::components::AddonKind::deed_kind`, mirrored here
+    /// because a build script cannot import the crate it is generating.
+    const fn deed_kind(&self) -> u32 {
+        match self {
+            Self::StoneOvenEast => 110,
+            Self::StoneOvenSouth => 111,
+            Self::ElvenOvenSouth => 112,
+            Self::ElvenOvenEast => 113,
+        }
+    }
 }
 
 /// `recipe::OutputMaterial`, written in JSON only where a recipe has a kind.
@@ -488,6 +528,10 @@ fn generate(table: &Table) -> String {
             }
             None => out.push_str("        kind: None,\n"),
         }
+        match &row.addon {
+            Some(addon) => writeln!(out, "        addon: Some({}),", addon.expr()).unwrap(),
+            None => out.push_str("        addon: None,\n"),
+        }
         writeln!(out, "        graphic: Graphic({}),", hex("graphic", &row.graphic)).unwrap();
         writeln!(out, "        name: {},", row.name.expr()).unwrap();
         writeln!(out, "        group: {},", row.group).unwrap();
@@ -528,6 +572,15 @@ fn generate(table: &Table) -> String {
         writeln!(out, "        retain_color: {},", row.retain_color).unwrap();
         writeln!(out, "        use_all_res: {},", row.use_all_res).unwrap();
         writeln!(out, "        min_skill_offset: {},", row.min_skill_offset).unwrap();
+        writeln!(
+            out,
+            "        min_chance: {},",
+            match row.min_chance {
+                Some(chance) => format!("Some({chance})"),
+                None => "None".to_owned(),
+            }
+        )
+        .unwrap();
         writeln!(out, "        markable: {},", row.markable).unwrap();
         writeln!(out, "        never_exceptional: {},", row.never_exceptional).unwrap();
         writeln!(out, "        always_exceptional: {},", row.always_exceptional).unwrap();
@@ -597,6 +650,15 @@ fn check(row: &SystemRow, table: &Table) {
             row.trade,
             recipe.graphic
         );
+        if let Some(chance) = recipe.min_chance {
+            assert!(
+                chance <= 1000,
+                "{}: recipe {} has a chance-at-min of {} per-mille, above certainty",
+                row.trade,
+                recipe.graphic,
+                chance
+            );
+        }
         match (recipe.kind, &recipe.output_material) {
             (None, OutputMaterialRow::Legacy)
             | (Some(_), OutputMaterialRow::None)
@@ -614,6 +676,17 @@ fn check(row: &SystemRow, table: &Table) {
                     row.trade, recipe.graphic
                 )
             }
+        }
+        if let Some(addon) = &recipe.addon {
+            assert_eq!(
+                recipe.kind,
+                Some(addon.deed_kind()),
+                "{}: recipe {} installs {addon:?} but is not typed as item kind {} — a generic-art \
+                 deed's identity is its kind, not its name",
+                row.trade,
+                recipe.graphic,
+                addon.deed_kind()
+            );
         }
         if let OutputMaterialRow::InheritInput(input) = &recipe.output_material {
             assert!(

@@ -13110,13 +13110,21 @@ fn f1_creates_every_registered_definition_with_its_semantic_role() {
     let pack = items::backpack_of(&world.state, owner).unwrap();
 
     for definition in openshard_state::item_definition::ITEM_DEFINITIONS {
-        world.queue(admin_item_response(
-            gm,
-            &format!("0x{:04x}", definition.graphic.0),
-            "0",
-            "1",
-            false,
-        ));
+        // A `shared_art` kind's graphic is deliberately ambiguous (several
+        // deeds draw the same generic scroll), so F1's legacy graphic lookup
+        // cannot reach it by design — it is only ever constructed by naming
+        // its `ItemKindId` directly, the same door a real deed recipe uses.
+        if definition.shared_art {
+            world.queue(admin_item_kind_response(gm, definition.id, None, 1));
+        } else {
+            world.queue(admin_item_response(
+                gm,
+                &format!("0x{:04x}", definition.graphic.0),
+                "0",
+                "1",
+                false,
+            ));
+        }
         world.tick(now);
         let item = world
             .registry()
@@ -22295,6 +22303,724 @@ fn a_deed_raises_the_house_cursor_and_answering_it_builds() {
             .blocker_at_z(at.x + 1, at.y, 0)
             .is_some(),
         "the house has no walls"
+    );
+}
+
+/// An addon supplied as content (admin-created, not crafted) carries its
+/// `ItemKind` from spawn but gains the transient `AddonDeed` component only on
+/// first use. Its first double-click has to recover that identity, raise the
+/// ordinary tile cursor, and leave the oven locked down in the house.
+///
+/// Both elven facings are placed here because the facing *is* the whole
+/// difference between them: one tile at the origin either way, and only the
+/// graphic says which oven stands there.
+#[test]
+fn an_elven_oven_deed_places_the_single_component_its_facing_names() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{
+        AddonDeed,
+        AddonKind,
+        House,
+        LockedDown,
+    };
+    use openshard_uofiles::multi::Component;
+
+    const COTTAGE: u16 = 0x64;
+    const WALL: u16 = 0x0006;
+    const FLOOR: u16 = 0x0007;
+    // The elven oven's single tile is the *floor* offset: non-blocking, so the
+    // real collision check `place_addon_from_deed` runs finds it clear. A wall
+    // tile beside it keeps the house's own footprint non-empty
+    // (`Refusal::DrawsNothing`) without standing where the oven goes. Two floor
+    // tiles, because the two facings are placed one beside the other and a
+    // locked-down oven refuses to share a tile with another.
+    fn cottage() -> Vec<Component> {
+        vec![
+            Component {
+                graphic: Graphic(WALL),
+                dx:      -1,
+                dy:      0,
+                dz:      0,
+                flags:   1,
+            },
+            Component {
+                graphic: Graphic(FLOOR),
+                dx:      0,
+                dy:      0,
+                dz:      0,
+                flags:   1,
+            },
+            Component {
+                graphic: Graphic(FLOOR),
+                dx:      0,
+                dy:      1,
+                dz:      0,
+                flags:   1,
+            },
+        ]
+    }
+
+    let now = Instant::now();
+    let mut world = world();
+    world
+        .state
+        .set_tiles(tiles_with(&[(WALL, WALL_FLAGS, 20), (FLOOR, 0, 0)]));
+    world.state.multis = multis_with(COTTAGE, cottage());
+    let connection = enter_gm(&mut world, now);
+    let player = world.state.players[&connection];
+    let owner = world.state.registry.serial_of(player).expect("a player serial");
+    let at = Point::new(START.x, START.y, 0);
+
+    gm::run(&mut world.state, player, "house 0x64");
+    world.tick(now);
+    assert_eq!(
+        world.state.registry.query::<House>().count(),
+        1,
+        "the test house is absent"
+    );
+
+    let deed = items::spawn_item_kind(
+        &mut world.state,
+        ItemKindId(112), // AddonKind::ElvenOvenSouth's deed kind
+        None,
+        1,
+        false,
+        at,
+        Facet(0),
+    )
+    .expect("an elven oven deed");
+    let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
+    openshard_state::relocate_item(
+        &mut world.state,
+        deed,
+        openshard_state::ItemLocation::contained(Contained {
+            container: backpack,
+            position:  GumpPoint::new(20, 20),
+            grid:      GridSlot(0),
+        }),
+    )
+    .expect("the deed goes into the owner's backpack");
+    let deed_serial = world.state.registry.serial_of(deed).expect("a deed serial");
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(deed_serial.raw())),
+    });
+    world.tick(now);
+    assert!(
+        packets_for(&mut world, connection)
+            .iter()
+            .any(|packet| packet[0] == 0x6C),
+        "an admin-created elven oven deed raised no location cursor"
+    );
+    assert_eq!(
+        world.state.registry.get::<AddonDeed>(deed),
+        Some(&AddonDeed {
+            addon: AddonKind::ElvenOvenSouth,
+        }),
+        "the deed did not acquire its placement identity"
+    );
+
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(owner.raw()),
+            object:    openshard_protocol::serial::Serial::new(0),
+            location:  at,
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert!(
+        world.state.registry.entity_of(deed_serial).is_none(),
+        "placing the oven did not spend its deed"
+    );
+    assert!(
+        world.state.registry.query::<Drawn>().any(|(item, drawn)| {
+            drawn.id == Graphic(0x2DDC) && world.state.registry.has::<LockedDown>(item)
+        }),
+        "the elven oven's locked-down component is absent"
+    );
+
+    // The east facing, on the floor tile beside it: a different registered kind
+    // and a different graphic, everything else identical.
+    let beside = Point::new(at.x, at.y + 1, at.z);
+    let east = items::spawn_item_kind(
+        &mut world.state,
+        ItemKindId(113), // AddonKind::ElvenOvenEast's deed kind
+        None,
+        1,
+        false,
+        at,
+        Facet(0),
+    )
+    .expect("an elven oven east deed");
+    openshard_state::relocate_item(
+        &mut world.state,
+        east,
+        openshard_state::ItemLocation::contained(Contained {
+            container: backpack,
+            position:  GumpPoint::new(20, 40),
+            grid:      GridSlot(1),
+        }),
+    )
+    .expect("the deed goes into the owner's backpack");
+    let east_serial = world.state.registry.serial_of(east).expect("a deed serial");
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(east_serial.raw())),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.state.registry.get::<AddonDeed>(east),
+        Some(&AddonDeed {
+            addon: AddonKind::ElvenOvenEast,
+        }),
+        "the east deed did not acquire its placement identity"
+    );
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(owner.raw()),
+            object:    openshard_protocol::serial::Serial::new(0),
+            location:  beside,
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+    assert!(
+        world.state.registry.query::<Drawn>().any(|(item, drawn)| {
+            drawn.id == Graphic(0x2DDB)
+                && world
+                    .state
+                    .registry
+                    .get::<openshard_state::components::Position>(item)
+                    == Some(&openshard_state::components::Position(beside))
+                && world.state.registry.has::<LockedDown>(item)
+        }),
+        "the east-facing elven oven is absent, or drawn as the south one"
+    );
+}
+
+/// A crafted (not admin-created) stone oven deed installs both of its
+/// components at the offsets `data/deco_addons.json` gives `StoneOvenEastAddon`
+/// — the geometry `place_addon_from_deed` now reads through
+/// `decoration::addon_components` instead of a second, hand-kept copy.
+#[test]
+fn a_crafted_stone_oven_east_deed_places_both_locked_down_components() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{
+        AddonDeed,
+        AddonKind,
+        House,
+        LockedDown,
+    };
+    use openshard_uofiles::multi::Component;
+
+    const COTTAGE: u16 = 0x64;
+    const WALL: u16 = 0x0006;
+    const FLOOR: u16 = 0x0007;
+    // Both tiles a stone-oven-east occupies (offsets `(0, 0)` and `(0, 1)`) must
+    // be inside the house footprint for the placement to be accepted — and, since
+    // `place_addon_from_deed` now runs a real collision check, actually clear to
+    // stand on: flat, non-blocking floor rather than a wall. One further-off wall
+    // tile keeps the house's own footprint non-empty (`Refusal::DrawsNothing`)
+    // without standing where the oven goes.
+    fn cottage() -> Vec<Component> {
+        vec![
+            Component {
+                graphic: Graphic(WALL),
+                dx:      -1,
+                dy:      0,
+                dz:      0,
+                flags:   1,
+            },
+            Component {
+                graphic: Graphic(FLOOR),
+                dx:      0,
+                dy:      0,
+                dz:      0,
+                flags:   1,
+            },
+            Component {
+                graphic: Graphic(FLOOR),
+                dx:      0,
+                dy:      1,
+                dz:      0,
+                flags:   1,
+            },
+        ]
+    }
+
+    let now = Instant::now();
+    let mut world = world();
+    world
+        .state
+        .set_tiles(tiles_with(&[(WALL, WALL_FLAGS, 20), (FLOOR, 0, 0)]));
+    world.state.multis = multis_with(COTTAGE, cottage());
+    let connection = enter_gm(&mut world, now);
+    let player = world.state.players[&connection];
+    let owner = world.state.registry.serial_of(player).expect("a player serial");
+    let at = Point::new(START.x, START.y, 0);
+
+    gm::run(&mut world.state, player, "house 0x64");
+    world.tick(now);
+    assert_eq!(
+        world.state.registry.query::<House>().count(),
+        1,
+        "the test house is absent"
+    );
+
+    let deed = items::spawn_item_kind(
+        &mut world.state,
+        ItemKindId(110), // AddonKind::StoneOvenEast's deed kind
+        None,
+        1,
+        false,
+        at,
+        Facet(0),
+    )
+    .expect("a stone oven east deed");
+    let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
+    openshard_state::relocate_item(
+        &mut world.state,
+        deed,
+        openshard_state::ItemLocation::contained(Contained {
+            container: backpack,
+            position:  GumpPoint::new(20, 20),
+            grid:      GridSlot(0),
+        }),
+    )
+    .expect("the deed goes into the owner's backpack");
+    let deed_serial = world.state.registry.serial_of(deed).expect("a deed serial");
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(deed_serial.raw())),
+    });
+    world.tick(now);
+    assert_eq!(
+        world.state.registry.get::<AddonDeed>(deed),
+        Some(&AddonDeed {
+            addon: AddonKind::StoneOvenEast,
+        }),
+        "the crafted deed did not carry its placement identity"
+    );
+
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(owner.raw()),
+            object:    openshard_protocol::serial::Serial::new(0),
+            location:  at,
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+
+    assert!(
+        world.state.registry.entity_of(deed_serial).is_none(),
+        "placing the oven did not spend its deed"
+    );
+    for (graphic, at) in [
+        (Graphic(0x092C), at),
+        (Graphic(0x092B), Point::new(at.x, at.y + 1, at.z)),
+    ] {
+        assert!(
+            world.state.registry.query::<Drawn>().any(|(item, drawn)| {
+                drawn.id == graphic
+                    && world
+                        .state
+                        .registry
+                        .get::<openshard_state::components::Position>(item)
+                        == Some(&openshard_state::components::Position(at))
+                    && world.state.registry.has::<LockedDown>(item)
+            }),
+            "the stone oven east's {graphic:?} component at {at} is absent"
+        );
+    }
+}
+
+/// A cottage with a crafted stone oven east installed in it, through the whole
+/// player-facing path: deed in the pack, double-click, location cursor answered.
+///
+/// Written once for the two tests below, which are about what happens to an
+/// **installed** oven rather than about installing one — the placement path
+/// itself has its own test above.
+fn a_house_with_a_stone_oven(now: Instant) -> (World, ConnectionId, EntityId, EntityId) {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::House;
+    use openshard_uofiles::multi::Component;
+
+    const COTTAGE: u16 = 0x64;
+    const WALL: u16 = 0x0006;
+    const FLOOR: u16 = 0x0007;
+    // Real floor under both of the oven's tiles, and one wall elsewhere so the
+    // house's own footprint is not empty — the crafted-placement test's fixture,
+    // and for the reasons written there.
+    let cottage = vec![
+        Component {
+            graphic: Graphic(WALL),
+            dx:      -1,
+            dy:      0,
+            dz:      0,
+            flags:   1,
+        },
+        Component {
+            graphic: Graphic(FLOOR),
+            dx:      0,
+            dy:      0,
+            dz:      0,
+            flags:   1,
+        },
+        Component {
+            graphic: Graphic(FLOOR),
+            dx:      0,
+            dy:      1,
+            dz:      0,
+            flags:   1,
+        },
+    ];
+
+    let mut world = world();
+    world
+        .state
+        .set_tiles(tiles_with(&[(WALL, WALL_FLAGS, 20), (FLOOR, 0, 0)]));
+    world.state.multis = multis_with(COTTAGE, cottage);
+    let connection = enter_gm(&mut world, now);
+    let player = world.state.players[&connection];
+    let owner = world.state.registry.serial_of(player).expect("a player serial");
+    let at = Point::new(START.x, START.y, 0);
+
+    gm::run(&mut world.state, player, "house 0x64");
+    world.tick(now);
+    let house = world
+        .state
+        .registry
+        .query::<House>()
+        .next()
+        .map(|(entity, _)| entity)
+        .expect("the test house is absent");
+
+    let deed = items::spawn_item_kind(
+        &mut world.state,
+        ItemKindId(110), // AddonKind::StoneOvenEast's deed kind
+        None,
+        1,
+        false,
+        at,
+        Facet(0),
+    )
+    .expect("a stone oven east deed");
+    let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
+    openshard_state::relocate_item(
+        &mut world.state,
+        deed,
+        openshard_state::ItemLocation::contained(Contained {
+            container: backpack,
+            position:  GumpPoint::new(20, 20),
+            grid:      GridSlot(0),
+        }),
+    )
+    .expect("the deed goes into the owner's backpack");
+    let deed_serial = world.state.registry.serial_of(deed).expect("a deed serial");
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(deed_serial.raw())),
+    });
+    world.tick(now);
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(owner.raw()),
+            object:    openshard_protocol::serial::Serial::new(0),
+            location:  at,
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+    (world, connection, player, house)
+}
+
+/// Releasing one tile of an installed oven takes the **whole** oven down and
+/// puts its deed back in the pack.
+///
+/// Before the addon grouping existed, a release unpinned exactly the component
+/// it was aimed at: half an oven left standing, nothing refunded, and no way to
+/// reassemble it (docs/crafting.md's review, point 3). The rule copied here is
+/// ServUO's `BaseAddon`, which deletes itself whole and re-deeds.
+///
+/// The release is aimed at the **second** component on purpose — the group is
+/// named by the first one's serial, so aiming at the root would pass even if the
+/// sweep only ever looked at the item in hand.
+#[test]
+fn releasing_one_stone_oven_component_takes_the_whole_oven_and_returns_its_deed() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::HouseStorage;
+    use openshard_state::components::{
+        AddonKind,
+        AddonPart,
+        ItemKind,
+        Position,
+    };
+
+    let now = Instant::now();
+    let (mut world, _connection, player, house) = a_house_with_a_stone_oven(now);
+    let owner = world.state.registry.serial_of(player).expect("a player serial");
+    let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
+
+    let mut components = openshard_housing::storage::locked_down(&world.state, house);
+    assert_eq!(components.len(), 2, "the oven did not install both components");
+    // The far tile — `(0, 1)` — is the one that is not the group's root.
+    components.sort_by_key(|&item| {
+        world
+            .state
+            .registry
+            .get::<Position>(item)
+            .map(|&Position(point)| point.y)
+    });
+    let far = *components.last().expect("two components");
+    let root = world
+        .state
+        .registry
+        .get::<AddonPart>(far)
+        .expect("an installed component belongs to an addon")
+        .root;
+    assert_eq!(
+        world.state.registry.get::<AddonPart>(far).map(|part| part.addon),
+        Some(AddonKind::StoneOvenEast),
+        "the component does not name the addon it is part of"
+    );
+    assert_ne!(
+        world.state.registry.serial_of(far),
+        Some(root),
+        "the far component is the group's root, so this test would not prove the sweep"
+    );
+    let far_serial = world.state.registry.serial_of(far).expect("a component serial");
+
+    world.change_house_storage(player, house, HouseStorage::Release, Some(far_serial));
+
+    assert!(
+        openshard_housing::storage::locked_down(&world.state, house).is_empty(),
+        "releasing one component left the rest of the oven locked down"
+    );
+    for component in components {
+        assert!(
+            world.state.registry.get::<Position>(component).is_none(),
+            "a released oven component is still standing in the world"
+        );
+    }
+    let deeds = openshard_state::contained_items(&world.state, backpack)
+        .filter(|&(item, _)| world.state.registry.get::<ItemKind>(item) == Some(&ItemKind(ItemKindId(110))))
+        .count();
+    assert_eq!(
+        deeds, 1,
+        "the released oven did not come back as one deed in the pack"
+    );
+}
+
+/// The grouping is saved and restored, so a restart does not turn an oven back
+/// into two unrelated locked-down graphics.
+///
+/// Nothing else on disk says which components were ever one addon — the tiles a
+/// second oven could legally stand on are the same tiles — so an unsaved
+/// grouping is one that cannot be re-derived at boot, and the release rule
+/// silently reverts to the half-an-oven behaviour it replaced.
+#[test]
+fn an_installed_oven_keeps_its_grouping_across_a_save_and_restore() {
+    use openshard_state::components::{
+        AddonKind,
+        AddonPart,
+    };
+
+    let now = Instant::now();
+    let (home, _connection, _player, house) = a_house_with_a_stone_oven(now);
+    let components = openshard_housing::storage::locked_down(&home.state, house);
+    assert_eq!(components.len(), 2, "the oven did not install both components");
+    let saved: Vec<_> = components
+        .iter()
+        .map(|&item| {
+            home.state
+                .registry
+                .get::<AddonPart>(item)
+                .copied()
+                .expect("an installed component belongs to an addon")
+        })
+        .collect();
+
+    let records = home.ground_items();
+    let mut shard = world();
+    let characters = shard.restore_characters(Vec::new());
+    shard.restore_items(records, &characters);
+
+    for (component, part) in components.iter().zip(saved) {
+        let serial = home
+            .state
+            .registry
+            .serial_of(*component)
+            .expect("a component serial");
+        let restored = shard
+            .state
+            .registry
+            .entity_of(serial)
+            .expect("the oven component is back on its serial");
+        assert_eq!(
+            shard.state.registry.get::<AddonPart>(restored),
+            Some(&part),
+            "the restored component forgot which oven it is part of"
+        );
+        assert_eq!(part.addon, AddonKind::StoneOvenEast);
+    }
+}
+
+/// A second oven cannot be planted on top of the first.
+///
+/// An ordinary locked-down item never registers itself in the facet's
+/// obstruction index the way a wall or a door does (see
+/// `World::addon_tile_is_free`'s doc, and docs/crafting.md's review, point 3),
+/// so without a direct check against the house's own storage list a second
+/// deed would stack invisibly on the components the first one already placed.
+#[test]
+fn a_second_stone_oven_east_refuses_to_stack_on_the_first() {
+    use openshard_protocol::item_kind::ItemKindId;
+    use openshard_state::components::{
+        AddonDeed,
+        House,
+    };
+    use openshard_uofiles::multi::Component;
+
+    const COTTAGE: u16 = 0x64;
+    const WALL: u16 = 0x0006;
+    const FLOOR: u16 = 0x0007;
+    fn cottage() -> Vec<Component> {
+        vec![
+            Component {
+                graphic: Graphic(WALL),
+                dx:      -1,
+                dy:      0,
+                dz:      0,
+                flags:   1,
+            },
+            Component {
+                graphic: Graphic(FLOOR),
+                dx:      0,
+                dy:      0,
+                dz:      0,
+                flags:   1,
+            },
+            Component {
+                graphic: Graphic(FLOOR),
+                dx:      0,
+                dy:      1,
+                dz:      0,
+                flags:   1,
+            },
+        ]
+    }
+
+    /// Craft, carry, double-click and answer the location cursor at `at` — one
+    /// full placement attempt. Returns the deed's serial so the caller can tell
+    /// whether it was spent.
+    fn place_stone_oven_east_at(
+        world: &mut World,
+        connection: ConnectionId,
+        owner: Serial,
+        at: Point,
+        now: Instant,
+    ) -> Serial {
+        let deed = items::spawn_item_kind(
+            &mut world.state,
+            ItemKindId(110), // AddonKind::StoneOvenEast's deed kind
+            None,
+            1,
+            false,
+            at,
+            Facet(0),
+        )
+        .expect("a stone oven east deed");
+        let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
+        openshard_state::relocate_item(
+            &mut world.state,
+            deed,
+            openshard_state::ItemLocation::contained(Contained {
+                container: backpack,
+                position:  GumpPoint::new(20, 20),
+                grid:      GridSlot(0),
+            }),
+        )
+        .expect("the deed goes into the owner's backpack");
+        let deed_serial = world.state.registry.serial_of(deed).expect("a deed serial");
+        let _ = packets_for(world, connection);
+        world.queue(Command::DoubleClick {
+            connection,
+            request: UseRequest::Use(RawSerial(deed_serial.raw())),
+        });
+        world.tick(now);
+        world.queue(Command::TargetResponse {
+            connection,
+            response: openshard_protocol::target::TargetResponse {
+                cursor_id: openshard_protocol::wire::CursorId(owner.raw()),
+                object:    openshard_protocol::serial::Serial::new(0),
+                location:  at,
+                graphic:   None,
+                cancelled: false,
+            },
+        });
+        world.tick(now);
+        deed_serial
+    }
+
+    let now = Instant::now();
+    let mut world = world();
+    world
+        .state
+        .set_tiles(tiles_with(&[(WALL, WALL_FLAGS, 20), (FLOOR, 0, 0)]));
+    world.state.multis = multis_with(COTTAGE, cottage());
+    let connection = enter_gm(&mut world, now);
+    let player = world.state.players[&connection];
+    let owner = world.state.registry.serial_of(player).expect("a player serial");
+    let at = Point::new(START.x, START.y, 0);
+
+    gm::run(&mut world.state, player, "house 0x64");
+    world.tick(now);
+    let house = world
+        .state
+        .registry
+        .query::<House>()
+        .next()
+        .map(|(entity, _)| entity)
+        .expect("the test house is absent");
+
+    let first = place_stone_oven_east_at(&mut world, connection, owner, at, now);
+    assert!(
+        world.state.registry.entity_of(first).is_none(),
+        "the first oven's deed was not spent"
+    );
+    assert_eq!(
+        openshard_housing::storage::locked_down(&world.state, house).len(),
+        2,
+        "the first oven did not lock down both its components"
+    );
+
+    let second = place_stone_oven_east_at(&mut world, connection, owner, at, now);
+    let Some(second_entity) = world.state.registry.entity_of(second) else {
+        panic!("a second oven's deed was spent even though it could not fit");
+    };
+    assert_eq!(
+        openshard_housing::storage::locked_down(&world.state, house).len(),
+        2,
+        "a second oven stacked invisibly on the first"
+    );
+    assert!(
+        world.state.registry.get::<AddonDeed>(second_entity).is_some(),
+        "the refused deed lost its placement identity and cannot be retried"
     );
 }
 

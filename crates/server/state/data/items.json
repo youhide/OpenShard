@@ -107,5 +107,9 @@
   { "id": 106, "name": "female leather chest", "graphic": "0x1C06", "material_family": "leather", "armor_rating": 13, "tags": ["armor"] },
   { "id": 107, "name": "leather cap", "graphic": "0x1DB9", "material_family": "leather", "armor_rating": 13, "tags": ["armor"] },
   { "id": 108, "name": "studded bustier sleeves", "graphic": "0x1C0C", "material_family": "leather", "armor_rating": 16, "tags": ["armor"] },
-  { "id": 109, "name": "female studded chest", "graphic": "0x1C02", "material_family": "leather", "armor_rating": 16, "tags": ["armor"] }
+  { "id": 109, "name": "female studded chest", "graphic": "0x1C02", "material_family": "leather", "armor_rating": 16, "tags": ["armor"] },
+  { "id": 110, "name": "stone oven east deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
+  { "id": 111, "name": "stone oven south deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
+  { "id": 112, "name": "elven oven south deed", "graphic": "0x14F0", "shared_art": true, "tags": [] },
+  { "id": 113, "name": "elven oven east deed", "graphic": "0x14F0", "shared_art": true, "tags": [] }
 ]

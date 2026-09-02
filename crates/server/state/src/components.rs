@@ -3144,9 +3144,137 @@ pub struct HouseDeed {
     pub multi: openshard_protocol::wire::MultiId,
 }
 
+/// The house addons that provide an oven.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AddonKind {
+    /// The north-south two-tile oven.
+    StoneOvenEast,
+    /// The east-west two-tile oven.
+    StoneOvenSouth,
+    /// The single-tile elven oven, east facing (`0x2DDB`).
+    ElvenOvenEast,
+    /// The single-tile elven oven, south facing (`0x2DDC`).
+    ElvenOvenSouth,
+}
+
+impl AddonKind {
+    /// The registered `ItemKindId` of the deed that installs this addon —
+    /// `state/data/items.json` ids 110-113. Every addon deed shares the one
+    /// generic scroll art (`shared_art` in the item-definition registry), so
+    /// this id, not the drawing, is what a saved or freshly-double-clicked deed
+    /// is identified by.
+    #[must_use]
+    pub const fn deed_kind(self) -> ItemKindId {
+        match self {
+            Self::StoneOvenEast => ItemKindId(110),
+            Self::StoneOvenSouth => ItemKindId(111),
+            Self::ElvenOvenSouth => ItemKindId(112),
+            Self::ElvenOvenEast => ItemKindId(113),
+        }
+    }
+
+    /// Recover the addon a deed's `ItemKindId` was registered for.
+    #[must_use]
+    pub const fn from_deed_kind(kind: ItemKindId) -> Option<Self> {
+        match kind.0 {
+            110 => Some(Self::StoneOvenEast),
+            111 => Some(Self::StoneOvenSouth),
+            112 => Some(Self::ElvenOvenSouth),
+            113 => Some(Self::ElvenOvenEast),
+            _ => None,
+        }
+    }
+
+    /// What to call the installed addon when talking to a player: the thing that
+    /// stands in the house, not the deed. One method rather than a `match` at
+    /// every message site — the placement cursor, the installation line and the
+    /// release line all name the same object.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::StoneOvenEast | Self::StoneOvenSouth => "stone oven",
+            Self::ElvenOvenEast | Self::ElvenOvenSouth => "elven oven",
+        }
+    }
+
+    /// The label a freshly crafted deed is given, purely for the single-click
+    /// tooltip — the generic scroll art carries no name of its own. This is
+    /// cosmetic only: identity is [`deed_kind`](Self::deed_kind), never this
+    /// string.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::StoneOvenEast => "stone oven east deed",
+            Self::StoneOvenSouth => "stone oven south deed",
+            Self::ElvenOvenEast => "elven oven east deed",
+            Self::ElvenOvenSouth => "elven oven south deed",
+        }
+    }
+}
+
+/// A crafted house addon waiting to be placed.
+///
+/// Transient: not itself persisted. It is cheap to re-derive from the item's
+/// durable [`ItemKind`](crate::ItemKind) — see
+/// [`AddonKind::from_deed_kind`] — wherever it is missing, which is what
+/// restore and a deed's first double-click both do.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AddonDeed {
+    /// What the deed installs.
+    pub addon: AddonKind,
+}
+
+/// One tile of an installed house addon, and which addon it belongs to.
+///
+/// A stone oven stands as *two* ground items side by side, but every rule worth
+/// having is about the oven and not about either tile: releasing one component
+/// has to take the whole thing down and hand back the deed it was built from,
+/// the way ServUO's `BaseAddon` deletes itself whole and re-deeds. This
+/// component is that grouping. `root` is the serial of the addon's first
+/// component, carried by every part of the same addon — the root's own row
+/// names itself, so there is no separate "am I the root" flag to keep in step.
+///
+/// **Only meaningful while the part is locked down.**
+/// [`WorldState::set_item_lockdown`](crate::WorldState::set_item_lockdown)
+/// drops it whenever a part goes loose, so a component swept into a house's
+/// moving crate comes back an ordinary item rather than half of an addon whose
+/// other half is somewhere else entirely.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AddonPart {
+    /// Which addon this is a tile of.
+    pub addon: AddonKind,
+    /// The serial of the addon's first component — the group's name.
+    pub root:  openshard_protocol::serial::Serial,
+}
+
+impl AddonDeed {
+    /// Recover an addon deed from the durable item-kind identity of its item.
+    #[must_use]
+    pub const fn from_item_kind(kind: ItemKindId) -> Option<Self> {
+        match AddonKind::from_deed_kind(kind) {
+            Some(addon) => Some(Self { addon }),
+            None => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oven_deed_kinds_round_trip_their_addon_kind() {
+        for addon in [
+            AddonKind::StoneOvenEast,
+            AddonKind::StoneOvenSouth,
+            AddonKind::ElvenOvenEast,
+            AddonKind::ElvenOvenSouth,
+        ] {
+            let deed = AddonDeed { addon };
+            assert_eq!(AddonDeed::from_item_kind(addon.deed_kind()), Some(deed));
+        }
+        assert_eq!(AddonDeed::from_item_kind(ItemKindId(1)), None);
+    }
 
     #[test]
     fn combat_states_can_only_move_through_valid_transitions() {

@@ -17,6 +17,8 @@
 use openshard_entities::EntityId;
 use openshard_gateway::ConnectionId;
 use openshard_items as items;
+use openshard_map::grid::Tile;
+use openshard_map::overlay::Doors;
 use openshard_persistence::record::HouseRecord;
 use openshard_protocol::serial::{
     RawSerial,
@@ -26,6 +28,7 @@ use openshard_protocol::server_packet::ServerPacket;
 use openshard_protocol::target::{
     MultiOffset,
     MultiTargetRequest,
+    TargetCursor,
     TargetKind,
 };
 use openshard_protocol::wire::{
@@ -38,6 +41,9 @@ use openshard_protocol::world::{
     Point,
 };
 use openshard_state::components::{
+    AddonDeed,
+    AddonKind,
+    AddonPart,
     Client,
     Drawn,
     House,
@@ -59,6 +65,227 @@ use tracing::{
 use super::World;
 
 impl World {
+    /// Install a crafted addon at the selected house tile and consume its deed.
+    pub(super) fn place_addon_from_deed(&mut self, actor: EntityId, deed: EntityId, at: Point) {
+        let Some(&AddonDeed { addon }) = self.state.registry.get::<AddonDeed>(deed) else {
+            return;
+        };
+        if !self.deed_still_carried(actor, deed) {
+            return;
+        }
+        let facet = self.state.facet_of(actor);
+        let Some(house) = self.house_at(at, facet) else {
+            self.state
+                .system_message(actor, "That must be placed inside a house.");
+            return;
+        };
+        // Read from `deco_addons.json` through the same table the world's own
+        // pre-placed decoration is flattened from, so this geometry cannot drift
+        // from what already stands on the map — see docs/crafting.md's review.
+        let parts: &[crate::decoration::AddonComponent] = match addon {
+            AddonKind::StoneOvenEast => {
+                crate::decoration::addon_components("StoneOvenEastAddon")
+                    .expect("StoneOvenEastAddon is in deco_addons.json")
+            }
+            AddonKind::StoneOvenSouth => {
+                crate::decoration::addon_components("StoneOvenSouthAddon")
+                    .expect("StoneOvenSouthAddon is in deco_addons.json")
+            }
+            // No elven oven is pre-placed on this facet, so `deco_addons.json`
+            // never imported one and there is no generated row to read. The
+            // geometry is ServUO's own `ElvenStove{East,South}Addon`: one tile at
+            // the origin, the facing being the graphic and nothing else.
+            AddonKind::ElvenOvenEast => &[(Graphic(0x2DDB), 0, 0, 0)],
+            AddonKind::ElvenOvenSouth => &[(Graphic(0x2DDC), 0, 0, 0)],
+        };
+        if !openshard_housing::storage::has_room_for(&self.state, house, parts.len()) {
+            self.state
+                .system_message(actor, "This house cannot hold any more.");
+            return;
+        }
+        // Resolve and validate every component's absolute tile before spawning
+        // anything, so a bad tile refuses the whole placement rather than leaving
+        // half an oven behind. `dz` is honoured now rather than dropped: today's
+        // two ovens both carry zero, but a future addon's `deco_addons.json` row
+        // need not.
+        let mut tiles = Vec::with_capacity(parts.len());
+        for &(graphic, dx, dy, dz) in parts {
+            let x = i32::from(at.x) + i32::from(dx);
+            let y = i32::from(at.y) + i32::from(dy);
+            let z = i32::from(at.z) + i32::from(dz);
+            let (Ok(x), Ok(y), Ok(z)) = (u16::try_from(x), u16::try_from(y), i8::try_from(z)) else {
+                self.state.system_message(actor, "That cannot be placed there.");
+                return;
+            };
+            let point = Point::new(x, y, z);
+            if self.house_at(point, facet) != Some(house) {
+                self.state
+                    .system_message(actor, "The whole oven must fit inside the house.");
+                return;
+            }
+            if !self.addon_tile_is_free(facet, house, graphic, point) {
+                self.state
+                    .system_message(actor, "There is no room for that there.");
+                return;
+            }
+            tiles.push((graphic, point));
+        }
+        let mut installed = Vec::with_capacity(tiles.len());
+        for &(graphic, point) in &tiles {
+            let Some(item) = items::spawn_item(&mut self.state, graphic, Hue(0), 1, false, point, facet)
+            else {
+                for item in installed {
+                    self.state.unplace(facet, item);
+                    openshard_state::despawn_item(&mut self.state, item);
+                }
+                self.state
+                    .system_message(actor, "There is no room to place that now.");
+                return;
+            };
+            if let Err(refusal) =
+                openshard_housing::storage::lock_down(&mut self.state, actor, house, item, None)
+            {
+                self.state.unplace(facet, item);
+                openshard_state::despawn_item(&mut self.state, item);
+                for item in installed {
+                    self.state.unplace(facet, item);
+                    openshard_state::despawn_item(&mut self.state, item);
+                }
+                self.state.system_message(actor, refusal.message());
+                return;
+            }
+            installed.push(item);
+        }
+        // The parts become one addon. The group's name is the first component's
+        // serial, which the root carries too, so `AddonPart` alone answers both
+        // "what am I part of" and "what else is part of it" — see the component's
+        // own docs. A component with no serial cannot be named by the group and
+        // cannot name it either; that is impossible for a freshly spawned item,
+        // so it is asserted rather than tolerated.
+        let root = self
+            .state
+            .registry
+            .serial_of(installed[0])
+            .expect("a freshly spawned addon component has a serial");
+        for &item in &installed {
+            self.state.registry.insert(item, AddonPart { addon, root });
+        }
+        if let Some(serial) = self.state.registry.serial_of(deed) {
+            items::consume(&mut self.state, serial, 1);
+        }
+        let name = addon.name();
+        self.state
+            .system_message(actor, &format!("The {name} is installed and locked down."));
+    }
+
+    /// Take a whole installed addon down and hand its deed back.
+    ///
+    /// A stone oven is two locked-down items, and releasing one of them used to
+    /// unpin exactly that tile: half an oven left standing, nothing refunded, and
+    /// no way to put it back together. ServUO's `BaseAddon` answers a release by
+    /// deleting itself whole and giving the deed back, and this is that rule —
+    /// the group being [`AddonPart`], not a guess from what happens to stand
+    /// next to what.
+    ///
+    /// **Order is load-bearing.** Permission is asked first, then the deed goes
+    /// into the pack, and only then does the oven stop existing: giving the deed
+    /// can fail on a full pack, and a player who cannot carry it must keep the
+    /// oven rather than lose both. Removing the parts afterwards cannot fail, so
+    /// there is no window where the deed and the oven both exist.
+    fn release_addon(&mut self, actor: EntityId, house: EntityId, part: AddonPart) {
+        if let Err(refusal) = openshard_housing::storage::may_change(&self.state, actor, house) {
+            self.state.system_message(actor, refusal.message());
+            return;
+        }
+        let Some(owner) = self.state.registry.serial_of(actor) else {
+            return;
+        };
+        // Every tile of *this* addon, asked of this house's own lockdown list:
+        // the group is only meaningful among things pinned here, and a component
+        // that has gone loose has already dropped its `AddonPart`.
+        let parts: Vec<EntityId> = openshard_housing::storage::locked_down(&self.state, house)
+            .into_iter()
+            .filter(|&item| {
+                self.state
+                    .registry
+                    .get::<AddonPart>(item)
+                    .is_some_and(|other| other.root == part.root)
+            })
+            .collect();
+        if parts.is_empty() {
+            return;
+        }
+        if !items::give_kind_to_backpack(&mut self.state, owner, part.addon.deed_kind(), None, 1, false) {
+            self.state
+                .system_message(actor, "Your pack has no room for the deed.");
+            return;
+        }
+        let facet = self.state.facet_of(house);
+        for item in parts {
+            // Unpinned before it is removed, so the house's own lockdown count and
+            // its storage projection are told; the grouping goes with the pin.
+            self.state.set_item_lockdown(item, None);
+            self.state.unplace(facet, item);
+            openshard_state::despawn_item(&mut self.state, item);
+        }
+        let name = part.addon.name();
+        self.state.system_message(
+            actor,
+            &format!("The {name} is taken up, and the deed is in your pack."),
+        );
+    }
+
+    /// Whether an addon component may stand at `point`: nothing solid already
+    /// there, and no other locked-down item already sitting on the same spot.
+    ///
+    /// `housing::place` asks the wall/floor half of this question for a whole
+    /// building's footprint through [`openshard_movement::can_fit`]; an addon
+    /// grows a house that already passed that check, one or two tiles at a
+    /// time, so this is the per-tile version. Reused rather than reimplemented:
+    /// a wall, a door, or the world's own decoration all register themselves
+    /// into the facet's obstruction index the same way, so `can_fit` already
+    /// knows about every one of them.
+    ///
+    /// **What `can_fit` cannot see**: an ordinary locked-down item never
+    /// registers there (see docs/crafting.md's review) — a second oven, or any
+    /// other piece of house furniture, stacks on the first invisibly as far as
+    /// the obstruction index is concerned. Asked directly against the house's
+    /// own storage list instead, which is small and already loaded to check
+    /// the allowance a few lines up.
+    fn addon_tile_is_free(&self, facet: Facet, house: EntityId, graphic: Graphic, point: Point) -> bool {
+        let tile = Tile::new(point.x, point.y);
+        let height = i32::from(self.state.tiles().static_tile(graphic.0).height.max(1));
+        if !openshard_movement::can_fit(
+            &self.state.footing(facet, Doors::AsTheyStand),
+            tile,
+            i32::from(point.z),
+            height,
+        ) {
+            return false;
+        }
+        openshard_housing::storage::locked_down(&self.state, house)
+            .into_iter()
+            .all(|other| self.state.registry.get::<Position>(other) != Some(&Position(point)))
+    }
+
+    /// Whether a deed is still theirs to spend. A deed in somebody else's pack
+    /// is not a deed you hold, and the walk up the containment tree is `items`'
+    /// own — a deed in a bag in the backpack is carried as surely as one loose
+    /// in it. Sends the refusal itself on `false`, so both deed placements
+    /// (house and addon) answer it identically with one call.
+    fn deed_still_carried(&mut self, actor: EntityId, deed: EntityId) -> bool {
+        let carried = match openshard_state::item_location(&self.state, deed) {
+            Some(LiveItemLocation::Settled(openshard_state::SettledItemLocation::Contained(held))) => {
+                items::owner_of_container(&self.state, held.container) == Some(actor)
+            }
+            _ => false,
+        };
+        if !carried {
+            self.state.system_message(actor, "You no longer have that deed.");
+        }
+        carried
+    }
+
     /// Every house as a saveable record.
     pub(super) fn house_records(&self) -> Vec<HouseRecord> {
         self.state
@@ -369,6 +596,41 @@ impl World {
 }
 
 impl World {
+    /// Raise a normal location cursor for a crafted house addon.
+    pub(super) fn offer_addon_placement(&mut self, player: EntityId, deed: EntityId) {
+        let Some(addon_deed) = self.state.registry.get::<AddonDeed>(deed).copied().or_else(|| {
+            self.state
+                .registry
+                .get::<openshard_state::components::ItemKind>(deed)
+                .and_then(|kind| AddonDeed::from_item_kind(kind.0))
+        }) else {
+            return;
+        };
+        // Vendor and admin-created items carry their `ItemKind` from creation,
+        // unlike crafted deeds, which receive this transient component
+        // immediately. Make the identity explicit before the target cursor
+        // carries the entity.
+        self.state.registry.insert(deed, addon_deed);
+        let (Some(&Client { connection, .. }), Some(serial)) = (
+            self.state.registry.get::<Client>(player),
+            self.state.registry.serial_of(player),
+        ) else {
+            return;
+        };
+        self.state
+            .raise_target(player, TargetPurpose::PlaceAddon { deed });
+        self.state.send_packet(
+            connection,
+            &ServerPacket::TargetCursor(TargetCursor {
+                cursor_id: CursorId(serial.raw()),
+                kind:      TargetKind::Location,
+            }),
+        );
+        let name = addon_deed.addon.name();
+        self.state
+            .system_message(player, &format!("Where would you like to place the {name}?"));
+    }
+
     /// A deed's cursor came back: put the house where they clicked, and spend the
     /// deed.
     ///
@@ -386,17 +648,7 @@ impl World {
         let Some(&HouseDeed { multi }) = self.state.registry.get::<HouseDeed>(deed) else {
             return; // not a deed any more, or never was
         };
-        // Still theirs. A deed in somebody else's pack is not a deed you hold,
-        // and the walk up the containment tree is `items`' own — a deed in a bag
-        // in the backpack is carried as surely as one loose in it.
-        let carried = match openshard_state::item_location(&self.state, deed) {
-            Some(LiveItemLocation::Settled(openshard_state::SettledItemLocation::Contained(held))) => {
-                items::owner_of_container(&self.state, held.container) == Some(actor)
-            }
-            _ => false,
-        };
-        if !carried {
-            self.state.system_message(actor, "You no longer have that deed.");
+        if !self.deed_still_carried(actor, deed) {
             return;
         }
         let facet = self.state.facet_of(actor);
@@ -576,6 +828,17 @@ impl World {
             self.state.system_message(actor, "That is nothing.");
             return;
         };
+        // A release aimed at one tile of an installed addon is a release of the
+        // whole addon — see [`release_addon`](Self::release_addon). Asked before
+        // the ordinary paths, because the ordinary path would unpin that one tile
+        // and leave the rest of the oven standing.
+        if matches!(change, Change::Release) {
+            if let Some(&part) = self.state.registry.get::<AddonPart>(item) {
+                self.release_addon(actor, house, part);
+                openshard_housing::sign::show(&mut self.state, actor, house);
+                return;
+            }
+        }
         let outcome = match change {
             Change::LockDown => {
                 openshard_housing::storage::lock_down(&mut self.state, actor, house, item, None)
