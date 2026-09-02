@@ -25,7 +25,7 @@ use serde::Deserialize;
 /// Must match `consume::MAX_CRAFT_RESOURCE_LINES`; build scripts cannot import
 /// the crate they are generating. A change to either side is one measured
 /// budget change and therefore updates both in the same commit.
-const MAX_CRAFT_RESOURCE_LINES: usize = 4;
+const MAX_CRAFT_RESOURCE_LINES: usize = 5;
 
 /// One trade's file.
 #[derive(Deserialize)]
@@ -158,6 +158,10 @@ struct Row {
     /// system's — ServUO's `GetChanceAtMin(CraftItem)` special-casing a recipe.
     #[serde(default)]
     min_chance:         Option<u32>,
+    /// Mana paid on top of the materials — ServUO's `SetManaReq`, set by
+    /// Inscription's scroll rows and by nothing else.
+    #[serde(default)]
+    mana:               u16,
     /// Whether an exceptional one carries its maker's name.
     #[serde(default)]
     markable:           bool,
@@ -599,6 +603,7 @@ fn generate(table: &Table) -> String {
             }
         )
         .unwrap();
+        writeln!(out, "        mana: {},", row.mana).unwrap();
         writeln!(out, "        markable: {},", row.markable).unwrap();
         writeln!(out, "        never_exceptional: {},", row.never_exceptional).unwrap();
         writeln!(out, "        always_exceptional: {},", row.always_exceptional).unwrap();

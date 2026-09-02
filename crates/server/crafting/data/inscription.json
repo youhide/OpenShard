@@ -1,0 +1,846 @@
+{
+  "groups": [1111691, 1111692, 1111693, 1111694, 1044294],
+  "recipes": [
+    {
+      "graphic": "0x1F2D",
+      "name": 1044381,
+      "group": 0,
+      "mana": 4,
+      "skills": [{ "skill": "Inscribe", "min": -250, "max": 250 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F2E",
+      "name": 1044382,
+      "group": 0,
+      "mana": 4,
+      "skills": [{ "skill": "Inscribe", "min": -250, "max": 250 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F2F",
+      "name": 1044383,
+      "group": 0,
+      "mana": 4,
+      "skills": [{ "skill": "Inscribe", "min": -250, "max": 250 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F30",
+      "name": 1044384,
+      "group": 0,
+      "mana": 4,
+      "skills": [{ "skill": "Inscribe", "min": -250, "max": 250 }],
+      "resources": [
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F31",
+      "name": 1044385,
+      "group": 0,
+      "mana": 4,
+      "skills": [{ "skill": "Inscribe", "min": -250, "max": 250 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F32",
+      "name": 1044386,
+      "group": 0,
+      "mana": 4,
+      "skills": [{ "skill": "Inscribe", "min": -250, "max": 250 }],
+      "resources": [
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F33",
+      "name": 1044387,
+      "group": 0,
+      "mana": 4,
+      "skills": [{ "skill": "Inscribe", "min": -250, "max": 250 }],
+      "resources": [
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F34",
+      "name": 1044388,
+      "group": 0,
+      "mana": 4,
+      "skills": [{ "skill": "Inscribe", "min": -250, "max": 250 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F35",
+      "name": 1044389,
+      "group": 0,
+      "mana": 6,
+      "skills": [{ "skill": "Inscribe", "min": -108, "max": 392 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F36",
+      "name": 1044390,
+      "group": 0,
+      "mana": 6,
+      "skills": [{ "skill": "Inscribe", "min": -108, "max": 392 }],
+      "resources": [
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F37",
+      "name": 1044391,
+      "group": 0,
+      "mana": 6,
+      "skills": [{ "skill": "Inscribe", "min": -108, "max": 392 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F38",
+      "name": 1044392,
+      "group": 0,
+      "mana": 6,
+      "skills": [{ "skill": "Inscribe", "min": -108, "max": 392 }],
+      "resources": [
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F39",
+      "name": 1044393,
+      "group": 0,
+      "mana": 6,
+      "skills": [{ "skill": "Inscribe", "min": -108, "max": 392 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F3A",
+      "name": 1044394,
+      "group": 0,
+      "mana": 6,
+      "skills": [{ "skill": "Inscribe", "min": -108, "max": 392 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F3B",
+      "name": 1044395,
+      "group": 0,
+      "mana": 6,
+      "skills": [{ "skill": "Inscribe", "min": -108, "max": 392 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F3C",
+      "name": 1044396,
+      "group": 0,
+      "mana": 6,
+      "skills": [{ "skill": "Inscribe", "min": -108, "max": 392 }],
+      "resources": [
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F3D",
+      "name": 1044397,
+      "group": 1,
+      "mana": 9,
+      "skills": [{ "skill": "Inscribe", "min": 35, "max": 535 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F3E",
+      "name": 1044398,
+      "group": 1,
+      "mana": 9,
+      "skills": [{ "skill": "Inscribe", "min": 35, "max": 535 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F3F",
+      "name": 1044399,
+      "group": 1,
+      "mana": 9,
+      "skills": [{ "skill": "Inscribe", "min": 35, "max": 535 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F40",
+      "name": 1044400,
+      "group": 1,
+      "mana": 9,
+      "skills": [{ "skill": "Inscribe", "min": 35, "max": 535 }],
+      "resources": [
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F41",
+      "name": 1044401,
+      "group": 1,
+      "mana": 9,
+      "skills": [{ "skill": "Inscribe", "min": 35, "max": 535 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F42",
+      "name": 1044402,
+      "group": 1,
+      "mana": 9,
+      "skills": [{ "skill": "Inscribe", "min": 35, "max": 535 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F43",
+      "name": 1044403,
+      "group": 1,
+      "mana": 9,
+      "skills": [{ "skill": "Inscribe", "min": 35, "max": 535 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F44",
+      "name": 1044404,
+      "group": 1,
+      "mana": 9,
+      "skills": [{ "skill": "Inscribe", "min": 35, "max": 535 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F45",
+      "name": 1044405,
+      "group": 1,
+      "mana": 11,
+      "skills": [{ "skill": "Inscribe", "min": 178, "max": 678 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F46",
+      "name": 1044406,
+      "group": 1,
+      "mana": 11,
+      "skills": [{ "skill": "Inscribe", "min": 178, "max": 678 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F47",
+      "name": 1044407,
+      "group": 1,
+      "mana": 11,
+      "skills": [{ "skill": "Inscribe", "min": 178, "max": 678 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F48",
+      "name": 1044408,
+      "group": 1,
+      "mana": 11,
+      "skills": [{ "skill": "Inscribe", "min": 178, "max": 678 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F49",
+      "name": 1044409,
+      "group": 1,
+      "mana": 11,
+      "skills": [{ "skill": "Inscribe", "min": 178, "max": 678 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F4A",
+      "name": 1044410,
+      "group": 1,
+      "mana": 11,
+      "skills": [{ "skill": "Inscribe", "min": 178, "max": 678 }],
+      "resources": [
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F4B",
+      "name": 1044411,
+      "group": 1,
+      "mana": 11,
+      "skills": [{ "skill": "Inscribe", "min": 178, "max": 678 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F4C",
+      "name": 1044412,
+      "group": 1,
+      "mana": 11,
+      "skills": [{ "skill": "Inscribe", "min": 178, "max": 678 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F4D",
+      "name": 1044413,
+      "group": 2,
+      "mana": 14,
+      "skills": [{ "skill": "Inscribe", "min": 321, "max": 821 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F4E",
+      "name": 1044414,
+      "group": 2,
+      "mana": 14,
+      "skills": [{ "skill": "Inscribe", "min": 321, "max": 821 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F4F",
+      "name": 1044415,
+      "group": 2,
+      "mana": 14,
+      "skills": [{ "skill": "Inscribe", "min": 321, "max": 821 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F50",
+      "name": 1044416,
+      "group": 2,
+      "mana": 14,
+      "skills": [{ "skill": "Inscribe", "min": 321, "max": 821 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F51",
+      "name": 1044417,
+      "group": 2,
+      "mana": 14,
+      "skills": [{ "skill": "Inscribe", "min": 321, "max": 821 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F52",
+      "name": 1044418,
+      "group": 2,
+      "mana": 14,
+      "skills": [{ "skill": "Inscribe", "min": 321, "max": 821 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F53",
+      "name": 1044419,
+      "group": 2,
+      "mana": 14,
+      "skills": [{ "skill": "Inscribe", "min": 321, "max": 821 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F54",
+      "name": 1044420,
+      "group": 2,
+      "mana": 14,
+      "skills": [{ "skill": "Inscribe", "min": 321, "max": 821 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F55",
+      "name": 1044421,
+      "group": 2,
+      "mana": 20,
+      "skills": [{ "skill": "Inscribe", "min": 464, "max": 964 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F56",
+      "name": 1044422,
+      "group": 2,
+      "mana": 20,
+      "skills": [{ "skill": "Inscribe", "min": 464, "max": 964 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F57",
+      "name": 1044423,
+      "group": 2,
+      "mana": 20,
+      "skills": [{ "skill": "Inscribe", "min": 464, "max": 964 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F58",
+      "name": 1044424,
+      "group": 2,
+      "mana": 20,
+      "skills": [{ "skill": "Inscribe", "min": 464, "max": 964 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F59",
+      "name": 1044425,
+      "group": 2,
+      "mana": 20,
+      "skills": [{ "skill": "Inscribe", "min": 464, "max": 964 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F5A",
+      "name": 1044426,
+      "group": 2,
+      "mana": 20,
+      "skills": [{ "skill": "Inscribe", "min": 464, "max": 964 }],
+      "resources": [
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F5B",
+      "name": 1044427,
+      "group": 2,
+      "mana": 20,
+      "skills": [{ "skill": "Inscribe", "min": 464, "max": 964 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F5C",
+      "name": 1044428,
+      "group": 2,
+      "mana": 20,
+      "skills": [{ "skill": "Inscribe", "min": 464, "max": 964 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F5D",
+      "name": 1044429,
+      "group": 3,
+      "mana": 40,
+      "skills": [{ "skill": "Inscribe", "min": 607, "max": 1107 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F5E",
+      "name": 1044430,
+      "group": 3,
+      "mana": 40,
+      "skills": [{ "skill": "Inscribe", "min": 607, "max": 1107 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F5F",
+      "name": 1044431,
+      "group": 3,
+      "mana": 40,
+      "skills": [{ "skill": "Inscribe", "min": 607, "max": 1107 }],
+      "resources": [
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F60",
+      "name": 1044432,
+      "group": 3,
+      "mana": 40,
+      "skills": [{ "skill": "Inscribe", "min": 607, "max": 1107 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F61",
+      "name": 1044433,
+      "group": 3,
+      "mana": 40,
+      "skills": [{ "skill": "Inscribe", "min": 607, "max": 1107 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F62",
+      "name": 1044434,
+      "group": 3,
+      "mana": 40,
+      "skills": [{ "skill": "Inscribe", "min": 607, "max": 1107 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F63",
+      "name": 1044435,
+      "group": 3,
+      "mana": 40,
+      "skills": [{ "skill": "Inscribe", "min": 607, "max": 1107 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F64",
+      "name": 1044436,
+      "group": 3,
+      "mana": 40,
+      "skills": [{ "skill": "Inscribe", "min": 607, "max": 1107 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F65",
+      "name": 1044437,
+      "group": 3,
+      "mana": 50,
+      "skills": [{ "skill": "Inscribe", "min": 750, "max": 1250 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F66",
+      "name": 1044438,
+      "group": 3,
+      "mana": 50,
+      "skills": [{ "skill": "Inscribe", "min": 750, "max": 1250 }],
+      "resources": [
+        { "graphic": "0x0F7A", "amount": 1, "name": 1044353, "message": 1044361 },
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F88", "amount": 1, "name": 1044358, "message": 1044366 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F67",
+      "name": 1044439,
+      "group": 3,
+      "mana": 50,
+      "skills": [{ "skill": "Inscribe", "min": 750, "max": 1250 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F84", "amount": 1, "name": 1044355, "message": 1044363 },
+        { "graphic": "0x0F85", "amount": 1, "name": 1044356, "message": 1044364 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F68",
+      "name": 1044440,
+      "group": 3,
+      "mana": 50,
+      "skills": [{ "skill": "Inscribe", "min": 750, "max": 1250 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F69",
+      "name": 1044441,
+      "group": 3,
+      "mana": 50,
+      "skills": [{ "skill": "Inscribe", "min": 750, "max": 1250 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F6A",
+      "name": 1044442,
+      "group": 3,
+      "mana": 50,
+      "skills": [{ "skill": "Inscribe", "min": 750, "max": 1250 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F6B",
+      "name": 1044443,
+      "group": 3,
+      "mana": 50,
+      "skills": [{ "skill": "Inscribe", "min": 750, "max": 1250 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0F8C", "amount": 1, "name": 1044359, "message": 1044367 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x1F6C",
+      "name": 1044444,
+      "group": 3,
+      "mana": 50,
+      "skills": [{ "skill": "Inscribe", "min": 750, "max": 1250 }],
+      "resources": [
+        { "graphic": "0x0F7B", "amount": 1, "name": 1044354, "message": 1044362 },
+        { "graphic": "0x0F86", "amount": 1, "name": 1044357, "message": 1044365 },
+        { "graphic": "0x0F8D", "amount": 1, "name": 1044360, "message": 1044368 },
+        { "graphic": "0x0EF3", "amount": 1, "name": 1044377, "message": 1044378 }
+      ]
+    },
+    {
+      "graphic": "0x22C5",
+      "name": 1041267,
+      "group": 4,
+      "markable": true,
+      "skills": [{ "skill": "Inscribe", "min": 450, "max": 950 }],
+      "resources": [
+        { "graphic": "0x0EF3", "amount": 8, "name": 1044377, "message": 1044378 },
+        { "graphic": "0x1F4C", "amount": 1, "name": 1044445, "message": 1044253 },
+        { "graphic": "0x1F60", "amount": 1, "name": 1044446, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x0EFA",
+      "name": 1023834,
+      "group": 4,
+      "markable": true,
+      "skills": [{ "skill": "Inscribe", "min": 500, "max": 1260 }],
+      "resources": [
+        { "graphic": "0x0EF3", "amount": 10, "name": 1044377, "message": 1044378 }
+      ]
+    }
+  ]
+}

@@ -85,15 +85,15 @@ started.
   double-clicking one casts nothing. Classic UO casts from the scroll itself, at
   the circle's difficulty less one and without reagents, consuming it — the piece
   that makes a scroll worth buying for a mage who cannot yet hold the circle.
-- **Eleven of the twenty-five unbuilt spells need no new subsystem.** They are
+- **Eleven of the fourteen unbuilt spells need no new subsystem.** They are
   `SpellEffect::Unimplemented` only because nobody has written the arm: Create
   Food (spawn into the pack), Mana Drain and Mana Vampire (`Mana` is right there),
   Arch Protection and Mass Curse (the area sweep plus the buff appliers that both
   already exist), Invisibility and Reveal (`Hidden`, `break_cover`, `refresh_around`
-  all exist), Magic Lock and Unlock (`ILockable` exists), Magic Trap and Untrap
-  (`Trap`/`TrapKind` and `tick/traps.rs` exist), and Dispel Field (`remove_field`
-  exists, and is private). The genuinely blocked ones are the eight summons, the
-  two Dispels behind them, Telekinesis, Incognito and Polymorph.
+  all exist), Magic Lock and Unlock (`ILockable` exists), and Magic Trap and Untrap
+  (`Trap`/`TrapKind` and `tick/traps.rs` exist). The genuinely blocked ones are
+  Telekinesis, Incognito and Polymorph. (The eight summons and the three dispels
+  behind them were the rest of this list, and have landed.)
 - **House catalogue material-family umbrella rows.** The generated house item
   catalogue currently emits a material-less semantic identity as well as every
   concrete material for metal, wood and leather families. That material-less

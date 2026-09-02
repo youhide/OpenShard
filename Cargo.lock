@@ -2705,6 +2705,7 @@ dependencies = [
  "openshard-entities",
  "openshard-gateway",
  "openshard-items",
+ "openshard-magic",
  "openshard-map",
  "openshard-movement",
  "openshard-protocol",

@@ -58,6 +58,13 @@ pub use spells::{
     mana,
 };
 
+mod dispel;
+pub use dispel::{
+    MASS_DISPEL_RANGE,
+    check_dispelled,
+    dispel_chance,
+};
+
 mod resist;
 pub use resist::{
     RESIST_SKILL,

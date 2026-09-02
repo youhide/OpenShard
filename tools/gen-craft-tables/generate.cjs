@@ -31,6 +31,13 @@ const SERVUO = process.argv[2] && !process.argv[2].startsWith('--')
   ? process.argv[2]
   : path.join(process.env.HOME, 'Git', 'ServUO');
 const DRY = process.argv.includes('--dry');
+// A table that already exists has been *edited as data* since it was generated —
+// typed `kind`/`addon` rows, the hand-written dough row, per-recipe chance
+// floors — and none of that is in the C#. Writing over it silently loses the
+// work, which is what a first run of this tool for a new trade did to seven
+// tables. Adding a trade therefore only writes the file that is missing; a
+// deliberate re-port against a newer ServUO says `--force` and reads the diff.
+const FORCE = process.argv.includes('--force');
 const OUT = path.join(__dirname, '..', '..', 'crates', 'server', 'crafting', 'data');
 
 // The expansions this shard can be set to. `[gameplay] expansion` tops out at
@@ -59,6 +66,29 @@ const SYSTEMS = [
     plainTypes: new Set(['Kindling', 'Shaft', 'Arrow', 'Bolt']),
   },
   { file: 'DefCooking', module: 'cooking', skill: 'Cooking' },
+  {
+    file: 'DefInscription',
+    module: 'inscription',
+    skill: 'Inscribe',
+    // The one table that does not write its rows as `AddCraft`: sixty-four
+    // Magery scrolls go through an `AddSpell` helper reading two fields set
+    // between the circles (`m_Circle` picks the skill band and the group,
+    // `m_Mana` the mana the scribe pays). `expand` rewrites those calls into
+    // the statements the parser below already understands, so there is one
+    // parser and not two, and the numbers still come out of the C#.
+    expand: expandInscription,
+    // A Magery scroll is exactly a row whose art falls in the classic run the
+    // spellbook reads, `0x1F2D + spell`. What that leaves out is content this
+    // engine has not reached rather than rows worth shipping inert: the
+    // necromancy scrolls (no such spells here, and their reagents grow
+    // nowhere), and the Mondain's Legacy artifact books, whose own materials
+    // do not exist. The two books that stay are the two this shard already has
+    // items for.
+    keep: (recipe) =>
+      (recipe.graphic >= 0x1f2d && recipe.graphic <= 0x1f2d + 63)
+      || recipe.type === 'Runebook'
+      || recipe.type === 'Spellbook',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -162,6 +192,14 @@ const GRAPHIC_OVERRIDES = new Map([
   ['Goblet', 0x099a], // BaseBeverage.ComputeItemID
   ['PewterMug', 0x0fff], // the same
   ['Key', 0x1010], // KeyType.Iron, the default a tinker makes
+  // The two books state their art through a *chained* constructor, and the walk
+  // below follows `base(…)` only: `Spellbook() : this((ulong)0)` reaches
+  // `this(content, 0xEFA)`, and `Runebook()` reaches a `base(Core.AOS ? id :
+  // 0xEFA)` whose AoS arm is a defaulted parameter, `int id = 0x22C5`. Both ids
+  // are the ones `openshard_state` already holds as `SPELLBOOK_GRAPHIC` and
+  // `RUNEBOOK_GRAPHIC`, which is what makes naming them here safe.
+  ['Spellbook', 0x0efa],
+  ['Runebook', 0x22c5],
 ]);
 
 const graphicCache = new Map();
@@ -332,6 +370,127 @@ function tenths(arg) {
   return value === null ? null : Math.round(value * 10);
 }
 
+// ---------------------------------------------------------------------------
+// DefInscription's scroll helper
+
+// The clilocs `AddSpell` computes rather than states. Each is a base plus the
+// `Reg` enum's own value, so they are transcribed once here and indexed the way
+// the C# indexes them.
+const SPELL_NAME_BASE = 1044381; // `1044381 + m_Index++`, one per scroll in order
+const REG_NAME_BASE = 1044353; // `1044353 + (int)reg`
+const REG_MESSAGE_BASE = 1044361; // `1044361 + (int)reg`
+const BLANK_SCROLL_NAME = 1044377;
+const BLANK_SCROLL_MESSAGE = 1044378;
+
+/**
+ * The eight circles' skill bands and group clilocs, read out of `AddSpell`'s own
+ * switch rather than copied: the numbers are irregular (-25.0, -10.8, 3.5, …)
+ * and a transcription error in them would be invisible — a scroll that wants
+ * the wrong skill still crafts.
+ */
+function inscriptionCircles(src) {
+  const circles = [];
+  const row = /case\s+(\d+):\s*minSkill\s*=\s*(-?[\d.]+);\s*maxSkill\s*=\s*(-?[\d.]+);\s*cliloc\s*=\s*(\d+);/g;
+  let match;
+  while ((match = row.exec(src)) !== null) {
+    circles[Number(match[1])] = {
+      min: Number(match[2]),
+      max: Number(match[3]),
+      group: Number(match[4]),
+    };
+  }
+  if (circles.length !== 8 || circles.some((c) => !c)) {
+    throw new Error(`DefInscription: found ${circles.length} spell circles, expected 8`);
+  }
+  return circles;
+}
+
+/**
+ * The `Reg` enum in its declared order, checked against the `m_RegTypes` table
+ * beside it. The enum's *value* is what both reagent clilocs are computed from
+ * and the type at the same index is what the row consumes, so the two lists
+ * agreeing is the whole reason `AddSpell` can name a reagent once.
+ */
+function inscriptionReagents(src) {
+  const names = /private\s+enum\s+Reg\s*\{([^}]*)\}/.exec(src);
+  const table = /m_RegTypes\s*=\s*new\s+Type\[\]\s*\{([^}]*)\}/.exec(src);
+  if (!names || !table) throw new Error('DefInscription: no Reg enum or m_RegTypes table');
+  const enumerated = names[1].split(',').map((s) => s.trim()).filter(Boolean);
+  const types = [...table[1].matchAll(/typeof\(\s*(\w+)\s*\)/g)].map((m) => m[1]);
+  if (enumerated.length !== types.length) {
+    throw new Error(`DefInscription: ${enumerated.length} Reg names against ${types.length} types`);
+  }
+  for (let i = 0; i < types.length; i++) {
+    if (enumerated[i] !== types[i]) {
+      throw new Error(`DefInscription: Reg.${enumerated[i]} is m_RegTypes[${i}] = ${types[i]}`);
+    }
+  }
+  return enumerated;
+}
+
+/**
+ * Rewrite `AddSpell(typeof(HealScroll), Reg.Garlic, …)` into the `AddCraft` /
+ * `AddRes` / `SetManaReq` statements every other table writes by hand.
+ *
+ * `AddNecroSpell` and `AddMysticSpell` are deliberately left alone: they are
+ * two more families of scroll for spells this shard does not have, and a row
+ * expanded here would only be dropped by `keep` a moment later — with the
+ * difference that a reader of the drop list would have to work out why.
+ */
+function expandInscription(lines, src) {
+  const circles = inscriptionCircles(src);
+  const reagents = inscriptionReagents(src);
+  const out = [];
+  let circle = 0;
+  let mana = 0;
+  let index = 0;
+  let expanded = 0;
+  for (const line of lines) {
+    const setCircle = /^m_Circle\s*=\s*(\d+)$/.exec(line);
+    if (setCircle) {
+      circle = Number(setCircle[1]);
+      continue;
+    }
+    const setMana = /^m_Mana\s*=\s*(\d+)$/.exec(line);
+    if (setMana) {
+      mana = Number(setMana[1]);
+      continue;
+    }
+    const spell = /^AddSpell\(([\s\S]*)\)$/.exec(line);
+    if (!spell) {
+      out.push(line);
+      continue;
+    }
+    const args = splitArgs(spell[1]).map((a) => a.trim());
+    const type = /typeof\((\w+)\)/.exec(args[0]);
+    const regs = args.slice(1).map((arg) => {
+      const named = /^Reg\.(\w+)$/.exec(arg);
+      const at = named ? reagents.indexOf(named[1]) : -1;
+      if (at < 0) throw new Error(`DefInscription: ${line} names no known reagent in ${arg}`);
+      return at;
+    });
+    if (!type || regs.length === 0) throw new Error(`DefInscription: cannot expand ${line}`);
+    const band = circles[circle];
+    const name = SPELL_NAME_BASE + index++;
+    const first = regs[0];
+    out.push(
+      `index = AddCraft(typeof(${type[1]}), ${band.group}, ${name}, `
+      + `${band.min}, ${band.max}, typeof(${reagents[first]}), ${REG_NAME_BASE + first}, 1, `
+      + `${REG_MESSAGE_BASE + first})`,
+    );
+    for (const reg of regs.slice(1)) {
+      out.push(`AddRes(index, typeof(${reagents[reg]}), ${REG_NAME_BASE + reg}, 1, ${REG_MESSAGE_BASE + reg})`);
+    }
+    out.push(`AddRes(index, typeof(BlankScroll), ${BLANK_SCROLL_NAME}, 1, ${BLANK_SCROLL_MESSAGE})`);
+    out.push(`SetManaReq(index, ${mana})`);
+    expanded++;
+  }
+  if (expanded !== 64) {
+    throw new Error(`DefInscription: expanded ${expanded} Magery scrolls, expected 64`);
+  }
+  return out;
+}
+
 const dropped = [];
 
 function parseSystem(spec) {
@@ -340,7 +499,12 @@ function parseSystem(spec) {
   const init = src.indexOf('InitCraftList');
   const body = blockAt(src, init);
   if (!body) throw new Error(`no InitCraftList in ${spec.file}`);
-  const lines = statements(dropUnsupported(body.body));
+  const plain = statements(dropUnsupported(body.body));
+  // A table whose rows are written through a helper hands the parser the
+  // statements that helper stands for; every other table is already in that
+  // shape. The whole file is passed along because the helper's own constants
+  // live outside `InitCraftList`.
+  const lines = spec.expand ? spec.expand(plain, src) : plain;
 
   const groups = [];
   const recipes = [];
@@ -356,7 +520,7 @@ function parseSystem(spec) {
   };
 
   for (const line of lines) {
-    const call = /(?:(\w+)\s*=\s*)?\b(AddCraft|AddRes|AddSkill|SetSubRes|SetSubRes2|AddSubRes|AddSubRes2|SetItemHue|SetUseAllRes|SetMinSkillOffset|ForceNonExceptional|ForceExceptional|SetNeedHeat|SetNeedOven|SetNeedMill|SetNeedWater|SetNeedMaker|AddRecipe|SetNeededThemePack|SetRequiresBasketWeaving|SetRequireResTarget|AddCreateItem|AddCraftAction|SetData|SetDisplayID|SetUseSubRes2|SetNeededExpansion|SetForceSuccess)\s*\(([\s\S]*)\)\s*$/.exec(line);
+    const call = /(?:(\w+)\s*=\s*)?\b(AddCraft|AddRes|AddSkill|SetSubRes|SetSubRes2|AddSubRes|AddSubRes2|SetItemHue|SetUseAllRes|SetMinSkillOffset|ForceNonExceptional|ForceExceptional|SetNeedHeat|SetNeedOven|SetNeedMill|SetNeedWater|SetNeedMaker|AddRecipe|SetNeededThemePack|SetRequiresBasketWeaving|SetRequireResTarget|AddCreateItem|AddCraftAction|SetData|SetDisplayID|SetUseSubRes2|SetNeededExpansion|SetForceSuccess|SetManaReq)\s*\(([\s\S]*)\)\s*$/.exec(line);
     if (!call) continue;
     const [, assigned, name, rawArgs] = call;
     const args = splitArgs(rawArgs);
@@ -383,6 +547,7 @@ function parseSystem(spec) {
           useAllRes: false,
           minSkillOffset: 0,
           markable: markable(type[1]),
+          mana: 0,
           neverExceptional: false,
           alwaysExceptional: false,
           needs: {},
@@ -447,6 +612,12 @@ function parseSystem(spec) {
         break;
       case 'SetMinSkillOffset':
         withRecipe(args[0], (r) => { r.minSkillOffset = tenths(args[1]) ?? 0; });
+        break;
+      // ServUO's `SetManaReq`, the mana a scribe pays for the scroll on top of
+      // its reagents. Checked twice like every other gate and spent only when
+      // the item is actually made.
+      case 'SetManaReq':
+        withRecipe(args[0], (r) => { r.mana = number(args[1]) ?? 0; });
         break;
       case 'ForceNonExceptional':
         withRecipe(args[0], (r) => { r.neverExceptional = true; });
@@ -531,6 +702,9 @@ function parseSystem(spec) {
     if (spec.types && !spec.types.has(recipe.type)) {
       recipe.drop = recipe.drop || 'no gameplay row';
     }
+    if (spec.keep && !spec.keep(recipe)) {
+      recipe.drop = recipe.drop || 'no gameplay row';
+    }
     if (recipe.drop) {
       dropped.push(`${spec.file}: ${recipe.type} — ${recipe.drop}`);
       continue;
@@ -559,9 +733,14 @@ function csSkill(arg) {
  * Whether an exceptional one carries its maker's name — ServUO's `IsMarkable`,
  * which is a list of base classes rather than a flag.
  */
+// Not all of `m_MarkableTable`, which also names three dozen concrete furniture
+// and container types: only the bases the trades ported so far actually make,
+// plus the two books, which the table names by their own type and which are the
+// only rows here whose maker's mark a player ever sees.
 const MARKABLE_BASES = [
   'BaseArmor', 'BaseWeapon', 'BaseClothing', 'BaseJewel', 'BaseTool',
   'BaseHarvestTool', 'BaseInstrument', 'BaseQuiver', 'DragonBardingDeed',
+  'Spellbook', 'Runebook',
 ];
 function markable(type) {
   const seen = new Set();
@@ -656,6 +835,7 @@ function emit(parsed) {
     if (!recipe.retainColor) row.push('      "retain_color": false,');
     if (recipe.useAllRes) row.push('      "use_all_res": true,');
     if (recipe.minSkillOffset) row.push(`      "min_skill_offset": ${recipe.minSkillOffset},`);
+    if (recipe.mana) row.push(`      "mana": ${recipe.mana},`);
     if (recipe.markable) row.push('      "markable": true,');
     if (recipe.neverExceptional) row.push('      "never_exceptional": true,');
     if (recipe.alwaysExceptional) row.push('      "always_exceptional": true,');
@@ -707,14 +887,16 @@ function main() {
     const parsed = parseSystem(spec);
     const table = emit(parsed);
     const file = path.join(OUT, `${spec.module}.json`);
-    if (!DRY) {
+    const kept = fs.existsSync(file) && !FORCE;
+    if (!DRY && !kept) {
       fs.mkdirSync(OUT, { recursive: true });
       fs.writeFileSync(file, table);
     }
     const axis = parsed.subRes ? `${parsed.subRes.entries.length} materials` : 'no axis';
     console.log(
       `${spec.module.padEnd(12)} ${String(parsed.recipes.length).padStart(4)}/${parsed.total} recipes, ` +
-      `${parsed.groups.length} groups, ${axis}`,
+      `${parsed.groups.length} groups, ${axis}` +
+      (kept ? '  — kept: edited as data since (--force to re-port)' : ''),
     );
   }
 

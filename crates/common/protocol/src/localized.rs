@@ -276,6 +276,14 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "Your music succeeds, as you start a fight.",
     },
     Message {
+        id:       ClilocId(501629),
+        fallback: "You inscribe the spell and put the scroll in your backpack.",
+    },
+    Message {
+        id:       ClilocId(501630),
+        fallback: "You fail to inscribe the scroll, and the scroll is ruined.",
+    },
+    Message {
         id:       ClilocId(501783),
         fallback: "You feel yourself resisting magical energy.",
     },
@@ -564,6 +572,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "You do not have room in your backpack for a fish.",
     },
     Message {
+        id:       ClilocId(1005049),
+        fallback: "That cannot be dispelled.",
+    },
+    Message {
         id:       ClilocId(1007072),
         fallback: "You dig some iron ore and put it in your backpack.",
     },
@@ -624,6 +636,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
     Message {
         id:       ClilocId(1010018),
         fallback: "What do you want to use this item on?",
+    },
+    Message {
+        id:       ClilocId(1010084),
+        fallback: "The creature resisted the attempt to dispel it!",
     },
     Message {
         id:       ClilocId(1010481),
@@ -1712,6 +1728,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
     Message {
         id:       ClilocId(1042001),
         fallback: "That must be in your pack for you to use it.",
+    },
+    Message {
+        id:       ClilocId(1042404),
+        fallback: "You don't have that spell!",
     },
     Message {
         id:       ClilocId(1042666),

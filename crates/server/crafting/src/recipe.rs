@@ -125,6 +125,16 @@ pub struct Recipe {
     /// (Cooking's `GrapesOfWrath`/`EnchantedApple` start at 50% rather than the
     /// trade's 0%). `None` for every recipe that does not.
     pub min_chance:         Option<u32>,
+    /// Mana the crafter pays on top of the materials — ServUO's `SetManaReq`,
+    /// which only Inscription's scroll rows set: writing a spell down costs what
+    /// the spell's own circle costs to cast.
+    ///
+    /// Zero for every other row, and zero is "no requirement" rather than "free":
+    /// the check is skipped entirely, so a mobile with no [`Mana`] component at
+    /// all — a creature, an NPC scribe — is not refused an ordinary craft.
+    ///
+    /// [`Mana`]: openshard_state::components::Mana
+    pub mana:               u16,
     /// Whether an exceptional one carries its maker's name — ServUO's
     /// `CraftItem.IsMarkable`, which is a list of base classes (armour, weapons,
     /// clothing, jewellery, tools, instruments) and so is data here rather than a

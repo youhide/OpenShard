@@ -338,7 +338,7 @@
     "mage": [
       { "graphic": 3834, "amount": 10, "price": 18, "name": "spellbook" },
       { "graphic": 4031, "amount": 10, "price": 8, "name": "scribes pen" },
-      { "graphic": 3636, "amount": 20, "price": 5, "name": "blank scroll" },
+      { "graphic": 3827, "amount": 20, "price": 5, "name": "blank scroll" },
       { "graphic": 5912, "amount": 10, "price": 11, "name": "magic wizards hat" },
       { "graphic": 7956, "amount": 10, "price": 15, "name": "recall rune" },
       { "graphic": 3851, "amount": 10, "price": 15, "name": "refresh potion" },
@@ -435,7 +435,7 @@
       { "graphic": 5360, "amount": 20, "price": 12450, "name": "guild deed" }
     ],
     "realestatebroker": [
-      { "graphic": 3636, "amount": 20, "price": 5, "name": "blank scroll" },
+      { "graphic": 3827, "amount": 20, "price": 5, "name": "blank scroll" },
       { "graphic": 4031, "amount": 20, "price": 8, "name": "scribes pen" }
     ],
     "tailor": [

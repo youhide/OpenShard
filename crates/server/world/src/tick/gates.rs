@@ -291,8 +291,9 @@ impl World {
 
     /// Take a gate off the world: forget it on every screen, off the sector grid,
     /// out of the registry. `remove_field`'s tail — miss it and what is left is
-    /// an invisible gate that still works.
-    fn close_gate(&mut self, entity: EntityId) {
+    /// an invisible gate that still works. Dispel Field closes one through here too,
+    /// so a dispelled gate and an expired one leave the same way.
+    pub(super) fn close_gate(&mut self, entity: EntityId) {
         let Some(serial) = self.state.registry.serial_of(entity) else {
             return;
         };

@@ -13,6 +13,7 @@
 //! animation for a craft that was never possible.
 
 use openshard_entities::EntityId;
+use openshard_protocol::casting::SpellId;
 use openshard_protocol::item_kind::{
     ItemKindId,
     MaterialId,
@@ -23,17 +24,22 @@ use openshard_protocol::wire::{
     Hue,
     SoundId,
 };
+use openshard_skills::skill_value;
 use openshard_state::components::{
     AddonDeed,
     CraftedBy,
     Crafting,
+    Mana,
     Name,
     Position,
     Quality,
+    Runebook,
     Tool,
+    scroll_spell,
 };
 use openshard_state::{
     Drawn,
+    Skill,
     WorldState,
     presentation_of,
 };
@@ -80,6 +86,15 @@ const MADE_EXCEPTIONAL: ClilocId = ClilocId(1_044_155);
 const MADE_MARKED: ClilocId = ClilocId(1_044_156);
 /// "You must wait to perform another action." — ServUO's `BeginAction` refusal.
 const ALREADY_BUSY: ClilocId = ClilocId(500_119);
+/// "You don't have that spell!" — ServUO's `DefInscription.CanCraft`, refusing to
+/// write down a spell the scribe's own book has not got.
+const NO_SPELL: ClilocId = ClilocId(1_042_404);
+/// "You inscribe the spell and put the scroll in your backpack."
+const SCROLL_MADE: ClilocId = ClilocId(501_629);
+/// "You fail to inscribe the scroll, and the scroll is ruined."
+const SCROLL_RUINED: ClilocId = ClilocId(501_630);
+/// ServUO says this one as a plain string rather than a cliloc, and so does this.
+const NO_MANA: &str = "You lack the required mana to make that.";
 /// The base skill a maker's mark wants: grandmaster, in tenths.
 const MARK_AT: u16 = 1000;
 
@@ -157,6 +172,25 @@ enum Blocked {
     /// requirement its system did not have, and then there is nothing written
     /// down to say. Silence beats cliloc zero, which the client would look up.
     NoWorkshop(Option<ClilocId>),
+    /// The row writes a spell down and no spellbook in the scribe's pack holds
+    /// it — ServUO's `DefInscription.CanCraft`.
+    UnknownSpell,
+    /// The row costs mana and the crafter has not got that much — ServUO's
+    /// `CraftItem.ConsumeAttributes`, dry-run.
+    NoMana,
+}
+
+/// The Magery spell a row writes down, or `None` for a row that makes an
+/// ordinary thing.
+///
+/// Derived from the output art rather than carried as a column: the art of a
+/// Magery scroll names its spell (`openshard_state::scroll_spell`), and that is
+/// the same table the spellbook reads when a scroll is dropped on it. A column
+/// beside it would be a second place to be wrong, and the pair could disagree
+/// about which spell a scroll is — which matters more here than it looks, since
+/// the run is not `base + spell`: the first circle is rotated.
+fn writes_a_spell(recipe: &Recipe) -> Option<SpellId> {
+    scroll_spell(recipe.graphic)
 }
 
 /// The tool and workshop gates — ServUO's `CanCraft`, less the recipe's own.
@@ -187,6 +221,27 @@ fn can_craft(
     if needs.any() && !environment::around(state, crafter).satisfy(needs) {
         return Err(Blocked::NoWorkshop(def.needs_message));
     }
+    // A scribe may only write down a spell they have. ServUO asks the crafter's
+    // own spellbook (`Spellbook.Find`), so a book lying on the table is no help
+    // and neither is one in the bank.
+    if let Some(spell) = writes_a_spell(recipe) {
+        let carries = state
+            .registry
+            .serial_of(crafter)
+            .is_some_and(|serial| openshard_items::carries_spell(state, serial, spell));
+        if !carries {
+            return Err(Blocked::UnknownSpell);
+        }
+    }
+    // And pay for it in mana, which only those rows cost. Zero is "no
+    // requirement" and not "free": a crafter with no mana pool at all — an NPC
+    // smith, a creature — is refused nothing by this.
+    if recipe.mana > 0 {
+        let held = state.registry.get::<Mana>(crafter).map_or(0, |mana| mana.current);
+        if held < recipe.mana {
+            return Err(Blocked::NoMana);
+        }
+    }
     Ok(())
 }
 
@@ -197,6 +252,11 @@ fn say(state: &mut WorldState, crafter: EntityId, blocked: Blocked) {
         Blocked::Spent => TOOL_WORN_OUT,
         Blocked::NotCarried => TOOL_NOT_ON_PERSON,
         Blocked::NoWorkshop(Some(cliloc)) => cliloc,
+        Blocked::UnknownSpell => NO_SPELL,
+        Blocked::NoMana => {
+            state.system_message(crafter, NO_MANA);
+            return;
+        }
     };
     state.localized_message(crafter, cliloc, "");
 }
@@ -380,7 +440,18 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
             Err(_) => false,
         };
         train_attempt(state, crafter, recipe);
-        state.localized_message(crafter, if lost { FAILED_LOST } else { FAILED_KEPT }, "");
+        // A ruined scroll says so in its own words, and says nothing about the
+        // materials — ServUO's `PlayEndingEffect` takes the whole scroll branch
+        // before it ever looks at `lostMaterial`. The mana is *not* spent: only
+        // the finished scroll costs it.
+        let line = if writes_a_spell(recipe).is_some() {
+            SCROLL_RUINED
+        } else if lost {
+            FAILED_LOST
+        } else {
+            FAILED_KEPT
+        };
+        state.localized_message(crafter, line, "");
         wear_tool(state, crafter, work.tool);
         return;
     }
@@ -470,6 +541,21 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
     let commit_began = std::time::Instant::now();
     state.rng = prepared_rng;
     prepared.withdrawal.commit(state);
+    // Mana is spent here and nowhere else: after the last refusal has passed and
+    // beside the materials, so a scribe who could not be given the scroll — a
+    // full pack — has paid neither. `can_craft` re-checked the pool a moment
+    // ago, on this same tick, so the subtraction cannot go under.
+    if recipe.mana > 0 {
+        if let Some(&Mana { current, max }) = state.registry.get::<Mana>(crafter) {
+            state.set_mana(
+                crafter,
+                Mana {
+                    current: current.saturating_sub(recipe.mana),
+                    max,
+                },
+            );
+        }
+    }
     if recipe.use_all_res {
         // The passive per-skill check is skipped for a batch craft, and this is
         // what stands in for it: one roll per item made, so a hundred boards
@@ -491,6 +577,7 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         if outcome.exceptional {
             state.registry.insert(item, Quality { exceptional: true });
         }
+        stamp_runebook_charges(state, crafter, item, outcome.exceptional);
         if marked {
             if let Some(Name(name)) = state.registry.get::<Name>(crafter) {
                 let name = name.clone();
@@ -498,10 +585,17 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
             }
         }
     }
-    let line = match (outcome.exceptional, marked) {
-        (true, true) => MADE_MARKED,
-        (true, false) => MADE_EXCEPTIONAL,
-        (false, _) => MADE,
+    // A scroll says the same thing whatever its quality — ServUO's ending effect
+    // branches on the type before it reads the quality at all, which is also why
+    // no scroll row is markable.
+    let line = if writes_a_spell(recipe).is_some() {
+        SCROLL_MADE
+    } else {
+        match (outcome.exceptional, marked) {
+            (true, true) => MADE_MARKED,
+            (true, false) => MADE_EXCEPTIONAL,
+            (false, _) => MADE,
+        }
     };
     state.localized_message(crafter, line, "");
     state.bus.send(ItemCrafted {
@@ -559,6 +653,37 @@ fn grandmaster(state: &WorldState, crafter: EntityId, def: &CraftSystemDef) -> b
         .registry
         .get::<openshard_state::components::Skills>(crafter)
         .is_some_and(|skills| skills.get(def.skill) >= MARK_AT)
+}
+
+/// Give a freshly made runebook the charges its scribe earned it.
+///
+/// ServUO's `Runebook.OnCraft`: `5 + quality + Inscribe/30`, capped at ten, with
+/// `quality` 1 for an ordinary book and 2 for an exceptional one. A book that
+/// nobody crafted keeps the flat six `openshard_items` gives it — a vendor's
+/// book is nobody's work — so this is the only place the number is earned.
+///
+/// **One divergence, deliberate:** upstream sets `MaxCharges` and leaves
+/// `CurCharges` at zero, so a new book there is empty until Recall scrolls are
+/// dropped on it. This engine hands a made book its charges the same way it
+/// hands a shelf book its six, because the two rules living side by side would
+/// mean a bought book that works and a made one that does not.
+fn stamp_runebook_charges(state: &mut WorldState, crafter: EntityId, item: EntityId, exceptional: bool) {
+    let Some(book) = state.registry.get::<Runebook>(item).cloned() else {
+        return;
+    };
+    let quality = if exceptional { 2 } else { 1 };
+    let inscribe = u32::from(skill_value(state, crafter, Skill::Inscribe));
+    // Tenths here, whole points there: ServUO divides `Skills.Value` by 30.
+    let charges =
+        u8::try_from((5 + quality + inscribe / 300).min(10)).expect("a charge count under ten fits u8");
+    state.registry.insert(
+        item,
+        Runebook {
+            charges,
+            max_charges: charges,
+            ..book
+        },
+    );
 }
 
 /// Spend a use off the tool, and make it gone if that was the last.

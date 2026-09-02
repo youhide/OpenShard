@@ -48,7 +48,11 @@ pub const RESISTED_MESSAGE: openshard_protocol::wire::ClilocId = openshard_proto
 
 /// A whole certainty, in tenths of a per-cent — the scale [`resist_chance`] answers
 /// on and the range the roll is drawn from.
-const CERTAIN: u32 = 1000;
+///
+/// Shared with [`crate::dispel`], which answers on the same scale and draws from the
+/// same range: two spell rolls that read "out of a thousand" differently would be
+/// two different meanings for one number.
+pub(crate) const CERTAIN: u32 = 1000;
 
 /// The chance `target` resists a spell of `circle` cast by `caster`, in tenths of a
 /// per-cent (so `1000` is certain).

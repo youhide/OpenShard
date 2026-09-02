@@ -12,6 +12,7 @@
 
 use openshard_crafting::SystemId;
 use openshard_movement::scene::Scene;
+use openshard_protocol::casting::SpellId;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
 use openshard_protocol::item_kind::{
@@ -30,8 +31,11 @@ use openshard_state::components::{
     CraftedBy,
     Crafting,
     ItemKind,
+    Mana,
     Material,
     Quality,
+    Runebook,
+    Spellbook,
     Tool,
 };
 use openshard_state::harvest::ORE_GRAPHIC;
@@ -76,6 +80,264 @@ const ANVIL: Graphic = Graphic(4015);
 const FORGE: Graphic = Graphic(4017);
 /// An iron ingot.
 const INGOT: Graphic = openshard_crafting::INGOT_GRAPHIC;
+/// A scribe's pen, which opens the inscription window.
+const SCRIBES_PEN: Graphic = Graphic(0x0FBF);
+/// A blank scroll: the art `BlankScroll` itself carries. ServUO's mage sells the
+/// same item under a *different* picture (`0x0E34`), which is a vendor's display
+/// art and not the thing — two of our shelves handed over the picture until this
+/// slice, and a scribe could not write on it.
+const BLANK_SCROLL: Graphic = Graphic(0x0EF3);
+/// A spellbook, which is what the scribe's own knowledge is kept in.
+const SPELLBOOK: Graphic = Graphic(0x0EFA);
+/// A runebook, the one thing inscription makes that is not a scroll.
+const RUNEBOOK: Graphic = Graphic(0x22C5);
+/// Recall — the spell, and the scroll a scribe writes it on.
+const RECALL: SpellId = SpellId(31);
+const RECALL_SCROLL: Graphic = Graphic(0x1F4C);
+/// Gate Travel's scroll, the runebook's other binding.
+const GATE_SCROLL: Graphic = Graphic(0x1F60);
+
+/// The inscription system, and the row in it that makes `graphic`.
+fn inscription_row(graphic: Graphic) -> (SystemId, u16) {
+    let index = openshard_crafting::SYSTEMS
+        .iter()
+        .position(|def| def.skill == Skill::Inscribe)
+        .expect("the inscription system");
+    let row = openshard_crafting::SYSTEMS[index]
+        .recipes
+        .iter()
+        .position(|recipe| recipe.graphic == graphic)
+        .unwrap_or_else(|| panic!("inscription makes {:#06X}", graphic.0));
+    (SystemId::from_index(index).unwrap(), u16::try_from(row).unwrap())
+}
+
+/// Sit a scribe down: a pen, a mana pool, a spellbook holding `spells`, and
+/// enough of every material the row eats.
+///
+/// The pool is given full (`current == max`) on purpose. Mana trickles back on
+/// its own once it is below the ceiling, and the trickle runs later in the same
+/// tick that finishes a craft — so a pool that starts full is the one place an
+/// exact "it cost eleven" assertion cannot be joined by a stray point.
+fn scribe(world: &mut World, connection: ConnectionId, mana: u16, spells: &[SpellId], row: u16) -> EntityId {
+    let player = world.state.players[&connection];
+    let pen = give(world, connection, SCRIBES_PEN, Hue(0), 1);
+    world.state.registry.insert(
+        player,
+        Mana {
+            current: mana,
+            max:     mana,
+        },
+    );
+    let book = give(world, connection, SPELLBOOK, Hue(0), 1);
+    let mut held = Spellbook(0);
+    for spell in spells {
+        held.learn(*spell);
+    }
+    world.state.registry.insert(book, held);
+    let (system, _) = inscription_row(RECALL_SCROLL);
+    let def = openshard_crafting::system(system).expect("the inscription system");
+    for resource in def.recipes[usize::from(row)].resources {
+        // Twice what the row asks, so a refusal that spends nothing is visible as
+        // a full stock rather than as an arithmetic coincidence.
+        give(
+            world,
+            connection,
+            resource.graphic,
+            resource.hue,
+            resource.amount * 2,
+        );
+    }
+    pen
+}
+
+#[test]
+fn a_scribe_writes_a_recall_scroll_and_pays_the_spell_s_own_mana() {
+    // The whole inscription path: a pen, reagents, a blank scroll, and the one
+    // thing no other trade asks for — the mana the spell itself would cost to
+    // cast. Recall is a fourth-circle spell, so eleven.
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[]);
+    let (system, row) = inscription_row(RECALL_SCROLL);
+    let pen = scribe(&mut world, connection, 40, &[RECALL], row);
+    let player = world.state.players[&connection];
+    train(&mut world, connection, Skill::Inscribe, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+    let _ = clilocs(&mut world, connection);
+
+    craft_in_system(&mut world, connection, pen, system, row, 0, now);
+    now = finish(&mut world, connection, now);
+
+    assert_eq!(
+        carried(&world, connection, RECALL_SCROLL, Hue(0)),
+        1,
+        "the scroll is in the scribe's pack"
+    );
+    assert_eq!(
+        carried(&world, connection, BLANK_SCROLL, Hue(0)),
+        1,
+        "one of the two blank scrolls was written on"
+    );
+    assert_eq!(
+        world.state.registry.get::<Mana>(player).map(|mana| mana.current),
+        Some(40 - 11),
+        "writing a fourth-circle spell down costs what casting it would"
+    );
+    assert!(
+        clilocs(&mut world, connection).contains(&501_629),
+        "you inscribe the spell and put the scroll in your backpack"
+    );
+    let _ = now;
+}
+
+#[test]
+fn a_scribe_cannot_write_down_a_spell_their_own_book_has_not_got() {
+    // ServUO's `DefInscription.CanCraft`: the scroll is a copy of what you know,
+    // so a book without the spell is refused — and refused for *nothing*, before
+    // a reagent or a point of mana is spent.
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[]);
+    let (system, row) = inscription_row(RECALL_SCROLL);
+    // A book holding the spell either side of Recall in the same circle, so the
+    // refusal is about the bit and not about the book being empty.
+    let pen = scribe(&mut world, connection, 40, &[SpellId(30), SpellId(32)], row);
+    let player = world.state.players[&connection];
+    train(&mut world, connection, Skill::Inscribe, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+    let _ = clilocs(&mut world, connection);
+
+    craft_in_system(&mut world, connection, pen, system, row, 0, now);
+    now = finish(&mut world, connection, now);
+
+    assert_eq!(
+        carried(&world, connection, RECALL_SCROLL, Hue(0)),
+        0,
+        "no scroll was written"
+    );
+    assert_eq!(
+        carried(&world, connection, BLANK_SCROLL, Hue(0)),
+        2,
+        "and the refusal cost no materials"
+    );
+    assert_eq!(
+        world.state.registry.get::<Mana>(player).map(|mana| mana.current),
+        Some(40),
+        "nor any mana"
+    );
+    assert!(
+        clilocs(&mut world, connection).contains(&1_042_404),
+        "you don't have that spell"
+    );
+    let _ = now;
+}
+
+#[test]
+fn a_scribe_without_the_mana_is_refused_and_keeps_the_reagents() {
+    // The other new gate, and the reason it is checked before the materials are
+    // touched: one point short is a refusal, not a failed craft.
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[]);
+    let (system, row) = inscription_row(RECALL_SCROLL);
+    let pen = scribe(&mut world, connection, 10, &[RECALL], row);
+    let player = world.state.players[&connection];
+    train(&mut world, connection, Skill::Inscribe, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    craft_in_system(&mut world, connection, pen, system, row, 0, now);
+    now = finish(&mut world, connection, now);
+
+    assert_eq!(
+        carried(&world, connection, RECALL_SCROLL, Hue(0)),
+        0,
+        "ten mana does not write an eleven-mana spell"
+    );
+    assert_eq!(
+        carried(&world, connection, BLANK_SCROLL, Hue(0)),
+        2,
+        "and the reagents stay in the pack"
+    );
+    assert_eq!(
+        world.state.registry.get::<Mana>(player).map(|mana| mana.current),
+        Some(10),
+        "a refusal spends nothing"
+    );
+    let _ = now;
+}
+
+#[test]
+fn a_scribe_binds_a_runebook_with_the_charges_their_skill_earns() {
+    // The row this whole trade was wanted for. Before it, the only runebook on
+    // the shard was one a GM made: no vendor sold one and no recipe made one,
+    // while sixteen destinations, a charge counter and a schema version all sat
+    // waiting for it.
+    //
+    // ServUO's `Runebook.OnCraft` is `5 + quality + Inscribe/30`, capped at ten,
+    // with quality 1 ordinary and 2 exceptional — so a grandmaster's book is
+    // `5 + 1 + 3 = 9` charges, or ten when the same roll that decides the quality
+    // comes out exceptional. The assertion reads the quality rather than pinning
+    // one number, because which of the two it is belongs to the rng.
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[]);
+    let (system, row) = inscription_row(RUNEBOOK);
+    let pen = scribe(&mut world, connection, 40, &[RECALL], row);
+    train(&mut world, connection, Skill::Inscribe, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    craft_in_system(&mut world, connection, pen, system, row, 0, now);
+    now = finish(&mut world, connection, now);
+
+    let player = world.state.players[&connection];
+    let owner = world.state.registry.serial_of(player).unwrap();
+    let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
+    let book = openshard_state::contained_items(&world.state, backpack)
+        .map(|(item, _)| item)
+        .find(|item| {
+            world
+                .state
+                .registry
+                .get::<Drawn>(*item)
+                .is_some_and(|drawn| drawn.id == RUNEBOOK)
+        })
+        .expect("the scribe made a runebook");
+    let made = world
+        .state
+        .registry
+        .get::<Runebook>(book)
+        .expect("a runebook is a runebook from the moment it exists");
+    let exceptional = world.state.registry.has::<Quality>(book);
+    let expected = (9 + u8::from(exceptional)).min(10);
+    assert_eq!(
+        (made.charges, made.max_charges),
+        (expected, expected),
+        "a grandmaster scribe's book carries the charges the formula earns it"
+    );
+    assert!(
+        made.entries.is_empty(),
+        "and no destinations: those are the owner's to bind"
+    );
+    assert_eq!(
+        carried(&world, connection, RECALL_SCROLL, Hue(0)),
+        1,
+        "one of the two Recall scrolls was bound into the book"
+    );
+    assert_eq!(
+        carried(&world, connection, GATE_SCROLL, Hue(0)),
+        1,
+        "and one of the two Gate Travel scrolls"
+    );
+    let _ = now;
+}
 /// Valorite's hue — the top of the metal axis.
 const VALORITE: Hue = Hue(0x08AB);
 /// Oak's material hue, the second wood on the fletching axis.

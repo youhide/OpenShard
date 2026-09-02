@@ -90,6 +90,21 @@ pub struct SummonData {
     pub slots:       FollowerSlots,
     /// How long it stands.
     pub lifetime:    SummonLifetime,
+    /// The Magery at which a Dispel is an even bet, in tenths of a skill point —
+    /// ServUO's `DispelDifficulty`, which is `0.0` on a `BaseCreature` and
+    /// overridden per summon class.
+    ///
+    /// Named for what it *is* rather than for a chance, because it is a skill
+    /// value: at exactly this much Magery the roll is fifty-fifty, and every point
+    /// either side moves it by [`Self::dispel_focus`].
+    pub difficulty:  u16,
+    /// How steep the curve either side of [`Self::difficulty`] is, in tenths of a
+    /// skill point — ServUO's `DispelFocus`, `20.0` by default and `45.0` on the
+    /// elementals and the daemon. A *larger* focus is a flatter curve: it takes
+    /// twice the skill above the difficulty to reach certainty.
+    ///
+    /// Never zero: it divides.
+    pub focus:       u16,
     /// Whether it is laid on the *aimed* tile rather than beside its caster.
     ///
     /// True for the two that take a target (`BladeSpiritsSpell.Target` spawns at
@@ -131,6 +146,11 @@ pub fn summoned(kind: SummonKind) -> SummonData {
                 // follower cap that cannot be reasoned about.
                 slots:       FollowerSlots::new(2),
                 lifetime:    SummonLifetime::Magery,
+                // A woodland animal overrides neither, so it takes
+                // `BaseCreature`'s own numbers: anyone with any Magery at all
+                // dispels one.
+                difficulty:  0,
+                focus:       200,
                 at_the_mark: false,
             }
         }
@@ -148,6 +168,11 @@ pub fn summoned(kind: SummonKind) -> SummonData {
                 ],
                 slots:       FollowerSlots::new(1),
                 lifetime:    SummonLifetime::Rolled,
+                // `DispelDifficulty` 0.0, the base creature's — a blade spirit is
+                // the easiest thing in the game to dispel, which is the counterweight
+                // to its being the cheapest thing to call up.
+                difficulty:  0,
+                focus:       200,
                 at_the_mark: true,
             }
         }
@@ -165,6 +190,8 @@ pub fn summoned(kind: SummonKind) -> SummonData {
                 ],
                 slots:       FollowerSlots::new(1),
                 lifetime:    SummonLifetime::Rolled,
+                difficulty:  800, // 80.0
+                focus:       200, // 20.0
                 at_the_mark: true,
             }
         }
@@ -182,6 +209,11 @@ pub fn summoned(kind: SummonKind) -> SummonData {
                 ],
                 slots:       FollowerSlots::new(2),
                 lifetime:    SummonLifetime::Magery,
+                // The four elementals share one pair: 117.5 skill for an even bet,
+                // on the flatter 45.0 curve — so a grandmaster dispels one about
+                // four times in five and a journeyman hardly ever.
+                difficulty:  1175,
+                focus:       450,
                 at_the_mark: false,
             }
         }
@@ -199,6 +231,8 @@ pub fn summoned(kind: SummonKind) -> SummonData {
                 ],
                 slots:       FollowerSlots::new(2),
                 lifetime:    SummonLifetime::Magery,
+                difficulty:  1175,
+                focus:       450,
                 at_the_mark: false,
             }
         }
@@ -217,6 +251,8 @@ pub fn summoned(kind: SummonKind) -> SummonData {
                 ],
                 slots:       FollowerSlots::new(4),
                 lifetime:    SummonLifetime::Magery,
+                difficulty:  1175,
+                focus:       450,
                 at_the_mark: false,
             }
         }
@@ -234,6 +270,8 @@ pub fn summoned(kind: SummonKind) -> SummonData {
                 ],
                 slots:       FollowerSlots::new(3),
                 lifetime:    SummonLifetime::Magery,
+                difficulty:  1175,
+                focus:       450,
                 at_the_mark: false,
             }
         }
@@ -253,6 +291,11 @@ pub fn summoned(kind: SummonKind) -> SummonData {
                 ],
                 slots:       FollowerSlots::new(5),
                 lifetime:    SummonLifetime::Magery,
+                // The hardest of the eight to dispel, as it is the dearest to call:
+                // 125.0 is above a grandmaster's own skill, so even one who has
+                // mastered Magery loses the roll rather more often than they win it.
+                difficulty:  1250,
+                focus:       450,
                 at_the_mark: false,
             }
         }
@@ -377,6 +420,33 @@ mod tests {
                 body.0
             );
         }
+    }
+
+    /// Every summon sits on a dispel curve of its own, and none of them divides by
+    /// zero.
+    ///
+    /// The focus is a *denominator* (`magic::dispel_chance`, in the crate that owns
+    /// the roll — downstream of this one), so a zero here would not be a mild
+    /// mistake — and the
+    /// difficulty ordering is the whole design of the pair: what is dear to summon is
+    /// dear to send away again.
+    #[test]
+    fn every_summon_is_dispelled_on_a_curve_of_its_own() {
+        for kind in EVERY_KIND {
+            assert!(
+                summoned(kind).focus > 0,
+                "{kind:?}'s dispel curve would divide by zero"
+            );
+        }
+        assert!(
+            summoned(SummonKind::Daemon).difficulty > summoned(SummonKind::EnergyVortex).difficulty,
+            "a daemon does not go as easily as a vortex"
+        );
+        assert_eq!(
+            summoned(SummonKind::BladeSpirits).difficulty,
+            0,
+            "and a blade spirit goes at the first word — `BaseCreature`'s own 0.0"
+        );
     }
 
     /// Named rather than derived, so a ninth kind is a deliberate edit here too.

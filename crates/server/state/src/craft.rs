@@ -66,6 +66,8 @@ pub fn craft_tool(graphic: Graphic) -> Option<CraftToolData> {
         0x1022 | 0x1023 => Skill::Fletching,
         // Cooking: skillet, rolling pin, and flour sifter.
         0x097F | 0x1043 | 0x103E => Skill::Cooking,
+        // Inscription: both facings of a scribe's pen.
+        0x0FBF | 0x0FC0 => Skill::Inscribe,
         _ => return None,
     };
     Some(CraftToolData {
@@ -113,6 +115,7 @@ mod tests {
             (0x1028, 0x1029), // dovetail saw
             (0x1EB8, 0x1EB9), // tinker's tools
             (0x1022, 0x1023), // fletcher's tools
+            (0x0FBF, 0x0FC0), // scribe's pen
         ] {
             let (a, b) = (Graphic(a), Graphic(b));
             assert_eq!(craft_tool(a), craft_tool(b), "{:#06X} and {:#06X}", a.0, b.0);
@@ -174,9 +177,15 @@ mod tests {
                 continue;
             };
             let info = crate::skill::info(tool.skill.id()).expect("a real skill");
-            // Every craft skill is one the window cannot press: the action that
-            // uses it *is* the double-click on the tool.
-            assert!(!info.usable, "{} is pressable from the window", info.name);
+            // A craft skill is normally one the window cannot press: the action
+            // that uses it *is* the double-click on the tool. Inscription is the
+            // reference's own exception and not an oversight here — ServUO gives
+            // `SkillName.Inscribe` a use callback of its own (`Inscribe.cs`,
+            // "target the book you wish to copy") *and* a craft system reached
+            // through the pen. Both are true of it, so this asks about the rest.
+            if tool.skill != Skill::Inscribe {
+                assert!(!info.usable, "{} is pressable from the window", info.name);
+            }
             assert!(tool.min_uses <= tool.max_uses);
         }
     }

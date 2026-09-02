@@ -11414,6 +11414,249 @@ fn a_summon_is_not_written_down() {
     );
 }
 
+/// The two dispels these tests cast, by their classic spellbook ids. Mass Dispel
+/// is missing on purpose — see
+/// [`mass_dispel_clears_every_summon_around_the_aimed_spot`].
+const DISPEL: SpellId = SpellId(40);
+const DISPEL_FIELD: SpellId = SpellId(33);
+
+/// Answer a spell's target cursor with a thing.
+fn target_object(world: &mut World, connection: ConnectionId, object: Serial) {
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(0),
+            object:    Some(object),
+            location:  Point::new(0, 0, 0),
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+}
+
+#[test]
+fn dispel_unmakes_a_summon_and_gives_the_follower_slot_back() {
+    // The whole slice in one cast: a grandmaster against a woodland beast, whose
+    // `DispelDifficulty` is `BaseCreature`'s own 0.0, is certain — so this asserts
+    // the outcome and not a coin toss. The slot coming back is the point of routing
+    // the success through `npc::unsummon`: nothing had to be told the follower is
+    // gone, because the count is derived from what stands in the world.
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    world.queue(Command::RequestCast {
+        connection,
+        spell: SUMMON_CREATURE,
+    });
+    world.tick(now);
+    let summon = the_summon(&world).expect("the spell called something up");
+    let summon_serial = world.registry().serial_of(summon).unwrap();
+    assert_eq!(openshard_skills::followers_of(&world.state, caster), 2);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: DISPEL,
+    });
+    world.tick(now);
+    target_object(&mut world, connection, summon_serial);
+    world.tick(now);
+
+    assert!(the_summon(&world).is_none(), "the creature was unmade");
+    assert!(
+        world.registry().serial_of(summon).is_none(),
+        "and its whole mobile went with it"
+    );
+    assert_eq!(
+        openshard_skills::followers_of(&world.state, caster),
+        0,
+        "the slot it filled came free"
+    );
+}
+
+#[test]
+fn dispel_refuses_anything_that_was_never_summoned() {
+    // ServUO's `IsDispellable` is `Summoned`, and nothing else: a sixth-circle spell
+    // is not a way to delete an inconvenient mobile. Worth a test because the refusal
+    // is the only thing standing between the two.
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let bystander = spawn_mobile_at(&mut world, Point::new(START.x + 2, START.y, 0), 50, now);
+    let bystander_entity = entity(&world, bystander);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: DISPEL,
+    });
+    world.tick(now);
+    target_object(&mut world, connection, bystander);
+    world.tick(now);
+
+    assert!(
+        world.registry().serial_of(bystander_entity).is_some(),
+        "a creature that was never summoned cannot be dispelled away"
+    );
+}
+
+#[test]
+fn mass_dispel_clears_every_summon_around_the_aimed_spot() {
+    // Two creatures called up beside the caster, both swept by one sweep.
+    //
+    // Driven through `mass_dispel` and not through a cast, the way
+    // `wall_of_stone_blocks_the_way_then_clears` calls `lay_field`: Mass Dispel is
+    // *seventh* circle, and its casting band tops out at 105.7 skill — so even a
+    // grandmaster fizzles it about one cast in seven, which would make this a coin
+    // toss rather than a test of the sweep. The cast path itself is covered by the
+    // two spells below and above, whose bands a grandmaster clears outright.
+    let now = Instant::now();
+    let mut world = field_world();
+    let (_connection, caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let here = *world.registry().get::<Position>(caster).unwrap();
+    for _ in 0..2 {
+        openshard_npc::summon(
+            &mut world.state,
+            caster,
+            openshard_state::SummonKind::Creature,
+            here.0,
+        )
+        .expect("a creature was called up");
+    }
+    let standing = world
+        .registry()
+        .query::<openshard_state::components::Summoned>()
+        .count();
+    assert_eq!(standing, 2);
+    // And a bystander inside the blast, to show it is not an area attack.
+    let bystander = spawn_mobile_at(&mut world, Point::new(START.x + 2, START.y, 0), 50, now);
+    let bystander_hits = world
+        .registry()
+        .get::<Hitpoints>(entity(&world, bystander))
+        .unwrap()
+        .current;
+
+    world.mass_dispel(caster, here.0);
+
+    assert_eq!(
+        world
+            .registry()
+            .query::<openshard_state::components::Summoned>()
+            .count(),
+        0,
+        "one sweep took both, each on its own roll"
+    );
+    assert_eq!(
+        world
+            .registry()
+            .get::<Hitpoints>(entity(&world, bystander))
+            .unwrap()
+            .current,
+        bystander_hits,
+        "and the mobile that was never summoned was not touched"
+    );
+}
+
+#[test]
+fn dispel_field_takes_the_aimed_tile_and_frees_the_way() {
+    // One tile, not the row: each tile of a field is its own item here as it is in
+    // the reference, and `DispelFieldSpell` deletes the one that was clicked. The
+    // obstruction going with it is the half that would be silently wrong — a stone
+    // wall dispelled but still blocking reads as a broken step check.
+    use openshard_state::FieldKind;
+    use openshard_state::components::Field;
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let spot = Point::new(START.x, START.y + 3, 0);
+    world.lay_field(caster, FieldKind::Stone, spot);
+    let laid = world.registry().query::<Field>().count();
+    assert!(laid > 1, "a wall is a row of tiles");
+    let centre = world
+        .registry()
+        .query::<Field>()
+        .find(|(tile, _)| {
+            world
+                .registry()
+                .get::<Position>(*tile)
+                .is_some_and(|at| at.0.x == spot.x && at.0.y == spot.y)
+        })
+        .map(|(tile, _)| world.registry().serial_of(tile).unwrap())
+        .expect("the wall stands on the tile it was aimed at");
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: DISPEL_FIELD,
+    });
+    world.tick(now);
+    target_object(&mut world, connection, centre);
+    world.tick(now);
+
+    assert_eq!(
+        world.registry().query::<Field>().count(),
+        laid - 1,
+        "the aimed tile went and its neighbours stayed"
+    );
+    assert!(
+        !world
+            .state
+            .facet_state(Facet(0))
+            .obstructions()
+            .holds_anything(spot.x, spot.y),
+        "and the way through that tile is free"
+    );
+}
+
+#[test]
+fn dispel_field_refuses_a_thing_that_is_not_magic() {
+    // The other half of the same rule: the object cursor will answer with whatever
+    // was clicked, and only a field tile or a spell's gate is dispellable.
+    let now = Instant::now();
+    let mut world = field_world();
+    let (connection, _caster) = ready_caster(&mut world, BLACK_PEARL, now);
+    let backpack = backpack_serial(&world, connection);
+
+    world.queue(Command::RequestCast {
+        connection,
+        spell: DISPEL_FIELD,
+    });
+    world.tick(now);
+    target_object(&mut world, connection, backpack);
+    world.tick(now);
+
+    assert!(
+        world.registry().entity_of(backpack).is_some(),
+        "a backpack is not a magical field"
+    );
+}
+
+/// The dispel curve itself, pinned against ServUO's own arithmetic.
+///
+/// `resist_chance`'s reason for living in this suite and not in `magic`: the
+/// formula wants a live mobile with a real skill sheet, so the test reads the
+/// numbers rather than restating the expression. And the two ends are what the
+/// whole table is for — the easiest summon goes to anybody, and the dearest one
+/// resists even a master more often than not.
+#[test]
+fn the_dispel_curve_runs_from_certain_to_barely_worth_trying() {
+    let now = Instant::now();
+    let mut world = field_world();
+    let (_connection, caster) = ready_caster(&mut world, BLACK_PEARL, now); // Magery 100.0
+    assert_eq!(
+        openshard_magic::dispel_chance(&world.state, caster, openshard_state::SummonKind::BladeSpirits),
+        1000,
+        "0.5 + (100.0 - 0.0) / 40.0 is well past certainty"
+    );
+    assert_eq!(
+        openshard_magic::dispel_chance(&world.state, caster, openshard_state::SummonKind::Daemon),
+        223,
+        "0.5 + (100.0 - 125.0) / 90.0 — a grandmaster fails three daemons in four"
+    );
+    assert_eq!(
+        openshard_magic::dispel_chance(&world.state, caster, openshard_state::SummonKind::FireElemental),
+        306,
+        "0.5 + (100.0 - 117.5) / 90.0 — an elemental holds two casts in three"
+    );
+}
+
 #[test]
 fn the_bless_spell_raises_the_targets_stats() {
     use openshard_state::components::Stats;

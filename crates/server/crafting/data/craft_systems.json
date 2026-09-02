@@ -53,7 +53,7 @@
     },
     {
       "trade": "alchemy",
-      "note": "The only shipped system that takes the default exceptional curve — it overrides no ECA at all — which is why a flat sixty points appears here and nowhere else.",
+      "note": "One of the two shipped systems that take the default exceptional curve — neither overrides an ECA at all — which is why a flat sixty points appears here and under inscription and nowhere else.",
       "skill": "Alchemy",
       "title": 1044001,
       "chance_at_min": 0,
@@ -77,6 +77,15 @@
       "chance_at_min": 0,
       "eca": "ChanceMinusSixtyToFourtyFive",
       "craft_sound": "0x0000"
+    },
+    {
+      "trade": "inscription",
+      "note": "A scribe's floor is zero and the curve is the default flat sixty, like alchemy. The trade is unusual in two ways no header field can carry: sixty-four of its rows also cost mana, and each of those is refused unless the scribe's own spellbook holds the spell being written.",
+      "skill": "Inscribe",
+      "title": 1044009,
+      "chance_at_min": 0,
+      "eca": "ChanceMinusSixty",
+      "craft_sound": "0x0249"
     }
   ]
 }

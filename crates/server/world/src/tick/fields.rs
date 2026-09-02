@@ -185,8 +185,9 @@ impl World {
 
     /// Take a field tile off the world — free its obstruction if it was a wall,
     /// forget it on every screen (`0x1D`), off the sector grid, out of the registry.
-    /// The `clear_decorations` shape.
-    fn remove_field(&mut self, entity: EntityId) {
+    /// The `clear_decorations` shape. Also the Dispel Field spell's exit, so a tile
+    /// unmade by a mage and one that burnt out leave by the same door.
+    pub(super) fn remove_field(&mut self, entity: EntityId) {
         let Some(serial) = self.state.registry.serial_of(entity) else {
             return;
         };

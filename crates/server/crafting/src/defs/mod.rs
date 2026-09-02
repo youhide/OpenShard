@@ -1,4 +1,4 @@
-//! The seven trades: their recipe lists, and the headers that name them.
+//! The eight trades: their recipe lists, and the headers that name them.
 //!
 //! Each `Def*.cs` in ServUO is a recipe table plus a short header of overrides —
 //! the main skill, the chance floor, the exceptional curve, the sound, and what
@@ -21,6 +21,7 @@ pub mod blacksmithy;
 pub mod carpentry;
 pub mod cooking;
 pub mod fletching;
+pub mod inscription;
 pub mod tailoring;
 pub mod tinkering;
 
@@ -68,6 +69,132 @@ mod tests {
     };
 
     use super::*;
+
+    /// A blank scroll: every scroll row's last line, and the only one of them
+    /// that is not a reagent.
+    const BLANK_SCROLL: Graphic = Graphic(0x0EF3);
+
+    #[test]
+    fn every_magery_spell_has_exactly_one_scroll_row_and_only_inscription_writes_one() {
+        // Two halves of one rule. A scribe must be able to write down anything a
+        // spellbook can hold, or the trade has holes nothing announces; and no
+        // *other* trade may output a scroll's art, because `craft::writes_a_spell`
+        // reads the spell off the output graphic — a carpenter's row that landed
+        // in the run would start demanding a spellbook and a pool of mana.
+        for spell in 0..openshard_state::components::SPELL_COUNT {
+            let spell = openshard_protocol::casting::SpellId(u16::from(spell));
+            let art = Graphic(openshard_state::components::spell_scroll_graphic(spell));
+            let rows = inscription::RECIPES
+                .iter()
+                .filter(|recipe| recipe.graphic == art)
+                .count();
+            assert_eq!(rows, 1, "{:#06X} has {rows} rows", art.0);
+        }
+        for system in SYSTEMS {
+            if system.skill == Skill::Inscribe {
+                continue;
+            }
+            for recipe in system.recipes {
+                assert!(
+                    openshard_state::components::scroll_spell(recipe.graphic).is_none(),
+                    "{:?} makes {:#06X}, which reads as a Magery scroll",
+                    system.skill,
+                    recipe.graphic.0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_scroll_row_asks_for_the_spell_s_own_reagents_and_mana() {
+        // The rows and the spell table were carried out of the same C# by hand
+        // and live in different crates, so nothing but this makes them agree.
+        // The reference has been wrong here before in exactly this shape — Gate
+        // Travel's *cast* reagents carried blood moss where the classic list has
+        // black pearl, and the row and the spell disagreeing is how it hid.
+        // Every disagreement at once, rather than the first one: a permutation
+        // between two hand-carried tables is never a single row, and stopping at
+        // the first hides how much of the table is involved.
+        let mut checked = 0;
+        let mut wrong: Vec<String> = Vec::new();
+        for recipe in inscription::RECIPES {
+            let Some(spell) = openshard_state::components::scroll_spell(recipe.graphic) else {
+                continue;
+            };
+            let info = openshard_magic::info(spell).expect("a scroll row names a Magery spell");
+            if recipe.mana != openshard_magic::mana(info) {
+                wrong.push(format!(
+                    "{:#06X} costs {} mana to write and {} to cast",
+                    recipe.graphic.0,
+                    recipe.mana,
+                    openshard_magic::mana(info)
+                ));
+            }
+            let mut wanted: Vec<u16> = info.reagents.iter().map(|reagent| reagent.0).collect();
+            let mut asked: Vec<u16> = recipe
+                .resources
+                .iter()
+                .filter(|line| line.graphic != BLANK_SCROLL)
+                .map(|line| {
+                    assert_eq!(
+                        line.amount, 1,
+                        "{:#06X} wants more than one of a reagent",
+                        recipe.graphic.0
+                    );
+                    line.graphic.0
+                })
+                .collect();
+            wanted.sort_unstable();
+            asked.sort_unstable();
+            if asked != wanted {
+                wrong.push(format!(
+                    "{:#06X} (spell {}) is written on {asked:04X?} and cast with {wanted:04X?}",
+                    recipe.graphic.0, spell.0
+                ));
+            }
+            assert!(
+                recipe.resources.iter().any(|line| line.graphic == BLANK_SCROLL),
+                "{:#06X} is written on nothing at all",
+                recipe.graphic.0
+            );
+            checked += 1;
+        }
+        assert!(
+            wrong.is_empty(),
+            "{} rows disagree:\n{}",
+            wrong.len(),
+            wrong.join("\n")
+        );
+        // A check over nothing is green: say how many rows there were.
+        assert_eq!(checked, 64, "the eight circles are eight spells each");
+    }
+
+    #[test]
+    fn the_runebook_row_binds_the_two_scrolls_it_travels_by() {
+        // The one row in the catalogue whose ingredients are other rows of its
+        // own trade: a scribe writes the Recall and the Gate Travel scroll, then
+        // binds them into the book. Nothing else on the shard makes a runebook,
+        // so this row is the whole supply.
+        let runebook = inscription::RECIPES
+            .iter()
+            .find(|recipe| recipe.graphic == Graphic(0x22C5))
+            .expect("inscription makes a runebook");
+        let lines: Vec<(u16, u16)> = runebook
+            .resources
+            .iter()
+            .map(|line| (line.graphic.0, line.amount))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![(BLANK_SCROLL.0, 8), (0x1F4C, 1), (0x1F60, 1)],
+            "eight blank scrolls, a Recall scroll and a Gate Travel scroll"
+        );
+        assert!(
+            openshard_state::components::scroll_spell(runebook.graphic).is_none(),
+            "a runebook is not a scroll: it costs no mana and needs no spell"
+        );
+        assert_eq!(runebook.mana, 0);
+    }
 
     #[test]
     fn every_addon_deed_keeps_its_installation_kind() {

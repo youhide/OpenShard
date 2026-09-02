@@ -29,6 +29,15 @@ openshard-state.workspace = true
 openshard-gateway.workspace = true
 tracing.workspace = true
 
+# Tests only, and deliberately not a dependency: inscription's scroll rows carry
+# the reagents and the mana of the spells they write down, and the spells
+# themselves live in `magic`. The shard reads neither from here — the rows are
+# data — but the two halves are hand-carried from the same C# and would drift in
+# silence, so one test asks them the same question. `magic` does not depend on
+# this crate, so the graph stays acyclic.
+[dev-dependencies]
+openshard-magic.workspace = true
+
 # `build.rs` only: the recipe tables are `data/*.json` and become `const`s before
 # the crate compiles. Nothing here is linked into the shard.
 [build-dependencies]

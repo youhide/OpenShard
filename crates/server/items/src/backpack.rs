@@ -8,6 +8,7 @@
 //! constant, two is a coincidence, and three is how the reward path and the
 //! turn-in path start disagreeing about what a backpack is.
 
+use openshard_protocol::casting::SpellId;
 use openshard_protocol::item_kind::{
     ItemKindId,
     MaterialId,
@@ -16,6 +17,7 @@ use openshard_protocol::wire::{
     Graphic,
     Hue,
 };
+use openshard_state::components::Spellbook;
 use openshard_state::item_definition::item_definition;
 
 use super::*;
@@ -38,6 +40,34 @@ pub fn backpack_of(state: &WorldState, mobile: Serial) -> Option<Serial> {
     equipped_items(state, mobile)
         .find(|(item, equipped)| equipped.layer == BACKPACK_LAYER && state.registry.has::<Container>(*item))
         .and_then(|(item, _)| state.registry.serial_of(item))
+}
+
+/// Whether a mobile carries a spellbook that holds `spell` — ServUO's
+/// `Spellbook.Find(from, spellID)` narrowed to the pack.
+///
+/// Two systems ask this and neither owns it: casting refuses a spell that is in
+/// no book of yours, and inscribing refuses to *write down* a spell you do not
+/// have (ServUO's `DefInscription.CanCraft`, cliloc 1042404). It is here rather
+/// than in either of them because the question is "what is in this pack", which
+/// is this module's, and because two copies of it would be two answers the day
+/// one of them learns about a book worn on the hand.
+///
+/// A book must be a direct child of the backpack: not on the ground, not in the
+/// bank, and not — deliberately — in a bag inside the pack, which is the reach
+/// the caster's own check has always had.
+#[must_use]
+pub fn carries_spell(state: &WorldState, mobile: Serial, spell: SpellId) -> bool {
+    let Some(pack) = backpack_of(state, mobile) else {
+        return false;
+    };
+    state.registry.query::<Spellbook>().any(|(book, mask)| {
+        mask.has(spell)
+            && matches!(
+                openshard_state::item_location(state, book),
+                Some(ItemLocation::Settled(SettledItemLocation::Contained(held)))
+                    if held.container == pack
+            )
+    })
 }
 
 /// Put an item into a mobile's backpack: merged onto a like pile when

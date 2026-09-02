@@ -209,8 +209,9 @@
     it on expiry — the door-toggle/decoration pattern. Fields are transient
     (10–54 s), so like a cast in flight they are **excluded from the save sweep**
     rather than restored as eternal statics. The cast voices only its ServUO sound
-    and gesture; the tiles are the visual. Deferred: Dispel Field (Dispel is still
-    `Scripted`), the 300 ms row stagger, and per-tile `stand_z` on slopes.
+    and gesture; the tiles are the visual. Deferred: the 300 ms row stagger, and
+    per-tile `stand_z` on slopes. (Dispel Field, deferred here for want of the
+    dispel roll, landed with the family below.)
   - [x] **Paralyze, and the freeze mechanic.** A `Frozen { until }` component (tick
     count, like `CriminalUntil`) that the two movement paths consult and refuse
     while it holds — the player walk (`walk`, a `0x21` reject) and the creature/NPC/
@@ -309,9 +310,8 @@
       one stat block**: the reference draws eighteen classes with their own
       numbers, this draws nine bodies the engine can name over one modest woodland
       animal, because there is no per-body stat table to draw from and inventing
-      eighteen is a bestiary rather than a spell. And **Dispel is still
-      `Unimplemented`** — it now has its question answered (`Summoned` is the
-      marker) and waits only on being written.
+      eighteen is a bestiary rather than a spell. (**Dispel**, listed here as
+      waiting only on being written, was written next — see the family below.)
   - **The roadmap still calls the unbuilt archetype `SpellEffect::Scripted`.** It
     is `SpellEffect::Unimplemented` in the tree and has been since the script-pack
     seam was retired; the entries above that name the old tag (the core-table
@@ -392,11 +392,64 @@
       red/young travel restrictions, ship-mark runes, an `op_place_moongate` for
       the pack, and a tooltip that refreshes mid-life — a marked rune is the
       first thing in the world whose *name* changes.
+  - [x] **The three dispels — Dispel, Mass Dispel, Dispel Field.** The counterspell
+    family, and the one kind of spell that only ever *removes*: it needed the summon
+    slice to land first and needs nothing after it. All three were
+    `Unimplemented` with their question already answered — `Summoned` is the
+    marker, and it had been read by the save sweep and the death path for a slice
+    already.
+    - **What a summon costs to send away is a table**, two columns beside the ones
+      that say what it is (`state::summon`): `difficulty`, the Magery at which the
+      roll is even, and `focus`, how steep the curve is either side of it — ServUO's
+      `DispelDifficulty`/`DispelFocus`, in tenths like every other skill number here.
+      `magic::dispel_chance` is the read site, `0.5 + (Magery - difficulty) /
+      (focus * 2)` in tenths of a per-cent so the reference's halves stay exact.
+      The two ends are the whole design: a blade spirit's `0.0/20.0` means anyone
+      with any Magery at all sends it away, while a daemon's `125.0/45.0` sits
+      *above* a grandmaster's entire skill, so what is dearest to call up is dearest
+      to be rid of. Nothing is trained by the roll — Magery was trained by the cast
+      that carried it, and the creature's difficulty is its class's, not something
+      it learnt.
+    - **A dispelled summon leaves by the door it already had**, `npc::unsummon`, so
+      an expiry, a death and a dispel are one exit with one picture, and the
+      follower slot needs no telling it is free — the count is derived from what
+      stands in the world. ServUO says the same thing twice (`BaseCreature.Dispel`
+      and `DispelSpell` play the identical `0x3728`/`0x201`); here it is said once.
+    - **The art is the outcome's, so all three rows are `Silent`.** A dispel has two
+      endings and a table row carries one: the puff of a creature that goes, or
+      `FixedEffect(0x3779)` on one that holds. Voicing it from the table would sound
+      a spell aimed at a rock, which is the reason Mark is silent too.
+    - **Dispel Field aims at an object, not at the ground** — the fourth
+      `SpellTarget::Item` spell, because ServUO builds its cursor with
+      `allowGround: false` and the thing it unmakes *is* an item. One tile per cast,
+      as in the reference, since a field is a row of separate tiles here as it is
+      there; the obstruction goes with the tile through the existing
+      `remove_field`, which is the half that would have been silently wrong — a
+      dispelled stone wall that still blocks reads as a broken step check.
+    - **A gate is dispellable and a city moongate is not, and that needed no flag.**
+      ServUO carries `[DispellableField]` on `Moongate` while `PublicMoongate` is a
+      plain `Item`; here the spell's gate carries the `Moongate` component and a
+      city gate carries nothing at all, its meaning derived from where it stands —
+      so the distinction the reference spends an attribute on is already the shape
+      of the data. **Only the aimed end closes**, as in the reference: the far half
+      stands out its half-minute as a one-way door, the pair having no link field
+      to follow by design.
+    - **Two wrong reagents fell out of writing the rows.** Dispel and Mass Dispel
+      both named spider's silk where ServUO and the classic list have sulfurous
+      ash — Gate Travel's blood moss again, the error that is invisible from every
+      direction but the table: the spell casts, costs and works, and only charges
+      for something the player never needed to buy.
+    - Deferred: the caster's line of sight ("Target can not be seen", cliloc
+      500237), unchecked here as it is everywhere else in this engine; ServUO's
+      `SummonMaster == from || CheckHSequence` gate, which lets you always dispel
+      your *own* summon and asks a harmful-action question about anyone else's;
+      and `IsAnimatedDead`, the other half of `IsDispellable`, which waits on a
+      necromancy that does not exist here.
   - [x] **Resurrection** — landed with the ghost slice: `SpellEffect::Resurrect`
     raises the aimed ghost through the core `resurrect` path (a no-op on the
     living).
-  - **Dispel, polymorph** — each waits on a subsystem of its own (summon
-    lifetimes, a body-swap that restores cleanly).
+  - **Polymorph** — still waiting on a subsystem of its own: a body-swap that
+    restores cleanly.
   - **The Poisoning skill for the deadlier doses** — the Magery-cast dose caps
     at greater; the higher poison levels (deadly, lethal) want the Poisoning skill
     to set them.

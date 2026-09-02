@@ -9,7 +9,7 @@
 //! to watch a cast.
 //!
 //! Effects that need systems the engine does not have yet — a body swap,
-//! dispelling, the lock-and-trap family — are tagged
+//! the lock-and-trap family — are tagged
 //! [`SpellEffect::Unimplemented`]: the spell still *casts* (its words, its
 //! gesture, mana, reagents, skill, delay and target all resolve) and then
 //! nothing happens, until the subsystem lands. Such a row is
@@ -126,6 +126,23 @@ pub enum SpellEffect {
     /// Paralyze — freezes the target mobile in place for a Magery-scaled span; a
     /// blow lifts it. See [`Frozen`](openshard_state::Frozen).
     Paralyze,
+    /// Unmake the aimed creature, if it was ever really there — Dispel.
+    ///
+    /// The only question it asks is whether the target carries
+    /// [`Summoned`](openshard_state::components::Summoned); the roll that follows is
+    /// [`crate::dispel_chance`], off the creature's own row. Nothing that was not
+    /// summoned can be dispelled, however magical it looks.
+    Dispel,
+    /// Unmake every summon standing near the aimed spot, each rolling its own
+    /// chance — Mass Dispel, within [`crate::MASS_DISPEL_RANGE`].
+    MassDispel,
+    /// Take away the aimed magical field — Dispel Field, which also closes a gate a
+    /// Gate Travel laid.
+    ///
+    /// It aims at the tile *entity*, not at the ground under it, which is why its
+    /// row targets an object: a field is a row of drawn items, and the one the
+    /// player clicked is the one that goes.
+    DispelField,
     /// Write the caster's own position onto the aimed recall rune.
     ///
     /// The rune must be in the caster's *backpack*, not merely within reach:
@@ -143,8 +160,8 @@ pub enum SpellEffect {
     /// gesture all happen — and then nothing occurs. That was the seam a script
     /// pack filled; with the pack gone it is simply a spell that is not built,
     /// and the name says so rather than pointing at a layer that no longer
-    /// exists. Polymorph, the dispels, the lock-and-trap family and the rest of
-    /// the unbuilt list are here.
+    /// exists. Polymorph, the lock-and-trap family and the rest of the unbuilt
+    /// list are here.
     Unimplemented,
 }
 
@@ -210,10 +227,12 @@ pub enum SpellArt {
     },
     /// None of its own.
     ///
-    /// Three different reasons, and the row's effect says which: a travel spell
+    /// Four different reasons, and the row's effect says which: a travel spell
     /// voices itself at *both* ends of the journey and so cannot be voiced once
     /// here (Recall, Gate Travel, and Mark, whose sound belongs beside the rune
-    /// it writes); the reference gives the spell no art at all (Earthquake); or
+    /// it writes); a dispel has one picture for the thing that goes and another
+    /// for the thing that holds, so it is voiced by its outcome and not by its
+    /// landing; the reference gives the spell no art at all (Earthquake); or
     /// the engine does not run the spell yet, and a spell with no effect has no
     /// landing to voice. A row that grows an effect grows its art with it.
     Silent,
@@ -253,8 +272,11 @@ use SpellEffect::{
     BehaviourBuff,
     Cure,
     Damage,
+    Dispel,
+    DispelField,
     Field,
     Heal,
+    MassDispel,
     Paralyze,
     Poison,
     StatMod,
@@ -428,7 +450,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Cunning",
         "Uus Wis",
         2,
-        &[GINSENG, MANDRAKE_ROOT],
+        &[MANDRAKE_ROOT, NIGHTSHADE],
         Mobile,
         Directed,
         StatMod(StatEffectKind::CUNNING),
@@ -461,7 +483,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Magic Trap",
         "In Jux",
         2,
-        &[SULFUROUS_ASH, SPIDERS_SILK],
+        &[GARLIC, SULFUROUS_ASH, SPIDERS_SILK],
         Location,
         Directed,
         Unimplemented,
@@ -481,7 +503,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Protection",
         "Uus Sanct",
         2,
-        &[GARLIC, GINSENG, SULFUROUS_ASH, SPIDERS_SILK],
+        &[GARLIC, GINSENG, SULFUROUS_ASH],
         SelfCast,
         Directed,
         BehaviourBuff(openshard_state::BehaviourBuffKind::PROTECTION),
@@ -596,7 +618,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Arch Protection",
         "Vas Uus Sanct",
         4,
-        &[GARLIC, GINSENG, MANDRAKE_ROOT, SULFUROUS_ASH, SPIDERS_SILK],
+        &[GARLIC, GINSENG, MANDRAKE_ROOT, SULFUROUS_ASH],
         Location,
         Directed,
         Unimplemented,
@@ -606,7 +628,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Curse",
         "Des Sanct",
         4,
-        &[GARLIC, NIGHTSHADE, SPIDERS_SILK],
+        &[GARLIC, NIGHTSHADE, SULFUROUS_ASH],
         Mobile,
         Directed,
         StatMod(StatEffectKind::CURSE),
@@ -636,7 +658,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Lightning",
         "Por Ort Grav",
         4,
-        &[BLACK_PEARL, MANDRAKE_ROOT, SULFUROUS_ASH],
+        &[MANDRAKE_ROOT, SULFUROUS_ASH],
         Mobile,
         Directed,
         Damage(Energy, 14),
@@ -648,7 +670,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Mana Drain",
         "Ort Rel",
         4,
-        &[BLOOD_MOSS, MANDRAKE_ROOT, SULFUROUS_ASH, SPIDERS_SILK],
+        &[BLACK_PEARL, MANDRAKE_ROOT, SPIDERS_SILK],
         Mobile,
         Directed,
         Unimplemented,
@@ -680,9 +702,16 @@ pub static MAGERY: [SpellInfo; 64] = [
         "An Grav",
         5,
         &[BLACK_PEARL, GARLIC, SULFUROUS_ASH, SPIDERS_SILK],
-        Location,
+        // The object cursor, not the ground one: ServUO's target is built with
+        // `allowGround: false` and answers with the field *item* it was clicked on.
+        // Aiming at a tile would mean guessing which of the things standing on it
+        // the caster meant.
+        Item,
         Directed,
-        Unimplemented,
+        DispelField,
+        // Voiced where the tile goes, not here: the sparkle and pop are ServUO's
+        // own, played after the field is found dispellable, so a Dispel Field aimed
+        // at a rock is as quiet as a refused Mark.
         SILENT,
     ),
     spell(
@@ -709,7 +738,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Mind Blast",
         "Por Corp Wis",
         5,
-        &[BLOOD_MOSS, MANDRAKE_ROOT, NIGHTSHADE, SPIDERS_SILK],
+        &[BLACK_PEARL, MANDRAKE_ROOT, NIGHTSHADE, SULFUROUS_ASH],
         Mobile,
         Directed,
         Damage(Cold, 14),
@@ -756,10 +785,15 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Dispel",
         "An Ort",
         6,
-        &[GARLIC, MANDRAKE_ROOT, SPIDERS_SILK],
+        // Sulfurous ash, not spider's silk: ServUO's `SpellInfo` and the classic
+        // list agree, and the row had the wrong third reagent — the same kind of
+        // invisible error Gate Travel's blood moss was.
+        &[GARLIC, MANDRAKE_ROOT, SULFUROUS_ASH],
         Mobile,
         Directed,
-        Unimplemented,
+        Dispel,
+        // Voiced by the outcome, which is two different pictures: a summon that goes
+        // leaves `npc::unsummon`'s puff, and one that holds flashes and stays.
         SILENT,
     ),
     spell(
@@ -809,7 +843,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Mass Curse",
         "Vas Des Sanct",
         6,
-        &[GARLIC, MANDRAKE_ROOT, NIGHTSHADE, SPIDERS_SILK],
+        &[GARLIC, MANDRAKE_ROOT, NIGHTSHADE, SULFUROUS_ASH],
         Location,
         Directed,
         Unimplemented,
@@ -819,7 +853,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Paralyze Field",
         "In Ex Grav",
         6,
-        &[BLOOD_MOSS, GARLIC, SULFUROUS_ASH, SPIDERS_SILK],
+        &[BLACK_PEARL, GINSENG, SPIDERS_SILK],
         Location,
         Directed,
         Field(FieldKind::Paralyze),
@@ -852,7 +886,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Energy Field",
         "In Sanct Grav",
         7,
-        &[BLOOD_MOSS, MANDRAKE_ROOT, SULFUROUS_ASH, SPIDERS_SILK],
+        &[BLACK_PEARL, MANDRAKE_ROOT, SULFUROUS_ASH, SPIDERS_SILK],
         Location,
         Directed,
         Field(FieldKind::Energy),
@@ -895,10 +929,13 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Mass Dispel",
         "Vas An Ort",
         7,
-        &[BLACK_PEARL, GARLIC, MANDRAKE_ROOT, SPIDERS_SILK],
+        // Sulfurous ash for spider's silk here too — the same wrong reagent as
+        // Dispel's, and from the same place.
+        &[BLACK_PEARL, GARLIC, MANDRAKE_ROOT, SULFUROUS_ASH],
         Location,
         Area,
-        Unimplemented,
+        MassDispel,
+        // Per victim, and each of them the outcome's — see Dispel above.
         SILENT,
     ),
     spell(
@@ -928,7 +965,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Earthquake",
         "In Vas Por",
         8,
-        &[BLOOD_MOSS, GARLIC, MANDRAKE_ROOT, SPIDERS_SILK],
+        &[BLOOD_MOSS, GINSENG, MANDRAKE_ROOT, SULFUROUS_ASH],
         SelfCast,
         Directed,
         AreaDamage(Physical, 30),
@@ -940,7 +977,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Energy Vortex",
         "Vas Corp Por",
         8,
-        &[BLOOD_MOSS, MANDRAKE_ROOT, NIGHTSHADE, SPIDERS_SILK],
+        &[BLACK_PEARL, BLOOD_MOSS, MANDRAKE_ROOT, NIGHTSHADE],
         Location,
         Area,
         SpellEffect::Summon(SummonKind::EnergyVortex),
@@ -970,7 +1007,7 @@ pub static MAGERY: [SpellInfo; 64] = [
         "Summon Daemon",
         "Kal Vas Xen Corp",
         8,
-        &[BLOOD_MOSS, MANDRAKE_ROOT, SPIDERS_SILK],
+        &[BLOOD_MOSS, MANDRAKE_ROOT, SULFUROUS_ASH, SPIDERS_SILK],
         SelfCast,
         Area,
         SpellEffect::Summon(SummonKind::Daemon),
@@ -1128,6 +1165,49 @@ mod tests {
         }
     }
 
+    /// The three dispels, and the three different things they aim at.
+    ///
+    /// The target column is the half of each row a player feels first — it decides
+    /// which cursor the client raises — and all three are different for reasons that
+    /// are invisible from the Rust: Dispel Field answers with the field *item*
+    /// (ServUO builds its target with `allowGround: false`), Dispel with a mobile,
+    /// and Mass Dispel with a spot on the ground it then sweeps around.
+    ///
+    /// The reagents are pinned for [`the_travel_spells_cost_what_the_reference_says`]'s
+    /// reason, and two of these three rows were wrong in exactly that invisible way:
+    /// both named spider's silk where the reference has sulfurous ash.
+    #[test]
+    fn the_dispel_family_aims_at_three_different_things() {
+        let field = info(SpellId(33)).unwrap();
+        assert_eq!(field.name, "Dispel Field");
+        assert_eq!(field.effect, SpellEffect::DispelField);
+        assert_eq!(field.target, SpellTarget::Item);
+        assert_eq!(
+            field.reagents,
+            &[BLACK_PEARL, GARLIC, SULFUROUS_ASH, SPIDERS_SILK]
+        );
+
+        let one = info(SpellId(40)).unwrap();
+        assert_eq!(one.name, "Dispel");
+        assert_eq!(one.effect, SpellEffect::Dispel);
+        assert_eq!(one.target, SpellTarget::Mobile);
+        assert_eq!(
+            one.reagents,
+            &[GARLIC, MANDRAKE_ROOT, SULFUROUS_ASH],
+            "sulfurous ash, not spider's silk — ServUO's Dispel.cs"
+        );
+
+        let many = info(SpellId(53)).unwrap();
+        assert_eq!(many.name, "Mass Dispel");
+        assert_eq!(many.effect, SpellEffect::MassDispel);
+        assert_eq!(many.target, SpellTarget::Location);
+        assert_eq!(
+            many.reagents,
+            &[BLACK_PEARL, GARLIC, MANDRAKE_ROOT, SULFUROUS_ASH],
+            "sulfurous ash here too — ServUO's MassDispel.cs"
+        );
+    }
+
     /// Every spell has words. There is no such thing as a Magery spell cast
     /// silently: ServUO gives all sixty-four a `Mantra`, and a row that grew a
     /// blank one would cast with an empty line over the caster's head rather than
@@ -1191,7 +1271,14 @@ mod tests {
         for spell in &MAGERY {
             let voiced_elsewhere = matches!(
                 spell.effect,
-                SpellEffect::Recall | SpellEffect::GateTravel | SpellEffect::Mark
+                SpellEffect::Recall
+                    | SpellEffect::GateTravel
+                    | SpellEffect::Mark
+                    // Two outcomes and two pictures: the puff a summon leaves, or
+                    // the flash of one that shrugged the dispel off.
+                    | SpellEffect::Dispel
+                    | SpellEffect::MassDispel
+                    | SpellEffect::DispelField
             );
             // Earthquake: ServUO gives it neither sound nor particle.
             let silent_in_the_reference = spell.name == "Earthquake";

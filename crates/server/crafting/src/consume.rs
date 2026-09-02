@@ -65,7 +65,13 @@ pub enum Refusal {
 /// The generated recipe build asserts the same ceiling. Raising it is a
 /// benchmark decision because every additional line can overlap every earlier
 /// selector and therefore has to share the same reservation table.
-pub const MAX_CRAFT_RESOURCE_LINES: usize = 4;
+///
+/// It is five because the reference has a row that needs five: a scroll for one
+/// of the four-reagent spells — Arch Protection, Greater Heal, Mind Blast and
+/// eleven more — plus the blank scroll every scroll is written on. Four held
+/// while the seven material trades were the whole catalogue, and none of them
+/// asks for more than four.
+pub const MAX_CRAFT_RESOURCE_LINES: usize = 5;
 
 /// The most physical piles one atomic craft may change.
 ///

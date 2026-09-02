@@ -114,7 +114,9 @@ impl World {
 
     /// A flash, a puff of smoke or a cloud, standing at a thing's own tile — the
     /// `0x70` in its simplest form, seen by everyone who can see the thing.
-    fn location_effect(&mut self, at: EntityId, graphic: Graphic) {
+    ///
+    /// Shared with the dispels, whose two outcomes are both one of these.
+    pub(super) fn location_effect(&mut self, at: EntityId, graphic: Graphic) {
         let Some(&Position(spot)) = self.state.registry.get::<Position>(at) else {
             return;
         };

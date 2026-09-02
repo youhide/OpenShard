@@ -178,7 +178,6 @@ use openshard_state::components::{
     Ridden,
     Riding,
     SpawnedBy,
-    Spellbook,
     Stackable,
     Stamina,
     Stats,
@@ -234,6 +233,7 @@ mod crops;
 mod death;
 mod decor;
 mod defaults;
+mod dispel;
 mod enter;
 mod fields;
 mod gates;

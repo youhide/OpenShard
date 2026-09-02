@@ -28,6 +28,9 @@ built, with no status in it — what is ready and what is open is
 | Field → cotton | `items/src/crop.rs` | the plant standing in a field and the double-click that picks it. A second timer in `items`, ticked by `advance_crops` |
 | Sheep → wool | `items/src/shear.rs` | a blade on a live sheep. A branch of `carve`, because upstream reaches both through one target |
 | The fields themselves | `world/src/crops.rs`, `world/src/tick/crops.rs`, `world/data/crops.json` | which patches of ground grow cotton, and the pass that keeps them planted — the spawn region's shape, for items |
+| Reagents + mana → scroll | `crafting/data/inscription.json` | a scroll is an ordinary recipe with two extras: `mana`, and a gate derived from its own output art |
+| The spell gate | `items/src/backpack.rs` (`carries_spell`) | a spellbook in your own pack with the bit set. Shared with casting, which asks the identical question |
+| Scroll art ↔ spell | `state::components::scroll_spell` | the run `0x1F2D..`, whose **first circle is rotated** — not `base + spell` |
 | Tool table | `state/src/craft.rs` | graphic → trade skill + uses; in `state` because `items` reads it too |
 | In-flight state | `state::components::Crafting`, `Tool`, `Quality`, `CraftedBy` | components on the crafter / the item |
 | Addon state | `state::components::AddonKind`, `AddonPart`, `AddonDeed`, `Spinning`, `LoomPhase`, `Fibre` | what a deed installs, which tiles are one addon, and what the wheel and the loom are in the middle of |
@@ -57,8 +60,18 @@ and flags: `use_all_res` (batch: make as many as the pack affords), `hue`,
 per-recipe `needs`, `min_chance` (this row's own odds floor, overriding the
 system's — point 6 of
 [`evidence/2026-09-02-the-crafting-review.md`](evidence/2026-09-02-the-crafting-review.md)),
+`mana` (paid on top of the materials; zero on every row but inscription's
+scrolls, and zero means "no requirement" rather than "free"),
 and `addon: Option<AddonKind>` for the deeds that install a
 house addon.
+
+**One gate is derived rather than declared.** A row whose output art is a Magery
+scroll may only be made by a crafter carrying a spellbook that holds that spell
+— ServUO's `DefInscription.CanCraft`. The spell is read off the row's own output
+(`state::components::scroll_spell`), so there is no column to disagree with it;
+the same function is what a spellbook reads when a scroll is dropped on it, and
+what casting checks. Its run is **not** `base + spell`: the first circle is
+rotated, and the table says so in both directions.
 
 The **material axis** is a hue swap, not a type swap: nine ingot hues against
 one ingot graphic, seven woods, the leather grades. Exactly one resource line of
@@ -86,7 +99,9 @@ crafting::open(CraftGumpContext{system, tool, group, sub_res, page})   [server r
         ▼
 gump::handle ──► make ──► craft::begin
         │   gates: not already Crafting · tool exists/has uses/is carried (no Position)
-        │          · workshop (system.needs ∪ recipe.needs) · skill band · materials dry-run
+        │          · workshop (system.needs ∪ recipe.needs) · the spell, if the row
+        │            writes one · mana, if the row costs any · skill band
+        │          · materials dry-run
         ▼
 insert Crafting{system, recipe, tool, sub_res, beats_left, next_beat}; first strike now
         │
@@ -96,7 +111,8 @@ insert Crafting{system, recipe, tool, sub_res, beats_left, next_beat}; first str
         ▼ complete: EVERY gate again → roll (exceptional draw first, then success)
            → fail: pay Share::All (or Half for use_all_res), train, wear tool
            → success: resolve output identity → prepare withdrawal plan
-             → prepare placement in pack → commit both → Quality/CraftedBy/AddonDeed
+             → prepare placement in pack → commit both → pay mana
+             → Quality/CraftedBy/AddonDeed/runebook charges
              → cliloc → bus.send(ItemCrafted) → wear tool
 ```
 
@@ -127,6 +143,13 @@ Points that are load-bearing rather than tidy:
   z band; line-of-sight is deliberately not copied.
 - **Tool wear** is one use per attempt, success or failure; at zero the `Tool`
   component goes and `items::consume(serial, 0)` removes the item.
+- **Mana is a cost of the finished item**, not of the attempt: checked with every
+  other gate at both ends, spent beside the materials once the craft has
+  succeeded. A ruined scroll costs its reagents and no mana, and a refusal costs
+  neither — ServUO consumes it in `CompleteCraft` and nowhere else.
+- **A scroll says its own lines.** Success is cliloc 501629 and failure 501630,
+  whatever the quality, because ServUO's ending effect branches on the type
+  before it reads the quality. It is also why no scroll row is markable.
 
 ## 4. Persistence
 

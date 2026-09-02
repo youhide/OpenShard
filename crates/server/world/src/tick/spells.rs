@@ -507,6 +507,15 @@ impl World {
                     magic::apply_paralyze(&mut self.state, target, until);
                 }
             }
+            SpellEffect::Dispel => {
+                // A Mobile-target spell: it asks the aimed creature whether it was
+                // ever really there.
+                if let Some(target) = target_serial {
+                    self.dispel_creature(caster, target);
+                }
+            }
+            SpellEffect::MassDispel => self.mass_dispel(caster, target_location),
+            SpellEffect::DispelField => self.dispel_field(caster, target_serial),
             SpellEffect::Summon(kind) => {
                 // The creature is its own picture, so `spell_feedback` only voiced
                 // the cast — the `Unseen` visual a field uses, for the same reason.
@@ -771,22 +780,15 @@ impl World {
 
     /// Whether the caster carries a spellbook that holds `spell` — a book in its
     /// backpack with the spell's bit set. The gate `begin_cast` reads.
+    ///
+    /// The search itself is [`openshard_items::carries_spell`]: a scribe writing
+    /// a scroll asks exactly the same question, and one of the two would have
+    /// gone stale the first time the other learnt something.
     pub(super) fn caster_has_spell(&self, caster: EntityId, spell: SpellId) -> bool {
         let Some(serial) = self.state.registry.serial_of(caster) else {
             return false;
         };
-        let Some(pack) = self.caster_pack(serial) else {
-            return false;
-        };
-        self.state.registry.query::<Spellbook>().any(|(book, mask)| {
-            mask.has(spell)
-                && matches!(
-                    openshard_state::item_location(&self.state, book),
-                    Some(LiveItemLocation::Settled(
-                        openshard_state::SettledItemLocation::Contained(c)
-                    )) if c.container == pack
-                )
-        })
+        openshard_items::carries_spell(&self.state, serial, spell)
     }
 
     /// The backpack reagents come out of, or `None` if the caster wears no pack.

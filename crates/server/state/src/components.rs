@@ -1778,24 +1778,55 @@ pub const fn ghost_body(body: Graphic) -> Graphic {
     }
 }
 
-/// The item graphic of the scroll for a Magery spell, `0-based` — the classic
-/// run `0x1F2D..` (Reactive Armor, Clumsy, …), one per spell.
+/// The first Magery scroll's art. The run is sixty-four long and contiguous.
+const SCROLL_ART_BASE: u16 = 0x1F2D;
+
+/// Where in the scroll art run a spell's scroll is drawn — **not** its spell id.
+///
+/// The run opens with Reactive Armor (`0x1F2D`, spell **6**) and only then goes
+/// Clumsy, Create Food, Feeblemind, Heal, Magic Arrow, Night Sight (`0x1F2E`
+/// through `0x1F33`, spells 0 through 5); Weaken is `0x1F34` at spell 7, and
+/// from Agility (`0x1F35`, spell 8) on, position and spell id are the same
+/// number for the rest of the eight circles.
+///
+/// So the first circle is rotated by one and nothing else is, which is exactly
+/// the shape of thing a `base + spell` formula gets away with for fifty-seven
+/// spells and is silently wrong about for six. It was: a Reactive Armor scroll
+/// dropped on a spellbook taught Clumsy, a Clumsy scroll taught Create Food, and
+/// so on up the circle. Recall (spell 31, `0x1F4C`) sits above the rotation,
+/// which is why the runebook's recharge never noticed.
+///
+/// Every pair is ServUO's own `SpellScroll(spellID, itemID)` constructor.
+const fn scroll_art_position(spell: u16) -> u16 {
+    match spell {
+        6 => 0,
+        0..=5 => spell + 1,
+        _ => spell,
+    }
+}
+
+/// The item graphic of the scroll for a Magery spell, `0`-based.
 #[must_use]
 pub const fn spell_scroll_graphic(spell: SpellId) -> u16 {
-    0x1F2D + spell.0
+    SCROLL_ART_BASE + scroll_art_position(spell.0)
 }
 
 /// The Magery spell a scroll graphic teaches, if it is a Magery scroll.
+///
+/// The inverse of [`scroll_art_position`], written out rather than searched: it
+/// is on the drop path of every scroll and the rotation is seven entries long.
 #[must_use]
 pub const fn scroll_spell(graphic: Graphic) -> Option<SpellId> {
-    // Opened once, so the scroll table below stays terse.
     let graphic = graphic.0;
-    let base = 0x1F2D;
-    if graphic >= base && graphic < base + SPELL_COUNT as u16 {
-        Some(SpellId(graphic - base))
-    } else {
-        None
+    if graphic < SCROLL_ART_BASE || graphic >= SCROLL_ART_BASE + SPELL_COUNT as u16 {
+        return None;
     }
+    let position = graphic - SCROLL_ART_BASE;
+    Some(SpellId(match position {
+        0 => 6,
+        1..=6 => position - 1,
+        _ => position,
+    }))
 }
 
 /// What kind of thing a body is — ServUO's `BodyType`, from `Data/bodyTable.cfg`.
@@ -3591,6 +3622,50 @@ mod tests {
         AddonKind::ElvenSpinningWheelEast,
         AddonKind::ElvenSpinningWheelSouth,
     ];
+
+    #[test]
+    fn the_first_circle_of_scrolls_is_drawn_out_of_spell_order() {
+        // Every pair here is read off a ServUO `SpellScroll(spellID, itemID)`
+        // constructor. The first circle is the whole of the irregularity, and it
+        // is the reason this is a table and not `base + spell`: the arithmetic
+        // agrees with the reference for fifty-seven of the sixty-four spells,
+        // which is exactly enough to look right.
+        for (spell, art) in [
+            (6, 0x1F2D),  // Reactive Armor — the run opens on it
+            (0, 0x1F2E),  // Clumsy
+            (1, 0x1F2F),  // Create Food
+            (2, 0x1F30),  // Feeblemind
+            (3, 0x1F31),  // Heal
+            (4, 0x1F32),  // Magic Arrow
+            (5, 0x1F33),  // Night Sight
+            (7, 0x1F34),  // Weaken, already back in step
+            (8, 0x1F35),  // Agility, and the second circle on is plain
+            (31, 0x1F4C), // Recall, which is why the runebook never noticed
+            (63, 0x1F6C), // Earthquake, the last of the eighth circle
+        ] {
+            let spell = SpellId(spell);
+            assert_eq!(spell_scroll_graphic(spell), art, "spell {} draws wrong", spell.0);
+            assert_eq!(scroll_spell(Graphic(art)), Some(spell), "{art:#06X} reads wrong");
+        }
+    }
+
+    #[test]
+    fn every_scroll_art_is_one_spell_and_the_run_holds_all_of_them() {
+        // A rotation is easy to write down twice and get subtly wrong the second
+        // time, so the two directions are checked against each other rather than
+        // against the same table.
+        let mut seen = vec![false; SPELL_COUNT as usize];
+        for position in 0..u16::from(SPELL_COUNT) {
+            let art = Graphic(0x1F2D + position);
+            let spell = scroll_spell(art).expect("every art in the run is a scroll");
+            assert!(!seen[usize::from(spell.0)], "two arts teach spell {}", spell.0);
+            seen[usize::from(spell.0)] = true;
+            assert_eq!(spell_scroll_graphic(spell), art.0);
+        }
+        assert!(seen.into_iter().all(|found| found), "a spell has no scroll");
+        assert_eq!(scroll_spell(Graphic(0x1F2C)), None, "below the run");
+        assert_eq!(scroll_spell(Graphic(0x1F6D)), None, "above it");
+    }
 
     #[test]
     fn addon_deed_kinds_round_trip_their_addon_kind() {
