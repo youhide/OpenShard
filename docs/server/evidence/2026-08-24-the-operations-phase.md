@@ -1,7 +1,11 @@
 # 8. Operations
 
-> Open work and follow-up findings from this phase are tracked in the
-> [consolidated backlog](../../plans/roadmap/PLAN.md).
+> **This is a record**, the roadmap's phase 8 as it was written on 2026-08-24.
+> What is open about operating a shard is
+> [`plans/server/operations/PLAN.md`](../../../plans/server/operations/PLAN.md)
+> and [`../README.md`](../README.md) § what is open; the pointer this record
+> carried, to the roadmap's consolidated backlog, is where that queue lived
+> before the domain had a README of its own.
 
 - [x] `config` — TOML, validated at load
 
@@ -10,9 +14,9 @@
 A shard stops on one `gateway::Shutdown`, cloned into the accept loop, every
 connection task and the tick; `run_shard` returns only once the last snapshot is
 written. The design and the order of events are in
-[`docs/client/design_net.md`](../client/design_net.md), under "Stopping is one word".
+[`docs/client/design_net.md`](../../client/design_net.md), under "Stopping is one word".
 
-**The manners are a plan of its own: [`docs/shutdown.md`](../shutdown.md), S1–S6,
+**The manners are a plan of its own: [`docs/shutdown.md`](2026-07-31-stopping-a-shard.md), S1–S6,
 all in.** `SIGTERM` asks rather than kills, so a shard under systemd saves; a
 second signal is a force-exit for an operator whose store has wedged; bytes
 already queued reach the wire before the hang-up; the player is told why; a gate

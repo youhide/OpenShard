@@ -1,13 +1,21 @@
 # The connection state machine: one owner per phase
 
+> **This is a record.** It is the living plan that ran from 2026-07-30 to the end
+> of S7, kept as it was written. Its decisions are restated as built in
+> [`../design_connection_state.md`](../design_connection_state.md) — where the
+> two differ, the design is right — and what is still open out of the backlog
+> below is ranked in [`../README.md`](../README.md), which is the only status
+> page for this domain. The "Status" section at the foot of this file was true
+> the day it was written.
+
 Living plan for a multi-session refactor of what a *connection* is. It is the
 sequel to the design already written down in
-[`architecture.md` → "Sessions and the character registry"](architecture.md), and
+[`architecture.md` → "Sessions and the character registry"](../../architecture.md), and
 it does the one thing that design left unresolved: it says **where the
 connection's state lives**, rather than which of its questions each existing
 table answers.
 
-As with [`design_wire_types.md`](protocol/design_wire_types.md): when reality contradicts
+As with [`design_wire_types.md`](../../protocol/design_wire_types.md): when reality contradicts
 a decision here, change this file in the same commit that changes the code.
 
 ## Why
@@ -44,7 +52,7 @@ Five things follow from the split, and each is a reason on its own:
    `players → Client`, so a connection on the character screen is unreachable
    from inside a tick, and unreachable *silently*. This is the structural reason
    the character screen cannot become world commands as
-   [`roadmap/02-gateway-login.md`](roadmap/02-gateway-login.md) plans: the version has to live on the
+   [`roadmap/02-gateway-login.md`](2026-08-24-the-gateway-and-login-phase.md) plans: the version has to live on the
    connection, not on the entity. *(S1 moved it there; S5 is what it was moved
    for, and the row carries the account and access level too.)*
 4. **The login crate already made this argument about itself.**
@@ -133,7 +141,7 @@ phase must exist rather than the gate simply being moved later.
 in.** Ordering, not preference: until the world owns the saved records it cannot
 answer `0x5D`, and until the connection record exists it cannot answer anybody
 who has no entity. See ["The roster belongs in the
-world"](roadmap/02-gateway-login.md).
+world"](2026-08-24-the-gateway-and-login-phase.md).
 
 **D6. This does not reopen the decision in `architecture.md`.** That decision —
 create, select and delete stay out of `openshard-login` — was about not dragging
@@ -186,7 +194,7 @@ follows.
       session nor the world, so an arm cannot reach past the packet it was
       handed, and `None` is a packet the world has nothing to do about. The
       phase is matched once, in `handle_world_packet`, which queues what comes
-      back — the rule [`roadmap/02-gateway-login.md`](roadmap/02-gateway-login.md)
+      back — the rule [`roadmap/02-gateway-login.md`](2026-08-24-the-gateway-and-login-phase.md)
       asks for on the character screen, applied
       to the whole dispatcher.
       `0x5D` moved out of the dispatcher and was routed *before* the gate: it is
@@ -372,7 +380,7 @@ will read it.
   it queues into the world, which the compiler splits across fields and refuses
   across a `&mut self`.
 - **Closing a refused connection relies on a chain nothing states.** *(Planned:
-  [`unenforced.md`](unenforced.md) S3.)*
+  [`unenforced.md`](2026-07-31-invariants-nothing-enforces.md) S3.)*
   `Sessions::close` drops the session, which drops the outbox, which ends the
   gateway's write task, which closes the socket, which makes the gateway emit
   `Disconnected`, which queues `Command::Disconnect` so the world lets go of
@@ -440,7 +448,7 @@ will read it.
   follow a link to something they cannot use — and it keeps
   `rustdoc::private_intra_doc_links` quiet.
 - ~~**`restore_characters` must run before `restore_items`, and only a doc says
-  so.**~~ Fixed by [`unenforced.md`](unenforced.md) S1. `restore_characters`
+  so.**~~ Fixed by [`unenforced.md`](2026-07-31-invariants-nothing-enforces.md) S1. `restore_characters`
   returns a `RestoredCharacters` — the set of serials it reserved, with a private
   field — and `restore_items` takes one, so the order is the signature and the
   pair cannot be swapped without a type error. The set is read rather than
@@ -617,7 +625,7 @@ acting on it would cost, and entries are struck through in the commit that fixes
 them rather than deleted, so the reasoning that was wrong stays readable beside
 the reasoning that replaced it.
 
-[`roadmap/02-gateway-login.md`](roadmap/02-gateway-login.md), under "A
+[`roadmap/02-gateway-login.md`](2026-08-24-the-gateway-and-login-phase.md), under "A
 connection's state is kept in two tables that must agree", is where this plan was
 argued for. Its five findings are all
 closed and it points back here for what is open — do not treat the two as two

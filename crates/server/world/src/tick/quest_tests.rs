@@ -857,7 +857,8 @@ fn a_quest_log_survives_a_restart_with_its_progress_and_cooldowns() {
     let mut shard = super::tests::world();
     shard.state.quests.set(vec![rat_cull()]);
     // The boot path: the row goes into the world's roster, and the entry names
-    // the character rather than carrying it. See `docs/connection_state.md`, S4.
+    // the character rather than carrying it. See S4 in
+    // `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
     shard.restore_characters(vec![record]);
     shard.queue(Command::Enter(Entering {
         connection: connection_two(),

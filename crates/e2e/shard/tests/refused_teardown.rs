@@ -5,7 +5,8 @@
 //! Nothing anywhere states this; every link is documented where it lives and no
 //! file says they are one thing. That is what this test is: the artefact that
 //! knows all six, so the prose belongs here rather than in a seventh file that
-//! could go stale on its own. See S3 in `docs/unenforced.md`.
+//! could go stale on its own. See S3 in
+//! `docs/server/evidence/2026-07-31-invariants-nothing-enforces.md`.
 //!
 //! 1. The world refuses an entry and says so — `PlayerRefused`, emitted by
 //!    `World::enter` for every failure path of `try_enter`.
@@ -25,7 +26,7 @@
 //!    the world from outside the tick.
 //!
 //! Break link 3, 4 or 5 and the world still holds a character for a connection
-//! that no longer exists — the leak the whole of `docs/connection_state.md` was
+//! that no longer exists — the leak `docs/server/design_connection_state.md` was
 //! written against, and the one this cannot become a type for: the links are a
 //! socket, a task and a channel, and what joins them is `Drop`.
 //!
@@ -38,7 +39,8 @@
 //! whose answer is the world's own: is the refused character still there. It
 //! sees the arrival (`0x78`) and then the departure (`0x1D`), and the first of
 //! those is not decoration — a "it is gone" assertion about something that was
-//! never there is green for the wrong reason. `connection_state.md` S7 learned
+//! never there is green for the wrong reason. S7 of
+//! `docs/server/evidence/2026-07-30-the-connection-state-machine.md` learned
 //! that one the expensive way.
 //!
 //! The witness is a *second account* playing a *second character*, which is why
@@ -83,7 +85,7 @@ use tokio::net::TcpStream;
 /// every wait below polls a socket and stops the moment its answer arrives, so
 /// this number is only ever paid by a failure. A `sleep` long enough to work
 /// here would be a test that passes on this machine — see D3 in
-/// `docs/unenforced.md`.
+/// `docs/server/evidence/2026-07-31-invariants-nothing-enforces.md`.
 const WAIT: Duration = Duration::from_secs(20);
 
 /// Read `socket`, folding everything it says into `view`, until `done` holds.

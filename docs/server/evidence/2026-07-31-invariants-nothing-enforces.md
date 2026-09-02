@@ -1,8 +1,19 @@
 # Invariants nothing enforces
 
+> **This is a record.** All six stages are done and this is the plan as it was
+> written, kept for the argument in it: a rule in prose is invisible to whoever
+> never opens the file, stays green when the code stops obeying it, and cannot be
+> found by the search that would prove it was broken. D1's ladder — a type beats
+> a build-time check beats a test — is restated in
+> [`../README.md`](../README.md) § what is enforced, and the boot restore order
+> the stages turned into signatures is in
+> [`../design_persistence.md`](../design_persistence.md). The "Deliberately not
+> in this plan" section names three debts; the first of them has since doubled,
+> and the current numbers are in the domain README.
+
 Living plan for the backlog that three finished sweeps left behind. Unlike
-[the wire-type sweep](protocol/design_wire_types.md) and
-[`connection_state.md`](connection_state.md), which each took one subject
+[the wire-type sweep](../../protocol/design_wire_types.md) and
+[`connection_state.md`](2026-07-30-the-connection-state-machine.md), which each took one subject
 through one crate, this one is a shape found in four places at once — a fifth
 came out of the first while it was being done — so the stages share a reason
 rather than a module.
@@ -50,7 +61,7 @@ below can be moved a whole step, it is moved a whole step. Where it cannot, the
 stage says why rather than settling quietly.
 
 **D2. `Option`, never a zero.** Already settled in
-[`style.md`](style.md) and applied twice in the cliloc work (`CraftGumpContext::
+[`style.md`](../../style.md) and applied twice in the cliloc work (`CraftGumpContext::
 notice`); S2 finishes it. A cliloc `0` is a number the client would look up, so
 "absent" and "message zero" are the same bits and only a comparison somewhere
 tells them apart.

@@ -153,7 +153,7 @@ them too, so it is `openshard_protocol::mounts` and there is no
   express "these four bodies share a sound but not a name".
 
 - ~~**The recipe invariants are tested, not enforced.**~~ **Done**
-  ([`unenforced.md`](../../unenforced.md) S2). The headers joined the data as
+  ([`unenforced.md`](../../server/evidence/2026-07-31-invariants-nothing-enforces.md) S2). The headers joined the data as
   `crafting/data/craft_systems.json`, so `build.rs` has both halves and checks
   them: a recipe whose group index is out of range, or that does not lead with
   its system's main skill, is now a build failure naming the row. The two
@@ -178,7 +178,7 @@ them too, so it is `openshard_protocol::mounts` and there is no
   mechanics in `architecture.md` are written for exactly this;
   `state/src/runtime.rs` is 2,169 and `state/src/components.rs` 2,108, and
   either is the easier warm-up. Deliberately left out of
-  [`unenforced.md`](../../unenforced.md) — see that file's last section for why a
+  [`unenforced.md`](../../server/evidence/2026-07-31-invariants-nothing-enforces.md) — see that file's last section for why a
   13,000-line mechanical move wants a session that owns the tree outright.
 
 ## ~~A double door is two leaves, and nothing links them~~ — linked

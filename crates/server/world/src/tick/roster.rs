@@ -12,8 +12,8 @@ use super::*;
 /// the list, is offered by `0xA9`, can be picked and can be deleted, and there is
 /// nothing anywhere describing it. That state used to be spelled "absent from the
 /// roster", which is the same shape of lie `Option<PlayedCharacter>` told about
-/// presence — see `docs/connection_state.md` — and it cost a brand-new character
-/// being deleted out from under the connection playing it.
+/// presence — `docs/server/design_connection_state.md` D3 — and it cost a
+/// brand-new character being deleted out from under the connection playing it.
 ///
 /// `None` is *absent*, not unknown: nothing has been recorded, and the character
 /// enters fresh. See [`World::enter`](crate::World::enter), which reads exactly
@@ -38,10 +38,11 @@ struct Enrolled {
 ///
 /// # Why it is the world's and not the shard binary's
 ///
-/// It was the binary's until S4 of `docs/connection_state.md`. The world was the
-/// only thing that could *fill* it — a logout is a tick — so the world drained a
-/// `departed` vector into a table it could not read, and the one caller that
-/// needed to read it, entering a character, had to be handed the row on its
+/// It was the binary's until S4 of
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md`. The world
+/// was the only thing that could *fill* it — a logout is a tick — so the world
+/// drained a `departed` vector into a table it could not read, and the one caller
+/// that needed to read it, entering a character, had to be handed the row on its
 /// command. That put the same fact in two places with a channel between them:
 /// the roster could be stale for exactly as long as the shard loop took to drain,
 /// and nothing said so. Now the writer and the reader are the same value.

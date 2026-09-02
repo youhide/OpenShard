@@ -407,7 +407,7 @@ the ones that kept wanting to reach into the world.
 ### Two owners, and the boundary between them
 
 *This section said three, and named the binary as the owner of two of them, until
-[`connection_state.md`](connection_state.md) S4 and S5 moved them into the world.
+[`connection_state.md`](server/evidence/2026-07-30-the-connection-state-machine.md) S4 and S5 moved them into the world.
 What is below is where they are.*
 
 - **Credentials live in `openshard-login`**: a password, a ban, an access level —
@@ -568,7 +568,7 @@ hook is synchronous — a tick never awaits.
 The benchmark is the point: a hook call costs on the order of a couple of hundred
 nanoseconds, so ten thousand mobiles each firing a hook per tick spend a
 single-digit-millisecond slice of the 25ms budget. It fits. Numbers and method
-are in [`roadmap/05-scripting.md`](roadmap/05-scripting.md).
+are in [`roadmap/05-scripting.md`](server/evidence/2026-08-24-the-scripting-spike.md).
 
 `ScriptEngine::load` doubles as hot reload — re-evaluating rebinds the hooks in
 the live isolate — and `DenoEngine::reload_if_changed` polls a watched file's

@@ -685,7 +685,8 @@ pub struct WorldView {
     ///
     /// It is history, not state — which is why nothing removes from it except
     /// the cap. The first thing it holds, and the reason it exists at all, is
-    /// the shard saying it is going away (`docs/shutdown.md` S3): a client that
+    /// the shard saying it is going away — S3 in
+    /// `docs/server/evidence/2026-07-31-stopping-a-shard.md`. A client that
     /// could decode that line and then dropped it was told and did not listen.
     pub journal:             VecDeque<Heard>,
     /// The dialogs the server has opened here and this client has not answered,
@@ -2367,8 +2368,9 @@ mod tests {
     fn a_restart_replaces_the_world_and_unsays_nothing() {
         // A `0x1B` says everything on screen is stale, and it says nothing
         // about what the client was told: the journal is history, not state.
-        // The case this is for is the announcement of `docs/shutdown.md` S3
-        // followed by one more entry packet.
+        // The case this is for is the shutdown announcement of
+        // `docs/server/evidence/2026-07-31-stopping-a-shard.md` S3, followed by
+        // one more entry packet.
         let mut view = WorldView::entered(start());
         view.apply(&ServerPacket::MobileIncoming(MobileIncoming {
             serial:    other(),

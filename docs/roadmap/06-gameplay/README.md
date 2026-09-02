@@ -17,7 +17,7 @@ What replaced it is data, not a runtime: `crates/*/data/*.json` compiled by a
 `build.rs` and laid by `server::content`, plus the two item behaviours that were
 scripts as `world::tick::shipped_items`. Each dataset moved under a test that
 compared its `Command`s against the pack's. The record of the spike and its
-benchmark is [`05-scripting.md`](../05-scripting.md); the decision is
+benchmark is [`05-scripting.md`](../../server/evidence/2026-08-24-the-scripting-spike.md); the decision is
 [`architecture.md`](../../architecture.md) § Scripting.
 
 ## Contents

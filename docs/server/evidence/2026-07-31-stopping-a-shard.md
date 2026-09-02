@@ -1,5 +1,13 @@
 # Stopping a shard: one word, heard everywhere — and what it owes the player
 
+> **This is a record.** It is the living plan that ran from 2026-07-31 through
+> S6, kept as it was written. Its decisions are restated as built in
+> [`../design_shutdown.md`](../design_shutdown.md) — where the two differ, the
+> design is right — S7 is
+> [`plans/server/operations/PLAN.md`](../../../plans/server/operations/PLAN.md),
+> and what is still open out of the backlog below is ranked in
+> [`../README.md`](../README.md), which is the only status page for this domain.
+
 Living plan. The stop itself landed: a `gateway::Shutdown` is cloned into the
 accept loop, every connection task and the tick, and `run_shard` returns only
 once the world is on disk. What was written down here is the four ways that stop
@@ -7,7 +15,7 @@ was still not what it claimed to be, and the order to fix them in. S1 through S6
 are done; S7 — an operator's stop from inside the world — is what is left, and
 the backlog at the bottom is where the next session in this area starts.
 
-As with [`connection_state.md`](connection_state.md): when reality contradicts a
+As with [`connection_state.md`](2026-07-30-the-connection-state-machine.md): when reality contradicts a
 decision here, change this file in the same commit that changes the code.
 
 ## Why
@@ -276,7 +284,7 @@ on. The rest are independent.
   and a `0x1B` restart replaces everything *except* the journal, because a
   restart says what is on screen is stale and unsays nothing that was said.
   That last one is `a_restart_replaces_the_world_and_unsays_nothing`, checked to
-  fail. **Drawing it is still M4** in [`client/design_windows.md`](client/design_windows.md) — this is the
+  fail. **Drawing it is still M4** in [`client/design_windows.md`](../../client/design_windows.md) — this is the
   record, not the window.
 - **`Shard::announce_shutdown` is the only caller of `World::announce`.** A GM
   broadcast is the obvious second, and S7's countdown is the third; until one of
@@ -337,7 +345,7 @@ on. The rest are independent.
   two `ALICE`/`BOB` because reading them as numbers did not work. The shape is
   that pair, shared: a test that wants a second player asks for one by name.
 - **Nothing tests that the playground boots** — carried over from
-  [`client/README.md`](client/README.md), and now with one more thing to get wrong, since the
+  [`client/README.md`](../../client/README.md), and now with one more thing to get wrong, since the
   playground stops its shard after the window closes.
 - ~~**`run_shard` takes six arguments, and the sixth is one every test passes
   blind.**~~ Done, in the shape the entry sketched: `Reins` in `shard.rs` beside
@@ -381,7 +389,7 @@ hears it. The oldest thing in it is now the unbounded `save_loop`: D2's force-ex
 finally names what it costs — the writes and the rows the save task had not
 finished — but a store that never answers is still a shard that cannot be
 stopped politely. The commit that created this plan is the one that landed the stop
-itself; [`docs/client/design_net.md`](client/design_net.md) → "Stopping is one word, and everything
+itself; [`docs/client/design_net.md`](../../client/design_net.md) → "Stopping is one word, and everything
 hears it" is the design it is built on, and
-[`roadmap/08-operations.md`](roadmap/08-operations.md) points here rather than
+[`roadmap/08-operations.md`](2026-08-24-the-operations-phase.md) points here rather than
 repeating the list.

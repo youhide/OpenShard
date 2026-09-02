@@ -11,7 +11,8 @@
 //! recipe's skill lines but not which skill its system rolled. Both invariants
 //! then lived in assertions in this file, green until somebody ran the tests
 //! against a row that was already committed. They are checked in `build.rs` now,
-//! and a bad row is a build failure naming it — see `docs/unenforced.md` S2.
+//! and a bad row is a build failure naming it — see S2 in
+//! `docs/server/evidence/2026-07-31-invariants-nothing-enforces.md`.
 //!
 //! [`data/craft_systems.json`]: ../../data/craft_systems.json
 

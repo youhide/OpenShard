@@ -54,8 +54,9 @@ pub(crate) fn lord_british() -> CharacterName {
 
 /// A login server holding [`admin`]. Its characters are not here — which
 /// characters an account has is the world's roster since S5 of
-/// `docs/connection_state.md`, and an account store that still answered would be
-/// the second list this whole plan deletes.
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md`, and an
+/// account store that still answered would be the second list that whole sweep
+/// deletes.
 pub(crate) fn login_server() -> LoginServer {
     LoginServer::new(
         DevAccounts::new().with_account(&admin(), &PlaintextPassword::new("hunter2")),

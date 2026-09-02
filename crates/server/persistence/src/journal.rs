@@ -4,7 +4,7 @@
 //!
 //! The database is never touched inside a tick. Not "rarely" — never. A tick
 //! that waits on a disk is a tick that took however long the disk took, and at
-//! 20Hz there is 50ms of budget for the entire world.
+//! `TICKS_PER_SECOND` — 40Hz — there is 25ms of budget for the entire world.
 //!
 //! But the *data* can only be read honestly from inside a tick, because that is
 //! the only moment nothing is half-applied. So the two halves are split:

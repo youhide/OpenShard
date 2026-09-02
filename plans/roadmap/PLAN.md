@@ -21,19 +21,23 @@ so migrating a domain is also what empties its section below.
 | The client | ranked, [`docs/client/README.md`](../../docs/client/README.md) § what is open |
 | Rendering and lighting | [`docs/render/README.md`](../../docs/render/README.md), with [`plans/render/`](../render/lighting/PLAN.md) for what is not built |
 | The protocol | ranked, [`docs/protocol/README.md`](../../docs/protocol/README.md) § what is open |
-| Server · items · combat · housing · npc | the sections below, until each is migrated |
+| The server | ranked, [`docs/server/README.md`](../../docs/server/README.md) § what is open, with [`plans/server/operations/PLAN.md`](../server/operations/PLAN.md) for what is not built |
+| Items · combat · housing · npc | the sections below, until each is migrated |
 
 ## Next
 
-**Migrate the remaining domains.** Five areas still have their documents flat in
-`docs/` and their phase records under `docs/roadmap/`: `server`, `items`,
-`combat`, `housing`, `npc`. Each is one batch — decisions into `design_*`, phase
-records and "amendments forced by" into `evidence/`, what is open into a domain
-README — and none of them blocks another. The batch that claims a domain also
-takes its phase file out of `docs/roadmap/` and its section out of this page.
+**Migrate the remaining domains.** Four areas still have their documents flat in
+`docs/` and their phase records under `docs/roadmap/`: `items`, `combat`,
+`housing`, `npc`. Each is one batch — decisions into `design_*`, phase records
+and "amendments forced by" into `evidence/`, what is open into a domain README —
+and none of them blocks another. The batch that claims a domain also takes its
+phase file out of `docs/roadmap/` and its section out of this page.
 
-The order to take them in is cheapest-first: `server`, then `items`, `combat`,
-`housing`, `npc`.
+The order to take them in is cheapest-first: `items`, then `combat`, `housing`,
+`npc`. All four are served by one file, [`docs/roadmap/06-gameplay/`](../../docs/roadmap/06-gameplay/README.md),
+so the first of them has to decide what happens to the parts of it that belong to
+the other three — the `server` batch hit the same shape and left the shared file
+where it was until its own rows had somewhere to go.
 
 ## Gameplay
 
@@ -57,18 +61,11 @@ The order to take them in is cheapest-first: `server`, then `items`, `combat`,
 
 ## Operations
 
-- [ ] Add metrics, tracing, Prometheus, and health endpoints.
-- [ ] Add plugin lifecycle and enable/disable support.
-- [ ] Add the REST/JWT administration API.
-- [ ] Build the dashboard, launcher, and map editor — the editor has a plan of
-      its own, [`plans/world/map_editor/PLAN.md`](../world/map_editor/PLAN.md).
-- [ ] Add the in-world operator shutdown command,
-      [`shutdown.md`](../../docs/shutdown.md)'s S7.
-- [ ] Add licence policy enforcement and third-party notices to releases —
-      [`backlog/operations.md`](../../docs/roadmap/backlog/operations.md). Its
-      audit names `cooked-waker` as arriving through `deno_core`, which was
-      deleted with the scripting spike; the audit wants re-running before the
-      gate is written.
+Moved out with the `server` migration: metrics and tracing, the plugin
+lifecycle, the administration API, the operator's stop and the licence gate are
+[`plans/server/operations/PLAN.md`](../server/operations/PLAN.md), in the domain
+whose crates they are. The map editor keeps its own plan,
+[`plans/world/map_editor/PLAN.md`](../world/map_editor/PLAN.md).
 
 ## Later
 

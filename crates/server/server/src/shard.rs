@@ -12,10 +12,10 @@ use super::*;
 ///
 /// # Why anything counts this
 ///
-/// D2 of `docs/shutdown.md`: the second stop signal is a force-exit, and it owes
-/// the operator a line naming what their impatience cost. Without this the line
-/// can only say that the save did not finish, which is the one thing they
-/// already know — they are the ones who did not wait.
+/// D2 of `docs/server/design_shutdown.md`: the second stop signal is a
+/// force-exit, and it owes the operator a line naming what their impatience
+/// cost. Without this the line can only say that the save did not finish, which
+/// is the one thing they already know — they are the ones who did not wait.
 ///
 /// # It is a number for a log line, and nothing branches on it
 ///
@@ -89,9 +89,9 @@ impl Unwritten {
 /// They are already handed to the same two places. [`run_shard`] watches the
 /// word and counts into the tally; `stop::watch` says the word on the first
 /// signal and reads the tally on the second. Neither may live *inside* the
-/// shard, and for one reason: the force-exit of `docs/shutdown.md` D2 has to
-/// work at the moment `run_shard` is not going to return, so what reads the
-/// tally cannot be owned by the thing that is stuck.
+/// shard, and for one reason: the force-exit of `docs/server/design_shutdown.md`
+/// D2 has to work at the moment `run_shard` is not going to return, so what
+/// reads the tally cannot be owned by the thing that is stuck.
 ///
 /// A caller with no way to force-exit — every test — builds one with
 /// [`Reins::new`] or [`Reins::over`] and never looks at it. That is the point of
@@ -373,8 +373,8 @@ const KEY_SWEEP: Duration = openshard_login::auth::DEFAULT_TTL;
 ///
 /// A constant and not a setting, deliberately: a message nobody can vary is a
 /// string, not a configuration. It becomes config on the day there is an operator
-/// command to schedule a stop and therefore something to vary it *with* — S7 of
-/// `docs/shutdown.md`.
+/// command to schedule a stop and therefore something to vary it *with* —
+/// `plans/server/operations/PLAN.md`.
 ///
 /// It says the world is being saved because that is the part a player cares
 /// about: the difference between this and a crash is whether the last half hour
@@ -399,9 +399,9 @@ pub const PERIODIC_SAVE_COMPLETE_NOTICE: &str = "The world save is complete.";
 /// Everything the shard loop owns between ticks.
 ///
 /// One value rather than eight locals threaded through every helper. Each step of
-/// `docs/connection_state.md` added one — the tick was up to seven parameters and
-/// took another per step — and a signature stops being readable long before it
-/// stops compiling.
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md` added one —
+/// the tick was up to seven parameters and took another per step — and a
+/// signature stops being readable long before it stops compiling.
 ///
 /// It is the loop's *state*, not a place for the loop's rules: the packet handlers
 /// below still take the pieces they need one at a time. That is not an oversight.
@@ -412,7 +412,7 @@ struct Shard {
     sessions: Sessions,
     /// Keeps the sessions' phases in step with what the world did — the world is
     /// the authority on every transition past `Entering`. See D4 in
-    /// `docs/connection_state.md`.
+    /// `docs/server/design_connection_state.md`.
     phases: PhaseSync,
     /// Credentials, keys and the relay. Everything after the `0x91` is the
     /// world's.
@@ -511,12 +511,12 @@ impl Shard {
     /// Tell every player the shard is going, and get the line onto the wire.
     ///
     /// Two statements that must not be separated, so they are one call. See D6 in
-    /// `docs/shutdown.md`: `announce` queues and `flush_outbound` sends, and a
-    /// stop that does the first without the second is a stop that says nothing —
-    /// silently, and in the one situation nobody re-runs by hand.
+    /// `docs/server/design_shutdown.md`: `announce` queues and `flush_outbound`
+    /// sends, and a stop that does the first without the second is a stop that
+    /// says nothing — silently, and in the one situation nobody re-runs by hand.
     ///
     /// Not a tick. The world is not advanced here: it has stopped, and what is
-    /// wanted is one packet per player, not another 50 ms of simulation on the
+    /// wanted is one packet per player, not another tick of simulation on the
     /// way out.
     fn announce_shutdown(&mut self) {
         self.world.announce(SHUTDOWN_NOTICE);
@@ -526,9 +526,9 @@ impl Shard {
     /// Hand everything the world has queued to the sessions it is addressed to.
     ///
     /// Its own method because the shutdown path needs it too, and needs it to be
-    /// the *same* one: the goodbye of `docs/shutdown.md` D6 is queued by the
-    /// world like any other packet, and a second copy of this loop written beside
-    /// the teardown would be a second thing to keep correct.
+    /// the *same* one: the goodbye of `docs/server/design_shutdown.md` D6 is
+    /// queued by the world like any other packet, and a second copy of this loop
+    /// written beside the teardown would be a second thing to keep correct.
     ///
     /// A packet for a connection with no session is dropped, not an error: the
     /// world may have addressed a client that was closed between the tick and
@@ -903,11 +903,12 @@ pub(crate) fn relay_is_unreachable(client: SocketAddr, advertised: SocketAddrV4)
 /// # The screen is not this crate's any more
 ///
 /// Creating and deleting a character are world commands since S5 of
-/// `docs/connection_state.md` — the world owns which characters exist, which of
-/// them is being played, and where each one was — so both arms here are a
-/// translation and nothing else, exactly like `dispatch_world_packet`. Neither
-/// touches `login`, and neither answers the client: the reply comes out of the
-/// tick that applies the command, which is what keeps the two ends in one order.
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md` — the world
+/// owns which characters exist, which of them is being played, and where each one
+/// was — so both arms here are a translation and nothing else, exactly like
+/// `dispatch_world_packet`. Neither touches `login`, and neither answers the
+/// client: the reply comes out of the tick that applies the command, which is
+/// what keeps the two ends in one order.
 ///
 /// What is left of the login conversation is what is genuinely not simulation:
 /// credentials, argon2, the auth key and the relay. It ends at
@@ -995,8 +996,9 @@ fn handle_login_packet(
 /// # The one gate
 ///
 /// This `if` is the whole of what thirty arms of `dispatch_world_packet` used to
-/// repeat — see that function's doc, and `docs/connection_state.md` S3. It is
-/// here rather than there because this is the last place that still holds the
+/// repeat — see that function's doc, and S3 in
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md`. It is here
+/// rather than there because this is the last place that still holds the
 /// session: past it, a packet is only a packet.
 ///
 /// Every packet reaching this function is a world packet and nothing else. The

@@ -173,4 +173,4 @@ and on logout, through the same journal the tick already feeds.
   1.82 MSRV of the time — so the lock held it at 0.7.12. The scripting spike (§5)
   raised the MSRV to 1.88, which cleared the constraint, and the pin was dropped;
   the crate floats on `"0.7"` again. See the `Cargo.lock` note in
-  [`development.md`](../development.md).
+  [`development.md`](../../development.md).

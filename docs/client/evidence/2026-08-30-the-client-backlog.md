@@ -221,7 +221,7 @@ own understanding had written.
   entry asked for exists too, as the answer to an atlas that has filled up
   rather than as the answer to a miss.
 - **`WorldMap` cannot be built in memory, so the renderer has no offline
-  tests.** *(Planned: [`unenforced.md`](../../unenforced.md) S4.)*
+  tests.** *(Planned: [`unenforced.md`](../../server/evidence/2026-07-31-invariants-nothing-enforces.md) S4.)*
   Every assertion about `ground::collect` lives in `tests/frame.rs` behind
   `OPENSHARD_CLIENT` and a GPU, because the only way to get a `WorldMap` is to
   load one from a file. A constructor taking cells — or a small fixture facet —

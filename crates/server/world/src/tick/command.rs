@@ -276,7 +276,8 @@ impl StoredCharacter {
 ///
 /// It used to carry the row — the shard read its own roster, unpacked it with
 /// `StoredCharacter::from_record` and sent the result along. Since S4 of
-/// `docs/connection_state.md` the roster is the world's, so the row is already
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md` the roster
+/// is the world's, so the row is already
 /// on the far side of this command and sending it would be sending the world
 /// something it holds. `Saved` is therefore a *question*, not an answer: play
 /// whatever is on file for this account and name. That the answer may be
@@ -376,7 +377,7 @@ pub enum Command {
     /// The hand-off, and the first the world hears of a connection: the login
     /// conversation before this point is not the world's business — accounts,
     /// passwords and the relay key are not simulation — and everything after it
-    /// is. See `docs/connection_state.md`.
+    /// is. See `docs/server/design_connection_state.md`, D1 and D2.
     ///
     /// Since S5 this is also what *answers* the login: applying it writes the
     /// connection's row and sends the `0xA9` character list (with the `0xB9`

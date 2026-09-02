@@ -70,10 +70,12 @@ pub enum Response {
 ///
 /// Two things and not one, because a login has a slow half. Everything a store
 /// knows is decided while the packet is in hand; comparing the password is
-/// argon2 — 19 MiB and two passes, most of a 50 ms tick — and the shard's loop
-/// is the one thread its whole simulation runs on. So the check comes back as
-/// work rather than being done here, and the verdict returns through
-/// [`LoginServer::resume`]. See [`Credential`](crate::Credential) and `docs/connection_state.md` S6.
+/// argon2 — 19 MiB and two passes, longer than a whole 25 ms tick — and the
+/// shard's loop is the one thread its whole simulation runs on. So the check
+/// comes back as work rather than being done here, and the verdict returns
+/// through [`LoginServer::resume`]. See [`Credential`](crate::Credential),
+/// `docs/server/design_connection_state.md` D1, and S6 of
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
 ///
 /// A caller with nothing to stall can run it on the spot: `check.run()` and
 /// straight into `resume` is two lines, and that is what the tests do.
@@ -583,10 +585,11 @@ impl LoginServer {
         // The password is the caller's to check, off the loop — see `Outcome`.
         // What follows a matching one is in `resume`, and this crate is done at
         // that point: the `0xA9` character list that used to go back from here is
-        // the world's since S5 of `docs/connection_state.md`, because which
-        // characters exist is the roster's and a character being *played* is a
-        // fact only the world holds. Answering from here meant a second list that
-        // had to agree with the world's and could not see it.
+        // the world's since S5 of
+        // `docs/server/evidence/2026-07-30-the-connection-state-machine.md`,
+        // because which characters exist is the roster's and a character being
+        // *played* is a fact only the world holds. Answering from here meant a
+        // second list that had to agree with the world's and could not see it.
         let (account, check) = credential.against(login.password);
         (
             Outcome::Verify(check),
@@ -749,8 +752,10 @@ mod tests {
 
         // Game connection: a new session, as a real client would reconnect.
         // Nothing goes back from here — the character list is the world's since
-        // S5 of `docs/connection_state.md`, and the caller queues
-        // `Command::Authenticated` off exactly the transition asserted below.
+        // S5 of
+        // `docs/server/evidence/2026-07-30-the-connection-state-machine.md`, and
+        // the caller queues `Command::Authenticated` off exactly the transition
+        // asserted below.
         let mut session = modern_session();
         let game_login = GameServerLogin {
             auth_key: key,

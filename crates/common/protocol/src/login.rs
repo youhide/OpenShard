@@ -1132,8 +1132,10 @@ pub enum LoginStagePacket {
     /// [`Self::DeleteCharacter`], and it is here for the reason the seam is drawn
     /// where it is: everything before a character is in the world belongs to the
     /// screen, whoever ends up acting on it. It was a [`ClientPacket`] until the
-    /// backlog of `docs/connection_state.md` caught up with it, which left the
-    /// world's dispatcher with one arm it could never legitimately reach and an
+    /// backlog of
+    /// `docs/server/evidence/2026-07-30-the-connection-state-machine.md` caught
+    /// up with it, which left the world's dispatcher with one arm it could never
+    /// legitimately reach and an
     /// `unreachable!` standing in for the invariant. On this side of the split
     /// that arm cannot be written.
     ///

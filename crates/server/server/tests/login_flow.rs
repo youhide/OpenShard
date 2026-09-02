@@ -64,7 +64,8 @@ use tokio::net::TcpStream;
 /// Stand up a shard on an ephemeral port. Mirrors `main.rs`.
 ///
 /// It drives a real [`World`] beside the login server, and that is not padding:
-/// the character list is the world's since S5 of `docs/connection_state.md`, so
+/// the character list is the world's since S5 of
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md`, so
 /// a fake shard that only ran the login conversation would stop one packet short
 /// of what a client actually needs — which is precisely the seam this file
 /// exists to test.

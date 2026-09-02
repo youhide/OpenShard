@@ -133,7 +133,9 @@ pub(crate) struct Restored {
 /// roster now takes off the record rather than off whichever call ran first, so
 /// that is order-independent too. `seed_configured_characters` sits here because
 /// a stored character should hold the lower slot, and nothing worse than a slot
-/// order rides on it. `unenforced.md` S6 has the argument.
+/// order rides on it. S6 of
+/// `docs/server/evidence/2026-07-31-invariants-nothing-enforces.md` has the
+/// argument, and `docs/server/design_persistence.md` states the order as built.
 ///
 /// Nothing here is fatal. A store that cannot be read is logged at each step and
 /// the shard comes up with whatever it did get: a shard that refuses to start
@@ -217,8 +219,8 @@ async fn load_accounts(store: &Store, config: &Config) -> DevAccounts {
 /// Bring the world's characters back from the database.
 ///
 /// All of it goes to the world and none of it to the accounts: a stored row says
-/// both that the character exists and where it was, and since S5 of
-/// `docs/connection_state.md` the roster is what holds each. The accounts keep
+/// both that the character exists and where it was, and the roster is what holds
+/// each — `docs/server/design_connection_state.md` D5. The accounts keep
 /// credentials and authority — what a login is about — and nothing that a
 /// character screen would read.
 /// A store that cannot be read is not a reason to skip the items: the restore

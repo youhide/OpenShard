@@ -234,7 +234,7 @@ assumption about our own game:
   `step_allowed` so the coarse guide cannot turn into an illegal walk.
 - A bench (`crates/common/movement/benches/` or an `examples/` binary, following the project's
   existing "measured, not asserted" convention — see the scripting-hook numbers in
-  [`roadmap/05-scripting.md`](../../roadmap/05-scripting.md) and the LOD ones in
+  [`roadmap/05-scripting.md`](../../server/evidence/2026-08-24-the-scripting-spike.md) and the LOD ones in
   [`client/design_lod.md`](../../client/design_lod.md)) comparing `find_long_path` against a plain `find_path` with a raised budget on a large
   synthetic map, to justify `chunk_size` with a number rather than a guess.
 - `cargo test -p openshard-state` / `-p openshard-client-app` for the two wiring points.

@@ -19,7 +19,7 @@ use super::*;
 /// synchronous question — only `queue(Command)` in and events out. So this is a
 /// projection of the world's fact and never a second copy of it: nothing but a
 /// world event moves it past [`Entering`](Self::Entering). See
-/// `docs/connection_state.md`, D4.
+/// `docs/server/design_connection_state.md`, D4.
 ///
 /// # It names no character
 ///

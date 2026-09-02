@@ -188,9 +188,10 @@ beside the address — stop it, or drop it, and the shard stops and its thread i
 joined. Fifty worlds started and dropped is now fifty threads that end, which is
 what a fuzzing run needs and what the old arrangement could not do at all.
 
-What this does *not* yet do — `SIGTERM`, the bytes still in the outbox, and
-telling the player why the world went away — is [`shutdown.md`](../shutdown.md), a
-plan of its own.
+What this section once said was still owed — `SIGTERM`, the bytes still in the
+outbox, and telling the player why the world went away — has landed on the
+server's side of the word:
+[`server/design_shutdown.md`](../server/design_shutdown.md).
 
 Two smaller decisions. The shard is given the same install the window reads
 (`world.client_files`), because the client predicts each step's `z` from its own

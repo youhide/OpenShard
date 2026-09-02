@@ -30,11 +30,13 @@ use crate::password;
 /// 19 MiB of memory and two passes, tens of milliseconds, deliberately, because
 /// that is what makes a stolen credential file expensive to crack.
 ///
-/// Tens of milliseconds is most of a 50 ms tick. Run on the shard's loop, one
-/// login stalls the simulation for every player on the shard; a handful at once
-/// stalls it visibly. So the cheap half stays where the accounts are and the
-/// expensive half becomes a value the caller can carry to a thread of its own —
-/// see [`CredentialCheck`], and `docs/connection_state.md` S6.
+/// Tens of milliseconds is more than a whole 25 ms tick. Run on the shard's
+/// loop, one login stalls the simulation for every player on the shard; a
+/// handful at once stalls it visibly. So the cheap half stays where the accounts
+/// are and the expensive half becomes a value the caller can carry to a thread of
+/// its own — see [`CredentialCheck`], `docs/server/design_connection_state.md`
+/// D1, and S6 of
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Credential {
     account: AccountName,
@@ -266,8 +268,9 @@ mod tests {
     /// Both halves of a login, run here, on this thread.
     ///
     /// This used to be a method on the account abstraction until the backlog of
-    /// `docs/connection_state.md` caught up with it: it is precisely the call the
-    /// shard must never make — argon2 on the caller's thread, tens of a 50 ms
+    /// `docs/server/evidence/2026-07-30-the-connection-state-machine.md` caught
+    /// up with it: it is precisely the call the shard must never make — argon2 on
+    /// the caller's thread, longer than a whole 25 ms
     /// tick — and a doc comment saying so was all that stood in the way. Nothing
     /// outside these tests ever called it, so it is a test helper now. A shard
     /// cannot reach it, and the rule is a fact about where the code lives rather

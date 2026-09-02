@@ -18,11 +18,11 @@ running the whole workspace with nothing excluded.
 Removing `deno_core` did **not** lower the MSRV. It was measured rather than
 assumed: the highest demand in the tree is now `wesl` 0.4.2 at 1.96, a
 build-dependency of the client's renderer, so the declared 1.88 had already
-stopped being true. See [`development.md`](../development.md) § What holds the MSRV.
+stopped being true. See [`development.md`](../../development.md) § What holds the MSRV.
 
 The checklist below is what the spike delivered, kept as the record of what was
 built and thrown away; the decision is in
-[`architecture.md`](../architecture.md) § Scripting.
+[`architecture.md`](../../architecture.md) § Scripting.
 
 - [x] `deno_core` embedded, one V8 isolate — `DenoEngine`, one `JsRuntime`
 - [x] `ScriptEngine` trait — four methods, nothing V8-shaped in a signature, so

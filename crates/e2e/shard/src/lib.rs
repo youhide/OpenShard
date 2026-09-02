@@ -309,7 +309,8 @@ pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (Soc
             tokio::spawn(gateway.run());
             ready.send(address).expect("the caller is still waiting");
             // The reins carry a fresh tally nobody reads: what counts unwritten
-            // saves is there for the force-exit of `docs/shutdown.md` D2, and a
+            // saves is there for the force-exit of
+            // `docs/server/design_shutdown.md` D2, and a
             // test shard has no signals to force-exit on. `over` rather than
             // `new`, because the stop it is held by already exists — the caller
             // is holding a clone of it in the `Running` below.

@@ -6,8 +6,9 @@
 //! is deliberate: the tick is single-threaded because determinism is the point.
 //! It means anything that blocks that task blocks the shard, and argon2 blocks it
 //! for tens of milliseconds: 19 MiB and two passes, on purpose, because that is
-//! what makes a stolen credential file expensive to grind. Most of a 50 ms tick,
-//! for one client's password, with every other player waiting.
+//! what makes a stolen credential file expensive to grind. More than a whole
+//! `TICK_INTERVAL` — 25 ms — for one client's password, with every other player
+//! waiting.
 //!
 //! So the login state machine hands the comparison back as a value
 //! ([`openshard_login::Outcome::Verify`]) instead of doing it, this module runs it

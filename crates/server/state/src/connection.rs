@@ -10,12 +10,11 @@
 //! client version through the player table and drops the packet, silently, when
 //! the lookup misses.
 //!
-//! That is why the character screen is answered by the binary today rather than
-//! out of a tick, and it is the first thing in the way of moving it in — see
-//! `docs/connection_state.md`. A connection is a thing in its own right, with a
-//! lifetime that starts before its character exists and ends after it is gone, so
-//! it gets a row of its own keyed by
-//! [`ConnectionId`](openshard_gateway::ConnectionId).
+//! That is what kept the character screen in the binary, and this row is what
+//! let it move into a tick — see `docs/server/design_connection_state.md`. A
+//! connection is a thing in its own right, with a lifetime that starts before its
+//! character exists and ends after it is gone, so it gets a row of its own keyed
+//! by [`ConnectionId`](openshard_gateway::ConnectionId).
 
 use openshard_entities::EntityId;
 use openshard_protocol::access::AccessLevel;

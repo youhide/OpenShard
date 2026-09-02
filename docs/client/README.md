@@ -56,7 +56,7 @@ network service on port 2593 — under the stock client, or ClassicUO.
 | The protocol read in the client's direction — the server length table, both missing halves, incremental Huffman | ✅ shipping | a decoder gap is silent: `ServerPacket::decode`'s list is shorter than the encode side's and nothing compares them — row 5 | [`design_net.md`](design_net.md) |
 | `client/net`: a sans-io `Connection`, the two-socket login machine, `WorldView`, the walk's acks | ✅ shipping | a lost shard is a restart — row 8 | the same |
 | The transport is a parameter at both ends — `Dial` for the client, `Gate` for the gateway | ✅ shipping | a third `Dial` (WebSocket, for a browser) is expected and unscheduled | the same |
-| One word stops a shard, level-triggered, and `run_shard` returns with the world on disk | ✅ shipping | `SIGTERM`, the outbox, and telling the player why — [`shutdown.md`](../shutdown.md) | the same |
+| One word stops a shard, level-triggered, and `run_shard` returns with the world on disk | ✅ shipping | — `SIGTERM`, the outbox and the goodbye landed; what is left is the server's, [`server/README.md`](../server/README.md) rows 2 and 6 | the same, and [`server/design_shutdown.md`](../server/design_shutdown.md) |
 | The client's own data files in `common/uofiles` | 🟡 most of them | `unifont`, `Bodyconv.def`, `Sound.def`, `TexTerr.def`, `anim2`–`anim5` addressing and the UOP animations are each an absence with a visible symptom — rows 3, 10 and 17 below | [`design_picture.md`](design_picture.md) |
 | The picture: ground stretched over four corner heights, textured from `texmaps`, statics and mobiles, one CPU ordering all three passes share | ✅ shipping | the ground is not screen-culled; a normal is computed nowhere, so nothing is lit off the terrain | the same |
 | A pass that blends | ⬜ | one pass, and five features behind it — row 2 below | the same |
@@ -394,5 +394,5 @@ and the three readers that bake off terrain — the radar raster, the building
 flood and the roof cutaway — because what each of them asks is a question about
 the map. [`client_versions.md`](../client_versions.md) is which client this one
 claims to be, [`findings.md`](../findings.md) is what the reference client
-actually does, and [`shutdown.md`](../shutdown.md) is the half of stopping that
-is still owed.
+actually does, and [`server/design_shutdown.md`](../server/design_shutdown.md) is
+what a stop owes the player, all of which this client now hears.

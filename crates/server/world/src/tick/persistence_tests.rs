@@ -60,8 +60,9 @@ fn only_snapshot(world: &mut World) -> Option<Snapshot> {
 /// walking anything wider would either address a connection with no body or
 /// speak to `Client` components that outlived the connections playing them.
 ///
-/// `docs/shutdown.md` D4 and its backlog entry, "a stop mid-`Entering` is
-/// untested".
+/// `docs/server/design_shutdown.md` D4, and the backlog entry "a stop
+/// mid-`Entering` is pinned in the world and not end to end" in
+/// `docs/server/evidence/2026-07-31-stopping-a-shard.md`.
 #[test]
 fn a_shutdown_notice_reaches_the_world_and_nobody_on_the_way_into_it() {
     let mut world = world();
@@ -139,7 +140,8 @@ fn deleting_a_character_forgets_its_row_on_the_next_save() {
 
     // By slot, through the command: the slot indexes the list the screen was
     // sent, which the world built out of the same roster this looks the character
-    // up in. See `docs/connection_state.md`, S5.
+    // up in. See S5 in
+    // `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
     delete_slot(&mut world, 0, now + WALK_INTERVAL * 2);
     let snapshot = only_snapshot(&mut world).expect("a deletion is a change worth saving");
     assert!(

@@ -19,7 +19,8 @@ use super::*;
 /// connection with no character queue work into the tick. `handle_world_packet`
 /// matches the phase once on the way in, so a packet that reaches this function
 /// is already one its connection may send, and there is no per-arm decision left
-/// to forget. See `docs/connection_state.md`, S3.
+/// to forget. See S3 in
+/// `docs/server/evidence/2026-07-30-the-connection-state-machine.md`.
 ///
 /// That is also why this takes neither the session nor the world: with the gate
 /// gone the only thing left in the arms is the packet, so it cannot reach past

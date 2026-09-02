@@ -2,10 +2,11 @@
 //!
 //! Everything between the game login and the world: the `0xA9` list, creating a
 //! character, deleting one, and picking one to play. It was the shard binary's
-//! until S5 of `docs/connection_state.md`, for one structural reason — the world
-//! could not address a connection with no character, and could not say which
-//! characters existed. Both are fixed (S1's connection row, S5a's roster), and
-//! this is what they were fixed for.
+//! until S5 of
+//! `docs/server/evidence/2026-07-30-the-connection-state-machine.md`, for one
+//! structural reason — the world could not address a connection with no
+//! character, and could not say which characters existed. Both are fixed (S1's
+//! connection row, S5a's roster), and this is what they were fixed for.
 //!
 //! # Why it belongs here rather than in the login crate
 //!

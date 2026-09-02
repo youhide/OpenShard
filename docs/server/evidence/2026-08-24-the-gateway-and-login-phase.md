@@ -67,7 +67,7 @@ than keeping their own copy of the unpacking. The private `struct Entering` besi
 The remaining step is the one this makes worth doing:
 
 - [x] **The roster belongs in the world.** Done — S4 of
-      [connection_state.md](../connection_state.md). `restore_characters` hands the
+      [connection_state.md](2026-07-30-the-connection-state-machine.md). `restore_characters` hands the
       store's rows into `World` like every other `restore_*`, and `reserve_serial`
       is something the world does to itself on the way in rather than a favour the
       shard asks for. `departed` and its drain are gone: the logout writes the
@@ -83,7 +83,7 @@ The remaining step is the one this makes worth doing:
       `RequestStatus` is answered with a status, is S5.
 
 - [x] **The character screen belongs in the world too.** Done — S5 of
-      [connection_state.md](../connection_state.md). The roster stopped being "where
+      [connection_state.md](2026-07-30-the-connection-state-machine.md). The roster stopped being "where
       the saved characters were" and became the account's list, which is the fact
       the login crate's `Accounts` used to hold: a character exists from the moment
       it is created, and carries a record only once something has written one. With
@@ -131,7 +131,7 @@ Found while doing the above, none of them blockers — all fixed:
 ## Still to do: the character screen is one conversation, split across two files
 
 The design this works toward is settled and written down — see "Sessions and the
-character registry" in [architecture.md](../architecture.md). Done so far:
+character registry" in [architecture.md](../../architecture.md). Done so far:
 `LoginSession` carries the account and the socket kind in its state rather than
 in fields kept in step by hand; `Sessions` answers who is playing what; `Roster`
 replaced a bare `HashMap<(String, String), CharacterRecord>` threaded through
@@ -163,12 +163,12 @@ One smaller thing noticed on the way through, not blocking:
 Read while asking why `world_handle_network` has to hold `Sessions`, `LoginServer`,
 `World` and `Roster` at once. None of these was a bug on a working shard; all of
 them were the same seam being unnamed. The plan that acted on them, including the
-steps above, is [`connection_state.md`](../connection_state.md).
+steps above, is [`connection_state.md`](2026-07-30-the-connection-state-machine.md).
 
 **All five are closed — S1 through S7 have landed.** What is left of that plan is
 its backlog, and that backlog is the live one: a dozen findings, each with the
 file it is in and what it would cost to act on, at
-[`connection_state.md` → "Backlog, found while doing S1 through S7"](../connection_state.md).
+[`connection_state.md` → "Backlog, found while doing S1 through S7"](2026-07-30-the-connection-state-machine.md).
 Anyone picking this area up should start there rather than here; the summaries
 below are kept only so a reader who arrives at this section knows what the plan
 was *for*.

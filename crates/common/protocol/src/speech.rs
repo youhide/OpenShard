@@ -369,7 +369,7 @@ impl DecodePacket for SpokenMessage {
 
     /// The client's direction of `0x1C`, written because our own client has to
     /// read what the shard says — and the first thing it has to read is the
-    /// shard telling it that it is going away (`docs/shutdown.md` S3).
+    /// shard telling it that it is going away (`docs/server/evidence/2026-07-31-stopping-a-shard.md` S3).
     ///
     /// The two sentinels are folded back into `None` here, exactly as
     /// [`serial_or_system`] and [`graphic_or_none`] fold them out: a message from

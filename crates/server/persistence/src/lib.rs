@@ -26,10 +26,13 @@
 //! - [`record`] is what the shapes look like on disk, which is deliberately
 //!   *not* what the components look like in memory.
 //!
-//! # What is not here yet
+//! # What is recorded
 //!
-//! Items: the journal takes entities, and a character is the only thing it knows
-//! how to record so far. See `docs/roadmap/04-persistence.md`.
+//! The whole world, not a character and its pack: every online character in full,
+//! every live mobile, ground clutter, decoration, spawn regions with their
+//! remaining timers, named regions, guilds, houses, boats and the world clock.
+//! The model is `docs/server/design_persistence.md`; what each schema version
+//! added is `docs/server/evidence/2026-08-24-the-persistence-phase.md`.
 
 mod journal;
 mod pg;

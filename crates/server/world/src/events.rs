@@ -29,8 +29,8 @@ use openshard_protocol::world::{
 /// A character entered the world.
 ///
 /// The confirmation half of `Command::Enter`, and the only thing that may move a
-/// connection's session on to "playing" — see `docs/connection_state.md`. Queuing
-/// the command is a request, and `World::enter` can refuse it
+/// connection's session on to "playing" — `docs/server/design_connection_state.md`
+/// D4. Queuing the command is a request, and `World::enter` can refuse it
 /// ([`PlayerRefused`]); a caller that treats the request as the arrival gets a
 /// session claiming to play a character that does not exist.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

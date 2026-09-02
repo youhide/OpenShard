@@ -12,14 +12,16 @@ Two things do not live here any more:
   A plan carries no progress and this page carries no queue.
 - **The status of a migrated domain** is that domain's README:
   [`world/`](../world/README.md), [`client/`](../client/README.md),
-  [`render/`](../render/README.md), [`protocol/`](../protocol/README.md). The
-  phases that used to describe those four are records in their `evidence/`
-  directories now — phase 3 is
+  [`render/`](../render/README.md), [`protocol/`](../protocol/README.md),
+  [`server/`](../server/README.md). The phases that used to describe those five
+  are records in their `evidence/` directories now — phase 3 is
   [`world/evidence/2026-08-26-a-client-walks-in-britannia.md`](../world/evidence/2026-08-26-a-client-walks-in-britannia.md),
   phase 9 is
   [`client/evidence/2026-08-24-the-client-milestones.md`](../client/evidence/2026-08-24-the-client-milestones.md),
   phase 1 is
-  [`protocol/evidence/2026-08-24-the-protocol-phase.md`](../protocol/evidence/2026-08-24-the-protocol-phase.md).
+  [`protocol/evidence/2026-08-24-the-protocol-phase.md`](../protocol/evidence/2026-08-24-the-protocol-phase.md),
+  and phases 0, 2, 4, 5, 7 and 8 are the six records in
+  [`server/evidence/`](../server/README.md).
 
 The roles a document can have, and the rule that puts each one in its place, are
 in [`docs/README.md`](../README.md).
@@ -28,22 +30,25 @@ in [`docs/README.md`](../README.md).
 
 | Phase | Record | Domain waiting to claim it |
 |---|---|---|
-| 0. Foundation | [`00-foundation.md`](00-foundation.md) | `server/` |
-| 2. Gateway and login | [`02-gateway-login.md`](02-gateway-login.md) | `server/` |
-| 4. Persistence | [`04-persistence.md`](04-persistence.md) | `server/` |
-| 5. Scripting | [`05-scripting.md`](05-scripting.md) | `server/` — spiked, proven and deleted |
 | 6. Gameplay | [`06-gameplay/`](06-gameplay/README.md) | `items/`, `combat/`, `housing/`, `npc/` |
-| 7. Scriptpack conversion | [`07-scriptpack-conversion.md`](07-scriptpack-conversion.md) | `server/` — dropped with phase 5 |
-| 8. Operations | [`08-operations.md`](08-operations.md) | `server/` |
 
-Beside them, three backlog records that are still the only home their subject
-has, and one policy:
+One file for four domains, which is the thing that makes this the last and
+awkward batch: whichever domain goes first has to decide what happens to the
+eleven subject files under it that belong to the other three. `server/` met the
+same shape and answered it by leaving the shared file alone until every row in it
+had somewhere to go.
+
+Beside it, two backlog records that are still the only home their subject has,
+and one policy:
 
 - [`backlog/gameplay.md`](backlog/gameplay.md) — the data-table and
   Felucca-converter findings.
-- [`backlog/operations.md`](backlog/operations.md) — the licensing audit and
-  what it left open.
 - [`backlog/later.md`](backlog/later.md) — the ideas that wait for an engine
   that stands on its own.
 - [`client-files.md`](client-files.md) — the policy on external client files:
   none are in this repository and none will be.
+
+The `server` batch took phases 0, 2, 4, 5, 7 and 8 and the licensing backlog out
+of here on 2026-09-03; they are records in
+[`docs/server/evidence/`](../server/README.md) now, and what is open about that
+domain is ranked in [`docs/server/README.md`](../server/README.md).
