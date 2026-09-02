@@ -11,7 +11,7 @@
 //!
 //! The deciding property is mutability rather than identity. Shelf-packing
 //! something that is rewritten per step either fragments the atlas or forces the
-//! whole-atlas rebuild `docs/client.md` names as the tightest resource in the
+//! whole-atlas rebuild `plans/client/sessions/PLAN.md` names as the tightest resource in the
 //! client — and a mutable entry in a structure whose entries are immutable by
 //! construction is the same shape of mistake `docs/boats.md` refused when it
 //! kept a moving hull out of `Obstructions`.

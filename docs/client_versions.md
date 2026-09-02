@@ -161,7 +161,7 @@ of maps at arbitrary sizes (`MapLoader.cs:106-138`).
 
 Not covered: `verdata.mul`, `mapdif`/`stadif`, the `x` files (`map0x.mul`,
 `statics0x.mul`), and everything a renderer needs but a server does not — see
-[`client.md`](client.md) M2.
+[`client/design_picture.md`](client/design_picture.md) M2.
 
 ## The other Rust reader, for comparison
 

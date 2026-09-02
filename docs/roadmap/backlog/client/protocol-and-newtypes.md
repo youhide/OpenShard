@@ -29,8 +29,9 @@ oracle):
   remaining unread ones should each be a decision rather than an omission.
   `0xDC` and `0xD6` were two of the four named here, and both were exactly this
   shape — an encoder, a table row, and no arm — for as long as the entry stood;
-  they were read in full on 2026-08-15 (see [`client.md`](../../../client.md)'s
-  "Tooltips, and the half that was never written"), and finding them again by
+  they were read in full on 2026-08-15 (see
+  [`client/evidence/2026-08-15-tooltips.md`](../../../client/evidence/2026-08-15-tooltips.md)),
+  and finding them again by
   hand rather than by a failing test is the argument for the sweep. `0x14` and
   `0xBF`'s subcommands are still open.
 

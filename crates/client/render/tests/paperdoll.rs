@@ -277,7 +277,7 @@ fn a_stranger_gets_the_status_button_and_none_of_the_rest() {
 }
 
 /// A layer with no `AnimID` draws nothing — a ring, an earring, anything the
-/// paperdoll has no picture of. `docs/client.md`'s "done when", in one
+/// paperdoll has no picture of. `docs/client/design_windows.md`'s "done when", in one
 /// assertion.
 #[test]
 #[ignore]

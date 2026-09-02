@@ -181,7 +181,7 @@ struct Speech {
 
 /// How a body's picture is allowed to lag the walk it is doing.
 ///
-/// The ease into and out of a walk, and the whole of `docs/camera.md` D10 in one
+/// The ease into and out of a walk, and the whole of `docs/client/design_camera_rig.md` D10 in one
 /// number. A step cannot itself be eased — a body has to cross one tile per hold
 /// and no profile that starts at rest does that without going faster than a walk
 /// somewhere in the middle — so what an ease *is* is a lag, and this is how much
@@ -221,7 +221,8 @@ impl Ease {
     /// the body is not centred on its tile and large enough that the start and
     /// the stop are visibly eased. The ease-out is the same number spent in
     /// reverse and costs no second rule. `dst::dump_the_ramp` is the table it
-    /// was read off; `docs/camera.md` C3 records the sitting.
+    /// was read off; `docs/client/evidence/2026-08-14-the-camera-rig-record.md`
+    /// C3 records the sitting.
     pub const WALK: Self = Self { tau: 0.08 };
 }
 
@@ -472,7 +473,7 @@ struct Tracked {
     /// whatever the ease is holding.
     ///
     /// The filter's state, and it is per body because every body is eased and
-    /// there is one of these per body — `docs/camera.md` D10. Equal to the
+    /// there is one of these per body — `docs/client/design_camera_rig.md` D10. Equal to the
     /// unfiltered position under [`Ease::NONE`], which is what makes the
     /// baseline still exactly the baseline.
     drawn:             Gaze,

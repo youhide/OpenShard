@@ -1,7 +1,7 @@
 //! The skill sheet as a component: the second window kind to own its state,
 //! its layout and its input.
 //!
-//! Step 2 of `docs/window_components.md`, and the step where one field stops
+//! Step 2 of `docs/client/design_panes.md`, and the step where one field stops
 //! meaning two things. `Windows::skills` was an `Option<skills::Tree>` whose
 //! `Some` *was* "the window is open", so closing the window and forgetting
 //! which headings were shut were the same write, and four files did it —

@@ -48,8 +48,8 @@
     seven requests, and draws an invitation prompt and a roster window. It also
     turned up that `0xBF` had **no decoder at all** on that end — nine variants
     share the id byte and there was no arm — so the whole family was arriving as
-    `Undecoded`. See "The channel selector, and the whole of `0xBF`" in
-    [`client.md`](../../client.md).
+    `Undecoded`. See
+    [`client/evidence/2026-08-15-the-channel-selector.md`](../../client/evidence/2026-08-15-the-channel-selector.md).
 - [x] `quests` — **a core system now, ServUO's Mondain's Legacy model, with the
   content left to the pack.** It was built pack-first (five thin seams and an
   opaque JSON blob the engine only stored) and that did not survive a client.

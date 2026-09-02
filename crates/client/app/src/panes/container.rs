@@ -1,7 +1,7 @@
 //! A bag's window as a component: the last of the six kinds to move in, and
 //! the one the hand runs through.
 //!
-//! Step 6 of `docs/window_components.md`. Every kind before this one could be
+//! Step 6 of `docs/client/design_panes.md`. Every kind before this one could be
 //! moved without touching what is on the cursor; this one cannot, because a
 //! bag is where an item is lifted from and where it is put down, and both of
 //! those are the *shard's* state as much as this client's. Decision 7 is the
@@ -172,7 +172,8 @@ pub struct ContainerPane {
     /// off the input event pump, not the redraw that fills this — there is no
     /// guaranteed gap between a redraw and the press that follows it, so the
     /// action button's own call to [`Self::contents`] stays a fresh read every time.
-    /// See `docs/window_components.md`'s backlog entry this closes: the
+    /// See `docs/client/evidence/2026-08-17-the-pane-router.md`'s backlog entry
+    /// this closes: the
     /// broader question of a once-a-frame scratch for every pane kind stays
     /// open, and this is deliberately narrower than that.
     scratch:        RefCell<Option<Vec<ContainedItem>>>,
@@ -444,7 +445,7 @@ impl ContainerPane {
     /// neither this nor [`Self::recall_contents`] touches `frame.resources`,
     /// and a test that wants to pin the caching in [`Self::scratch`] would
     /// otherwise need a full [`Resources`](crate::resources::Resources) — the
-    /// same wall step 8 of `docs/window_components.md` is still standing
+    /// same wall step 8 of `docs/client/design_panes.md` is still standing
     /// behind.
     fn contents(&self, view: &WorldView, hand: Option<Hand>) -> Vec<ContainedItem> {
         let held = hand.map(|hand| hand.drag().item.serial);
@@ -612,7 +613,8 @@ impl ContainerPane {
     /// action button used to be offered no pixels at all, so every window's
     /// `press_action` had to run its own box test against the raw cursor —
     /// which is what let a action button belonging to a window the pointer could not
-    /// see still answer a press (`docs/window_components.md`'s backlog entry
+    /// see still answer a press
+    /// (`docs/client/evidence/2026-08-17-the-pane-router.md`'s backlog entry
     /// this closes). Now the action button is a picture in [`Window::pictures`], so
     /// [`PaneCtx::under_pointer`] already means "the pointer is on this
     /// window's own art, action button included" before this is ever reached, and
@@ -907,7 +909,7 @@ impl ContainerPane {
                 // the topmost pixel here, so there is nothing of ours for the
                 // press to have landed on. A window drawn over this one's
                 // action button now correctly wins that pixel instead of this pane
-                // being asked anyway (`docs/window_components.md`'s closed
+                // being asked anyway (`docs/client/design_panes.md`'s closed
                 // backlog entry).
                 if !ctx.under_pointer {
                     return Response::ignored();
@@ -1472,7 +1474,7 @@ mod tests {
     /// **Step 8, through the front door.** `ItemPress::dragged` already pins
     /// the slop-then-lift rule (`hand.rs`'s own tests); this goes in through
     /// [`AnyPane::handle`](crate::panes::AnyPane::handle) instead — the located gate, the `drawn` lookup and
-    /// `Window::item_at` ahead of it — which is what `docs/window_components.md`'s
+    /// `Window::item_at` ahead of it — which is what `docs/client/design_panes.md`'s
     /// backlog entry asked for: a press on an icon becomes a lift without a
     /// client install on disk, now that [`fixture::Install`] answers every
     /// borrow a bag's own `handle` reads.
@@ -1535,7 +1537,7 @@ mod tests {
     /// different bags of items, and each frame's `layout` seeing exactly
     /// that frame's own state — never a lingering answer from the frame
     /// before it. This is the regression the backlog entry
-    /// (`docs/window_components.md`) was closed against: three redundant
+    /// (`docs/client/design_panes.md`) was closed against: three redundant
     /// recomputations became one memo per redraw, and it had to be provably
     /// impossible for that memo to leak across a change in what the bag
     /// holds.

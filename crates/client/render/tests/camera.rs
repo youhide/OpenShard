@@ -39,7 +39,7 @@ use openshard_protocol::world::Point;
 /// apart at all.
 ///
 /// **Not a preset and not a proposal.** No camera is chosen until C3 has been
-/// built and looked at (`docs/camera.md`, D9); what these two numbers are for is
+/// built and looked at (`docs/client/design_camera_rig.md`, D9); what these two numbers are for is
 /// that a table with one row in it and a chart with one curve on it cannot show
 /// whether they would show anything.
 const PROBE: Rig = Rig {
@@ -172,7 +172,8 @@ fn a_stair_is_eased_and_a_floor_is_cut() {
     // the plane's motion, since walking east moves the eye down the screen and
     // climbing moves it up. Delaying one half of a cancellation is a transient
     // where there was none. If this ever reads the other way round, the rig has
-    // changed shape and `docs/camera.md` C2 is the thing to re-read.
+    // changed shape and `docs/client/evidence/2026-08-14-the-camera-rig-record.md`
+    // C2 is the thing to re-read.
     assert!(
         eased.accel_max > reference.accel_max && eased.accel_max < reference.accel_max * 1.5,
         "a filtered stair was {:.0} against the reference's {:.0}",

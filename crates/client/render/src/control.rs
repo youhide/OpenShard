@@ -103,7 +103,7 @@ impl Control {
     ///
     /// The rig is an argument and not a default: which camera this client ships
     /// is undecided, and a `new` that quietly picked one would be the decision
-    /// (`docs/camera.md`, D9).
+    /// (`docs/client/design_camera_rig.md`, D9).
     pub fn new(camera: Camera, max_texture: u32, rig: Rig) -> Self {
         Self {
             camera,

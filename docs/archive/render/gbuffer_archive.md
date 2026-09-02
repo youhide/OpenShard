@@ -520,7 +520,7 @@ surface is a flat billboard. A depth and an id are exactly what a rasterised
 triangle of real geometry produces too — the reconstruction does not care
 whether the id's row describes a sprite's tile or a mesh's material, because
 "what was here" was never answered by the shape of the thing, only by what
-its own data says. [`client.md`](../../client.md)'s later milestones bring real
+its own data says. [`client.md`](../../client/README.md)'s later milestones bring real
 geometry into this client; this plan was written so that day does not
 reopen the G-buffer's shape a second time. The alternative this plan does
 *not* take — deriving a billboard's exact world position from its screen

@@ -920,7 +920,7 @@ pub fn plate(rect: Rect, hue: Hue, shade: Shade) -> SpriteQuad {
 /// Put a window's finished quads on the surface: magnified, then moved.
 ///
 /// **The one arithmetic between a window's own pixels and the screen's.** Every
-/// window kind lays itself out at the origin (`docs/window_components.md`'s
+/// window kind lays itself out at the origin (`docs/client/design_panes.md`'s
 /// window-local coordinates) and at its art's own size; this is where the
 /// manager's two answers about that window — how big it is drawn and where it
 /// sits — are applied, once, to everything the window produced. It takes quads
@@ -1144,7 +1144,7 @@ pub fn art_of(elements: &[Element]) -> BTreeSet<GumpArt> {
 ///
 /// What it costs is the character set: `fonts.mul` is single-byte, so a shard
 /// that writes a dialog in anything past Latin-1 gets those glyphs skipped
-/// rather than drawn — see [`crate::text::collect_gump`]. `docs/client.md`
+/// rather than drawn — see [`crate::text::collect_gump`]. `docs/client/evidence/2026-08-30-the-client-backlog.md`
 /// carries the backlog entry.
 pub const CAPTION_FONT: Font = Font(1);
 
@@ -2118,7 +2118,7 @@ mod tests {
         assert!((cut[0].region.v - (whole[0].region.v + whole[0].region.dv / 2.0)).abs() < 1e-6);
     }
 
-    /// The identity `docs/window_components.md`'s window-local coordinates
+    /// The identity `docs/client/design_panes.md`'s window-local coordinates
     /// depend on, now that a window is magnified as well as moved: the pixel
     /// [`place`] draws a picture's texel on is the pixel whose *local* cursor
     /// — `client/app`'s `OwnWindow::local_cursor`, which divides by the same

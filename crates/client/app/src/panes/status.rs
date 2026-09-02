@@ -1,7 +1,7 @@
 //! The status frame as a component: the third window kind to move in, and the
 //! one that proves a pane with no state and no input at all is still a pane.
 //!
-//! Step 3 of `docs/window_components.md`, and the smallest of the six. There is
+//! Step 3 of `docs/client/design_panes.md`, and the smallest of the six. There is
 //! nothing here to remember between frames — every number on the frame is read
 //! out of the view as it is drawn — and nothing on it to press: no arrow, no
 //! button, no list. What is left is a layout and the fact that the window is

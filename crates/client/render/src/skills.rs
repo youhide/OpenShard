@@ -30,7 +30,7 @@
 //! their skills.
 //!
 //! The reference also opens this window when a `0x3A` of type `0x01` or `0x03`
-//! arrives. This client opens it when the player asks — see `docs/client.md`,
+//! arrives. This client opens it when the player asks — see `docs/client/design_windows.md`,
 //! M4 — because the shard sends the whole list at world entry too, and a window
 //! that opened on the packet would open itself at every login.
 

@@ -2,7 +2,7 @@
 //! state that belongs to that window alone and answering the input that lands
 //! on it.
 //!
-//! `docs/window_components.md` is the plan this implements and its decisions
+//! `docs/client/design_panes.md` is the plan this implements and its decisions
 //! are the vocabulary here. A pane **takes readonly context in ([`PaneCtx`])
 //! and hands mutations out ([`Effect`])**: it never holds an `&mut App`, never
 //! reaches the shard, and never decides where on the screen it sits. Which
@@ -204,7 +204,7 @@ pub struct Modifiers {
 /// 195MB animation file, none of which can be built without an install on
 /// disk — so a `PaneFrame` carrying it made [`AnyPane::handle`] reachable from a
 /// test only on a machine with a client in it. That is the whole of step 8 in
-/// `docs/window_components.md`, and the answer the step's own last paragraph
+/// `docs/client/design_panes.md`, and the answer the step's own last paragraph
 /// proposed: *the two or three fields a pane actually reads instead of the
 /// whole `Resources`*. It turned out to be nine, and every one of them can be
 /// built from nothing — `GumpAtlas::pack`, `FontAtlas::pack`,
@@ -287,13 +287,14 @@ pub struct PaneFrame<'a> {
     /// a window can never draw or click a stale item.
     pub view:         &'a WorldView,
     /// The client's own files, narrowed to the nine a window reads — see
-    /// [`PaneFiles`], and step 8 of `docs/window_components.md` for why that
+    /// [`PaneFiles`], and step 8 of `docs/client/design_panes.md` for why that
     /// narrowing is the step's whole content.
     pub files:        PaneFiles<'a>,
     /// The pointer, in this window's own gump pixels — the origin is the
     /// window's own top-left corner, not the screen's.
     ///
-    /// **Window-local, not absolute.** `docs/window_components.md`'s Backlog
+    /// **Window-local, not absolute.**
+    /// `docs/client/evidence/2026-08-17-the-pane-router.md`'s Backlog
     /// entry of that name is what this field closes: every window kind lays
     /// its own pictures out as if it sat at `(0, 0)` (see each pane's
     /// `layout`, which always passes [`GumpPixel::new(0, 0)`] to the render
@@ -408,7 +409,8 @@ pub struct PaneCtx<'a> {
     /// and still wrong* — an icon in a bag drawn at three times the art asked
     /// for three times the hand movement that the same icon on the ground
     /// did. See [`hand::past_slop`](crate::hand::past_slop) and
-    /// `docs/window_components.md`'s Backlog entry of that name.
+    /// `docs/client/evidence/2026-08-17-the-pane-router.md`'s Backlog entry of
+    /// that name.
     pub past_slop:     bool,
 }
 

@@ -542,7 +542,7 @@ pub enum Command {
 ///
 /// This used to be the payload of a `Command::CloseWindow` that crossed the
 /// channel to the link thread. That variant is gone — S2 in
-/// `docs/client_window_state.md` retired it for the `locally_closed` overlay —
+/// `docs/client/evidence/2026-08-15-one-owner-for-a-window.md` retired it for the `locally_closed` overlay —
 /// and what is left is a plain argument to `App::apply_close_window`, which
 /// writes the event-loop thread's own view. It stays in this module because it
 /// names the three `WorldView` methods and nothing else does.
@@ -725,7 +725,7 @@ impl Link {
     // `virtue`: every request a paperdoll's furniture makes is asked for by
     // `panes::paperdoll::PaperdollPane` as an `Effect::Net` and sent through
     // [`Link::act`], the way the vendor's two went at step 1 of
-    // `docs/window_components.md`. `war_mode` stays because it has a caller
+    // `docs/client/design_panes.md`. `war_mode` stays because it has a caller
     // that is not a window: Tab.
 
     // No `set_skill_lock` and no `use_skill`: the skill sheet asks for both as

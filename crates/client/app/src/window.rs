@@ -432,7 +432,8 @@ pub(crate) fn ready_atlases(
     wanted: &Wanted,
     drawn: &[(Who, Mobile)],
 ) -> (bool, AtlasWork) {
-    // Set only on a successful rebuild — the counter `docs/camera.md`
+    // Set only on a successful rebuild — the counter
+    // `docs/client/evidence/2026-08-14-the-camera-rig-record.md`
     // asks for, so the frame that stalled for one can be told apart from
     // one that is merely heavy. See [`Frame::repacked`](crate::frames::Frame).
     let mut repacked = false;
@@ -851,7 +852,7 @@ pub(crate) struct Screen {
     /// there is nothing this has to wait for. A gump dialog's own captions are
     /// its first caller; the speech line and the journal are too, except when
     /// `App::ttf_font` is set — see `ttf_gump_pass`, its TrueType twin — per
-    /// `docs/client.md`'s "a third `GumpRenderer` bound to `App::font_atlas`".
+    /// `docs/client/evidence/2026-08-30-the-client-backlog.md`'s "a third `GumpRenderer` bound to `App::font_atlas`".
     pub(crate) gump_text_pass: GumpRenderer,
     /// What the GPU spent on the last frame it finished, pass by pass — the one
     /// half of a frame's cost that no clock on this thread can see, since

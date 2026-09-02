@@ -127,7 +127,7 @@ comparing against. None of them is a reason to soften a phase above.
   in a phase is what the knob would be turned against.
 - **The circle of transparency** — a radius around the body inside which walls
   go translucent. Not a lighting feature at all: it is the fifth item of the
-  blended pass [`docs/client.md`](../../../docs/client.md)'s "What is still M3"
+  blended pass [`docs/client/design_picture.md`](../../../docs/client/design_picture.md)'s "What is still M3"
   describes, recorded here only because it was asked for in the same breath.
 
 ## Order

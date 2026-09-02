@@ -2,7 +2,7 @@
 //!
 //! One pipeline, and every camera this client will have is a [`Rig`] — a value
 //! of parameters rather than an implementation of its own. The argument is in
-//! `docs/camera.md`; the short of it is that two cameras written as two
+//! `docs/client/design_camera_rig.md`; the short of it is that two cameras written as two
 //! implementations are two quantisers, two cut rules and two rounding habits,
 //! and a bench comparing them compares those as much as it compares the feel.
 //! [`Rig::HARD`] is the reference camera — the eye is the body, to the pixel,
@@ -35,7 +35,7 @@
 //!    the filter's state. *Empty.*
 //! 8. **Quantise** — round to the pixel the *display* has and keep the remainder
 //!    in the state. Not to a whole pixel of the art, which above 1:1 is several
-//!    of the display's: see `docs/camera.md` D11. It is the one stage that does
+//!    of the display's: see `docs/client/design_camera_rig.md` D11. It is the one stage that does
 //!    not happen here, because it is the one that needs the magnification —
 //!    [`crate::camera::Camera::snap`] is where it lands.
 //!
@@ -108,7 +108,7 @@ impl Gaze {
 
     /// This gaze, one frame's worth closer to `target`, on every channel.
     ///
-    /// The body's ease (`docs/camera.md` D10) is this, and the eye's filter is
+    /// The body's ease (`docs/client/design_camera_rig.md` D10) is this, and the eye's filter is
     /// the same [`approach`] per channel — what the eye does that this does not
     /// is decide a *cut* on the height first, which is a rule about where the
     /// target came from and not about damping. So the two are one arithmetic and
@@ -138,7 +138,7 @@ impl Gaze {
 
     /// The one point in the world this asks to be looked at.
     ///
-    /// **No longer the quantiser**, and that is `docs/camera.md` D11: rounding
+    /// **No longer the quantiser**, and that is `docs/client/design_camera_rig.md` D11: rounding
     /// here rounds to a *virtual* pixel, which at `3x` is three pixels of the
     /// display, and a camera that could only name one in three of the positions
     /// a screen can show moves the world in jumps coarser than the screen. The
@@ -208,7 +208,7 @@ impl Rig {
     ///
     /// What ClassicUO does, and what this client did before there was a
     /// pipeline. It is here as the baseline every other rig is scored against,
-    /// not as a default — see `docs/camera.md`, D9.
+    /// not as a default — see `docs/client/design_camera_rig.md`, D9.
     pub const HARD: Self = Self {
         plane_tau: 0.0,
         lift_tau:  0.0,
@@ -235,7 +235,8 @@ impl Rig {
     /// settles 7.5 pixels below the body — a third of one riser. Twice that and
     /// the eye is half a storey behind while climbing, which is the lift-shaft
     /// feel; half of it and a correction is back to arriving in two frames
-    /// instead of one. See `docs/camera.md`, C2.
+    /// instead of one. See
+    /// `docs/client/evidence/2026-08-14-the-camera-rig-record.md`, C2.
     pub const LIFT: Self = Self {
         plane_tau: 0.0,
         lift_tau:  0.15,
@@ -344,7 +345,7 @@ impl Follower {
 
     /// One frame: where the eye goes, given where it is asked to look.
     ///
-    /// Two arguments and not a `Frame` struct, which is what `docs/camera.md`
+    /// Two arguments and not a `Frame` struct, which is what `docs/client/design_camera_rig.md`
     /// first wrote: the pipeline's input is a gaze and an elapsed time until
     /// stages 2, 3 and 5 fill, and a wrapper around two values earns nothing.
     /// What the shape does say is what is *not* an argument — no `Instant`, no

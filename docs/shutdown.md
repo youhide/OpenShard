@@ -276,7 +276,7 @@ on. The rest are independent.
   and a `0x1B` restart replaces everything *except* the journal, because a
   restart says what is on screen is stale and unsays nothing that was said.
   That last one is `a_restart_replaces_the_world_and_unsays_nothing`, checked to
-  fail. **Drawing it is still M4** in [`client.md`](client.md) — this is the
+  fail. **Drawing it is still M4** in [`client/design_windows.md`](client/design_windows.md) — this is the
   record, not the window.
 - **`Shard::announce_shutdown` is the only caller of `World::announce`.** A GM
   broadcast is the obvious second, and S7's countdown is the third; until one of
@@ -337,7 +337,7 @@ on. The rest are independent.
   two `ALICE`/`BOB` because reading them as numbers did not work. The shape is
   that pair, shared: a test that wants a second player asks for one by name.
 - **Nothing tests that the playground boots** — carried over from
-  [`client.md`](client.md), and now with one more thing to get wrong, since the
+  [`client/README.md`](client/README.md), and now with one more thing to get wrong, since the
   playground stops its shard after the window closes.
 - ~~**`run_shard` takes six arguments, and the sixth is one every test passes
   blind.**~~ Done, in the shape the entry sketched: `Reins` in `shard.rs` beside
@@ -381,6 +381,6 @@ hears it. The oldest thing in it is now the unbounded `save_loop`: D2's force-ex
 finally names what it costs — the writes and the rows the save task had not
 finished — but a store that never answers is still a shard that cannot be
 stopped politely. The commit that created this plan is the one that landed the stop
-itself; [`docs/client.md`](client.md) → "Stopping is one word, and everything
+itself; [`docs/client/design_net.md`](client/design_net.md) → "Stopping is one word, and everything
 hears it" is the design it is built on, and [`roadmap.md`](roadmap.md) §8 points
 here rather than repeating the list.

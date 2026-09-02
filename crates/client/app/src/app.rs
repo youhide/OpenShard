@@ -357,7 +357,8 @@ pub(crate) struct App {
     /// for why it is not the scope.
     pub(crate) frames:              frames::Frames,
     /// How many full atlas repacks this session has paid for — the eviction
-    /// `AtlasError::Full` triggers, named in `docs/camera.md`: "costly and
+    /// `AtlasError::Full` triggers, named in
+    /// `docs/client/evidence/2026-08-14-the-camera-rig-record.md`: "costly and
     /// rare" was a claim nothing counted, and each one's cost otherwise reads
     /// as an ordinary heavy frame. See [`Frame::repacked`](frames::Frame) for
     /// which frame paid it.

@@ -177,7 +177,7 @@ impl SkillsForm {
             0x00 => Some(Self::WholeList { caps: false }),
             // 0x01 and 0x03 are the capped whole list *and* an instruction to
             // open the window, which this client does not take: its window opens
-            // when the player asks for it. See `docs/client.md`'s backlog.
+            // when the player asks for it. See `docs/client/evidence/2026-08-30-the-client-backlog.md`'s backlog.
             0x01..=0x03 => Some(Self::WholeList { caps: true }),
             0xDF => Some(Self::OneLine { caps: true }),
             0xFE => Some(Self::NameTable),

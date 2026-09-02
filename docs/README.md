@@ -56,7 +56,7 @@ answer: where the code lives. A topic is a subsystem with a canon of its own.
 | `combat/` | `server/combat`, `skills`, `magic` | not migrated |
 | `housing/` | `server/housing`, boats | not migrated |
 | `npc/` | `server/npc`, `ai`, `quests`, `guilds`, chat | not migrated |
-| `client/` | `client/net`, `client/model`, `client/app` | not migrated |
+| [`client/`](client/README.md) | `client/net`, `client/model`, `client/app` | **migrated** — the split of a 4,506-line document into roles; nothing of it is archived, because none of it was superseded |
 | [`render/`](render/README.md) | `client/render`, `client/artscan`, `client/pathtrace` | **migrated** — twelve superseded documents in [`archive/render/`](archive/render/README.md) |
 
 `render` is a domain separate from `client` on purpose: it is the majority of

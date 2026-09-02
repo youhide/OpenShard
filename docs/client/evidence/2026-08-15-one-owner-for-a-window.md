@@ -5,7 +5,7 @@ Living plan for a client-side refactor. It starts from a bug fixed on
 itself a second or so later — and the plan is what closing that bug the
 honest way would take, versus the patch that actually shipped.
 
-As with [`protocol_newtypes.md`](protocol_newtypes.md): when reality
+As with [`protocol_newtypes.md`](../../protocol_newtypes.md): when reality
 contradicts a decision here, change this file in the same commit that changes
 the code.
 
@@ -212,5 +212,5 @@ direct writes to `App`'s own `view` are gone. The `Command` half is gone. The
 writes are still there.
 
 This plan exists because the patch that fixed the visible bug was flagged,
-correctly, as a shape rather than a cause — see [`roadmap.md`](roadmap.md),
+correctly, as a shape rather than a cause — see [`roadmap.md`](../../roadmap.md),
 under "The client — planned," which points back here for what to do about it.

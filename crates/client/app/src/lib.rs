@@ -104,14 +104,15 @@ mod world;
 /// the pixel.
 ///
 /// Which rig it *ships* is undecided and is decided on a bench rather than here
-/// — `docs/camera.md` D9.
+/// — `docs/client/design_camera_rig.md` D9.
 pub(crate) const STARTUP_RIG: Rig = Rig::HARD;
 
 /// And how far the drawn body may lag the walk it is doing.
 ///
 /// **Not a default in the sense D9 refuses.** D9 is about naming a camera before
 /// one has won; this one was looked at — `dst::dump_the_ramp` is the table and
-/// `docs/camera.md` C3 records the sitting. It is also not a camera: the eye is
+/// `docs/client/evidence/2026-08-14-the-camera-rig-record.md` C3 records the
+/// sitting. It is also not a camera: the eye is
 /// still `HARD` above, and what eases is where the body is drawn (D10).
 ///
 /// Here rather than in `crowd.rs` on purpose. [`Ease::WALK`] is a *setting* — a
@@ -328,7 +329,7 @@ pub enum Scenario {
 pub(crate) const FACET: u8 = 0;
 
 /// Which client this claims to be. Every `Feature` gate on the server follows
-/// from it, and this is the one ClassicUO opens with — see `docs/client.md`.
+/// from it, and this is the one ClassicUO opens with — see `docs/client/design_decisions.md`.
 pub(crate) const VERSION: ClientVersion = ClientVersion::new(7, 0, 45, 65);
 
 /// How often to redraw while somebody is mid-step. See [`App::redraw_interval`].
@@ -412,7 +413,7 @@ pub(crate) const TURN_ZONE: f64 = 23.9;
 /// The same four seconds as the scope, and for the same reason: what is worth
 /// looking at is the last few steps, not the session. Its own constant because
 /// the two rings answer different questions and one of them is about to grow a
-/// slider — see `docs/camera.md`.
+/// slider — see `docs/client/evidence/2026-08-14-the-camera-rig-record.md`.
 pub(crate) const FRAMES_SPAN: std::time::Duration = std::time::Duration::from_secs(4);
 
 /// How much of the eye's recent past the scope keeps.
@@ -557,7 +558,7 @@ pub fn run<D: Dial + Send + 'static>(
         scenario,
     } = opening;
     // Reading the whole facet takes a moment and a few hundred megabytes. That
-    // is the shape `uofiles` has today — see the backlog in docs/client.md — and
+    // is the shape `uofiles` has today — see the backlog in docs/client/evidence/2026-08-30-the-client-backlog.md — and
     // it is honest to do it up front rather than to stall on the first frame.
     //
     // Which files that reads is `world`'s: the install's own map and statics, or

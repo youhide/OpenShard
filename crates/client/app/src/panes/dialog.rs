@@ -1,7 +1,7 @@
 //! A `0xB0` dialog as a component: the fourth window kind to own its state, its
 //! layout and its input.
 //!
-//! Step 4 of `docs/window_components.md`, and the kind the plan called "mostly
+//! Step 4 of `docs/client/design_panes.md`, and the kind the plan called "mostly
 //! a move": `crate::gump::Dialogs` already held the page, the switches, the
 //! typed text and the held button, keyed by gump id, so what this step really
 //! does is turn *one map keyed by window* into *one window's worth of state*.

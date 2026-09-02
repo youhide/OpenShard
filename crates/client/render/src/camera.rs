@@ -28,7 +28,7 @@
 //! # Two pixel sizes, and where the zoom is
 //!
 //! The client's art fixes a pixel size and the display has one of its own; they
-//! are the same only at 1:1. `docs/camera.md` D11 calls the first **virtual**
+//! are the same only at 1:1. `docs/client/design_camera_rig.md` D11 calls the first **virtual**
 //! and the second **real**, and the rule it settles is that motion is continuous
 //! and the one rounding is to the real pixel — because a scroll that stepped a
 //! whole *virtual* pixel would step `zoom` real ones, which is a world moving in
@@ -116,7 +116,7 @@ pub struct WorldPixel {
 ///
 /// What every position in this client actually is before anything rounds it: a
 /// body mid-step, an eased sprite, an eye converging on one. [`WorldPixel`] is
-/// what comes out of the quantiser, and `docs/camera.md` D11 is the rule for
+/// what comes out of the quantiser, and `docs/client/design_camera_rig.md` D11 is the rule for
 /// where that quantiser sits — the fraction it keeps is a fraction of a
 /// *virtual* pixel, because at `3x` a third of one is a whole pixel of the
 /// display and rounding it away is the judder the whole decision is about.
@@ -208,7 +208,7 @@ impl ViewPoint {
 
 /// A place on the display's own grid, to a fraction of one of its pixels.
 ///
-/// The **real** pixel of `docs/camera.md` D11 — what the compositor hands us and
+/// The **real** pixel of `docs/client/design_camera_rig.md` D11 — what the compositor hands us and
 /// what a painter drawing over the world has to answer in. Every other pixel
 /// space in this crate is *virtual*, the art's own grid, and the two are the
 /// same number only at 1:1; a [`Zoom`] is exactly the ratio between them.
@@ -424,7 +424,7 @@ pub struct Zoom {
 /// [`Camera::render_width`] and the GPU's texture limit have to agree about.
 ///
 /// **Whole above 1:1, fractional below it**, and the asymmetry is the point
-/// rather than an oversight — `docs/camera.md` D11. Magnifying, the world is
+/// rather than an oversight — `docs/client/design_camera_rig.md` D11. Magnifying, the world is
 /// drawn at the display's own resolution with `nearest` sampling, so a *whole*
 /// magnification puts every texel on exactly that many real pixels and a whole
 /// pixel of camera movement translates the picture; at `4/3` the texel widths
@@ -635,7 +635,7 @@ impl TileBounds {
 
 /// How the drawn image lands on the pixels a display actually has.
 ///
-/// The one place the two pixel sizes of `docs/camera.md` D11 meet, and the
+/// The one place the two pixel sizes of `docs/client/design_camera_rig.md` D11 meet, and the
 /// reason it is a value rather than three arguments: the three world passes all
 /// need the same answer, and a pass that computed its own would draw a correct
 /// frame at a different scale from its neighbours — which is not a wrong picture,
@@ -737,7 +737,7 @@ pub struct Camera {
     /// Pixels and not a tile: a tile is 44 pixels across and a drag is one pixel
     /// at a time.
     ///
-    /// **On the real pixel's lattice**, which is `docs/camera.md` D11 and is not
+    /// **On the real pixel's lattice**, which is `docs/client/design_camera_rig.md` D11 and is not
     /// the same as whole virtual pixels — it is whole virtual pixels only at
     /// 1:1. At `3x` this holds thirds, because a third of a virtual pixel is a
     /// whole pixel of the display and an eye that could not express one would
@@ -876,7 +876,7 @@ impl Camera {
     /// shrinks it, which is where a filter belongs: several virtual pixels
     /// landing on one real one is exactly the case `nearest` cannot answer.
     ///
-    /// See `docs/camera.md` D11 for why the magnifying case cannot be left to
+    /// See `docs/client/design_camera_rig.md` D11 for why the magnifying case cannot be left to
     /// the blit — the short of it is that an image of virtual resolution cannot
     /// express an offset of one real pixel, wherever the fraction is kept.
     pub fn minifies(&self) -> bool {
@@ -1208,7 +1208,7 @@ mod tests {
     /// Recorded rather than repaired, because repairing it is a decision about
     /// *motion* and not about centring — dropping the eye's fraction at the
     /// minifying rungs costs a third of a real pixel of smoothness there, which
-    /// is `docs/camera.md` D11's own subject. `docs/render/design_frame_assembly.md`'s backlog carries
+    /// is `docs/client/design_camera_rig.md` D11's own subject. `docs/render/design_frame_assembly.md`'s backlog carries
     /// it; this constant is what keeps the gate above from being green about it
     /// by accident.
     const AN_EYE_ON_A_HALF_PIXEL_REACHES_THE_CORNER: [&str; 1] = ["2/3x"];

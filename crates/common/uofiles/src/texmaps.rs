@@ -124,7 +124,7 @@ struct Entry {
 pub struct TexMaps {
     entries: Vec<Option<Entry>>,
     /// All of `texmaps.mul`, about 45MB of it. The same shape every reader in
-    /// this crate has — see the backlog in `docs/client.md`.
+    /// this crate has — see the backlog in `docs/client/evidence/2026-08-30-the-client-backlog.md`.
     data:    Vec<u8>,
 }
 

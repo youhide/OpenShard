@@ -15,7 +15,7 @@
 //! [`openshard_protocol::speech::Font`] the way `fonts.mul` text does — a
 //! known simplification, not an oversight, and the trade the "draw the whole
 //! line through one renderer or not at all" decision made: see
-//! `docs/client.md`.
+//! `docs/client/evidence/2026-08-30-the-client-backlog.md`.
 //!
 //! # The grey-pixel convention `fonts.mul` already uses
 //!

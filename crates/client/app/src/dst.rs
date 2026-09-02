@@ -20,7 +20,7 @@
 //! `Crowd` — and it is deliberately the simplest kinematics that could be right.
 //!
 //! It has exactly one rule beyond that, and it is the queue rule the client
-//! obeys (`steer.rs`, and `docs/client.md`): a press *while a step is under way*
+//! obeys (`steer.rs`, and `docs/client/design_walk.md`): a press *while a step is under way*
 //! moves no knot. It changes which way the step already owed will go, and that
 //! step leaves at the deadline it always had. Without it the oracle would demand
 //! a body that changes direction mid-tile, which is not a thing a grid walk can
@@ -59,7 +59,7 @@
 //! of this harness: a divergence introduced *into the copy* would be invisible
 //! here. If one of these tests ever needs a rule that is only in `App`, the
 //! answer is to lift that loop into a headless unit both can drive, not to grow
-//! the copy — see `docs/client.md`.
+//! the copy — see `docs/client/evidence/2026-08-30-the-client-backlog.md`.
 
 use std::collections::VecDeque;
 use std::time::{
@@ -287,7 +287,7 @@ impl Oracle {
     ///   which way the step already owed will go, and that step still leaves at
     ///   the deadline the walk already had. This is the queue rule: an input
     ///   rebuilds what is asked for next and never cuts short what is being
-    ///   walked — see `docs/client.md`;
+    ///   walked — see `docs/client/design_walk.md`;
     /// - every step crosses one tile over one hold at a constant speed,
     ///   whichever way the body was facing when it was asked for — a turn is a
     ///   packet, not a delay (see the module docs);
@@ -532,7 +532,7 @@ struct Sim {
     /// exactly as `App::step_online` holds it.
     walk:     Walk,
     /// **Where the body actually is**, and the whole reason this harness is not
-    /// a copy of `Crowd`: since `docs/movement_state_refactor.md` the local
+    /// a copy of `Crowd`: since `docs/client/evidence/2026-08-27-movement-state-refactor.md` the local
     /// body's pose comes from this core and never from the crowd — see
     /// `PresentationWorld::project_local_motion`, which is the line that
     /// overwrites what the crowd would have said. A harness that sampled the
@@ -2242,7 +2242,8 @@ fn wake_up_jitter_does_not_accumulate() {
 ///
 /// So this scenario asserts the ceiling directly, over the same walk at the
 /// same jitter, and the companion — the body did walk the whole way — is inside
-/// [`never_outran_a_walk`] and [`tracks`] both. `docs/camera.md` C4 has the
+/// [`never_outran_a_walk`] and [`tracks`] both.
+/// `docs/client/evidence/2026-08-14-the-camera-rig-record.md` C4 has the
 /// picture this came out of; `dst::dump_the_walk` draws it.
 #[test]
 fn wake_up_jitter_does_not_reach_the_speed() {
@@ -2448,7 +2449,7 @@ fn with_the_auto_door_off_the_doorway_is_walked_round_and_not_into() {
 // and paying nothing into the pace budget for the privilege.
 //
 // The rule, and the thing these scenarios assert: an input goes into the queue
-// or rebuilds it, and a step already begun ticks out. See `docs/client.md`.
+// or rebuilds it, and a step already begun ticks out. See `docs/client/design_walk.md`.
 
 /// The reversal, exactly as reported: walking east, west pressed halfway
 /// through the second step.
@@ -2526,7 +2527,7 @@ fn walking_back_and_forth_never_jumps_the_camera() {
 // The eye was `App`'s business until C0 and is `client/render`'s now: a `Rig`
 // of parameters, a `Follower` that holds where the eye has got to, and one
 // pipeline that every camera this client grows will be a value of. See
-// `docs/camera.md`.
+// `docs/client/design_camera_rig.md`.
 //
 // What that transplant must not have done is change anything, and the only
 // place that can be said honestly is here — the four units the walk is spread
@@ -3170,7 +3171,8 @@ fn dump_the_walk() {
 
 /// What a filter does to the start and the stop of a real walk, rig by rig.
 ///
-/// `docs/camera.md` C3 is the milestone this is the instrument for, and D9 is
+/// `plans/client/camera/PLAN.md`'s C3 is the milestone this is the instrument
+/// for, and `docs/client/design_camera_rig.md` D9 is
 /// why it is a dump and not a preset: no camera is chosen until one has been
 /// looked at. The reference rig is in the table as the row with no ramp at all —
 /// under `HARD` the eye *is* the body, so its start is the body's, which is

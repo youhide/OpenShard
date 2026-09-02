@@ -35,7 +35,7 @@
 //! workspace's `uofiles` does not parse yet. Until it does, [`flame`] picks a
 //! shape from the graphic — one warm default, and a wider, brighter one for a
 //! campfire. That is a deliberate stand-in and it is the one thing here that is
-//! invention rather than port; see `docs/client.md`.
+//! invention rather than port; see `docs/client/evidence/2026-08-30-the-client-backlog.md`.
 //!
 //! # The flicker is on the CPU
 //!

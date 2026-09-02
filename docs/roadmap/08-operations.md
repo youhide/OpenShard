@@ -10,7 +10,7 @@
 A shard stops on one `gateway::Shutdown`, cloned into the accept loop, every
 connection task and the tick; `run_shard` returns only once the last snapshot is
 written. The design and the order of events are in
-[`docs/client.md`](../client.md), under "Stopping is one word".
+[`docs/client/design_net.md`](../client/design_net.md), under "Stopping is one word".
 
 **The manners are a plan of its own: [`docs/shutdown.md`](../shutdown.md), S1–S6,
 all in.** `SIGTERM` asks rather than kills, so a shard under systemd saves; a

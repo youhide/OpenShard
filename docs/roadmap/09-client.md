@@ -1,4 +1,4 @@
-# 9. The client — planned, see [`docs/client.md`](../client.md)
+# 9. The client — planned, see [`docs/client/README.md`](../client/README.md)
 
 > Open work and follow-up findings from this phase are tracked in the
 > [consolidated backlog](backlog/README.md).
@@ -6,7 +6,7 @@
 Our own client, starting with the only part that has to exist either way: the
 protocol in the direction a client reads it, and a `crates/client/net` that
 connects, logs in and walks into the world. The milestones, and what is already
-missing for each, are in [`docs/client.md`](../client.md).
+missing for each, are in [`docs/client/README.md`](../client/README.md).
 
 - [x] M0 — `server_packet_length`, `frame_server_packet`, incremental Huffman,
       and `ServerPacket::decode` for the login set. `ClientPacket::encode` and
@@ -18,7 +18,7 @@ missing for each, are in [`docs/client.md`](../client.md).
   - [x] The decoders that fill a `WorldView`: `0x20`, `0x11`, `0x77`, `0x78`,
         `0x1A`, `0x1D`. `WorldView` now holds every other mobile and every
         ground item, not just the player; `0x11` decodes but is not folded in
-        — see `docs/client.md`.
+        — see `docs/client/design_net.md`.
   - [x] `0x02` with its sequence and fastwalk key, `0x22`/`0x21`.
         `client_net::walk::Walk` sends the steps and predicts where they land,
         because a `0x22` carries no position and only this end knows what the
@@ -32,7 +32,7 @@ missing for each, are in [`docs/client.md`](../client.md).
         `0x21` carries against the one the client derived on its own; the
         refusal is the only packet that ever states the server's own answer.
 
-## The reopening window, and the overlay that replaced the patch — see `client_window_state.md`
+## The reopening window, and the overlay that replaced the patch
 
 A locally-closed container, paperdoll or dialog reopened itself a beat
 later (2026-08-11): `App`'s own copy of `WorldView` learned of the close,
@@ -47,5 +47,5 @@ its own `view` locally at all, closing sets the overlay and sends the
 command, and `reconcile_own_windows` (pulled out of `sync_own_windows` so it
 is testable without a real `App`) clears an entry only once a fresh
 snapshot agrees the subject is gone.
-[`client_window_state.md`](../client_window_state.md) has the decision record
+[`client/evidence/2026-08-15-one-owner-for-a-window.md`](../client/evidence/2026-08-15-one-owner-for-a-window.md) has the decision record
 and the test that reproduces the original bug.

@@ -12,7 +12,7 @@
 //!
 //! # What is not here any more, and the three things that are
 //!
-//! This file used to answer every window's input. `docs/window_components.md`
+//! This file used to answer every window's input. `docs/client/design_panes.md`
 //! moved all six kinds into [`crate::panes`], one step at a time, and what is
 //! left falls into three groups:
 //!
@@ -622,7 +622,7 @@ impl App {
     ///
     /// The press while the hand is full is **not** asked about here: it is the
     /// manager's first question, ahead of every pane and of this — see
-    /// `App::manager_gestures` and decision 7 in `docs/window_components.md`.
+    /// `App::manager_gestures` and decision 7 in `docs/client/design_panes.md`.
     ///
     /// `owner` is `App::window_under_pointer`'s answer, asked once by
     /// `App::deliver` and handed down rather than asked again here.
@@ -820,7 +820,7 @@ impl App {
         match subject {
             WindowSubject::Container(serial) => {
                 // The overlay is what says this is closed — see D2 in
-                // `docs/client_window_state.md`. The line under it writes the
+                // `docs/client/evidence/2026-08-15-one-owner-for-a-window.md`. The line under it writes the
                 // same fact into this thread's own view, which is redundant
                 // for a container and is not for a vendor (the arm below sets
                 // only the overlay); both are kept until that plan's backlog

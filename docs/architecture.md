@@ -70,7 +70,7 @@ Arrows are dependencies; they only ever point down.
 | `movement` | The walk handshake, the sequence rules, the pace limiter, and A* (`find_path`). `Terrain` is a trait it does not implement. |
 | `config` | TOML, validated at load. |
 | `server` | The shard: glue only — `boot` loads config/store/world, `shard` owns the accept loop and shutdown, `dispatch` turns packets into commands, `session` is per-connection state. A library with a four-line binary on top, so a test can *start a shard* by calling `run_shard` instead of building one out of process. |
-| `client/net` | The client's side of the wire: framing, decompression, the login conversation as a sans-io state machine, a `WorldView` of what the server has shown, and `Dial` — how a connection is opened, of which `Tcp` is one answer. The mirror of `gateway` + `login`, and it depends on neither. See [`client.md`](client.md). |
+| `client/net` | The client's side of the wire: framing, decompression, the login conversation as a sans-io state machine, a `WorldView` of what the server has shown, and `Dial` — how a connection is opened, of which `Tcp` is one answer. The mirror of `gateway` + `login`, and it depends on neither. See [`client/design_net.md`](client/design_net.md). |
 | `world` | The tick, the client's file formats, `MapTerrain`, and the persistence journal. Owns `WorldState` and drives it. Orchestration, not rules — see the `tick/` layout below. |
 
 **The gameplay systems.** Each is a set of `fn(&mut WorldState)` in its own

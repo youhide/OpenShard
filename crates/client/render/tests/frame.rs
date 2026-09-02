@@ -5256,7 +5256,7 @@ fn a_mobile_is_drawn_over_the_ground_and_mirrors_with_its_facing() {
     let camera = Camera::new(centre, 256, 256);
 
     // The ground quad is built here rather than collected: `WorldMap` cannot be
-    // constructed in memory — see the backlog in docs/client.md — and what this
+    // constructed in memory — see the backlog in docs/client/evidence/2026-08-30-the-client-backlog.md — and what this
     // test needs is one tile under the mobile's feet at the depth `depth` would
     // have given it.
     let at = camera.to_screen(centre);
@@ -5401,7 +5401,7 @@ fn the_same_camera_renders_the_same_frame() {
     assert_ne!(frames[0], other.pixels, "moving the camera changed nothing");
 }
 
-/// The gate `docs/camera.md` D11 asks for, on the GPU: magnified, moving the
+/// The gate `docs/client/design_camera_rig.md` D11 asks for, on the GPU: magnified, moving the
 /// eye by `1/zoom` of a virtual pixel moves the picture by exactly one real one.
 ///
 /// Everything else about D11 is arithmetic that can be asserted without a

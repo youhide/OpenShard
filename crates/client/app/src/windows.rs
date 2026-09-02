@@ -10,7 +10,7 @@
 //! checked side by side on every press, and `own_windows` and `drawn_windows`
 //! are asked in the same breath to decide which window a click landed on.
 //!
-//! `docs/window_components.md` is finished with this module: every step of it
+//! `docs/client/design_panes.md` is finished with this module: every step of it
 //! took something from here into the window it belonged to, and what is left
 //! is what is true of the *layer* rather than of one window — which windows
 //! exist, in what order, where each sits, and who holds the three things there
@@ -52,7 +52,7 @@ use crate::hand::{
 /// A cascade rather than a pile: the shard sends no position, and two windows
 /// at one coordinate look like one window with the wrong contents. The
 /// reference client remembers a per-container position across sessions; this
-/// does not yet, and the note is in `docs/client.md`.
+/// does not yet, and the note is in `docs/client/evidence/2026-08-30-the-client-backlog.md`.
 const CONTAINER_CASCADE: GumpPixel = GumpPixel::new(24, 24);
 
 /// The corner the cascade starts from.
@@ -78,7 +78,7 @@ const CONTAINER_CASCADE_LENGTH: i32 = 8;
 /// window**. A shop's scroll position used to be an entry in
 /// `Windows::vendor_scrolls` that [`crate::App::close_window`] had to remember
 /// to remove by hand; anything that lives here is dropped by the same `retain`
-/// that takes the window off the list. See `docs/window_components.md`.
+/// that takes the window off the list. See `docs/client/design_panes.md`.
 #[derive(Debug)]
 pub struct OwnWindow {
     /// What it is a window over.
@@ -96,7 +96,7 @@ impl OwnWindow {
     ///
     /// **The inverse of `gump::place`, and the only one.** A pane lays itself
     /// out at the origin and at the art's own size
-    /// (`docs/window_components.md`'s window-local coordinates), so everything
+    /// (`docs/client/design_panes.md`'s window-local coordinates), so everything
     /// the manager decides about a window — its placement and its scale — has
     /// to be undone here before a pane is handed a cursor, exactly as it is
     /// applied there before the pane's quads reach the surface. Three callers
@@ -238,7 +238,7 @@ pub struct WindowHold {
 ///
 /// One list holds all three, because dragging, raising, hit-testing and
 /// closing are the same gesture over any of them — decision 5 in
-/// `docs/client.md`, and the reason the container's window machinery was
+/// `docs/client/design_windows.md`, and the reason the container's window machinery was
 /// written in this client's own gump pixels rather than as an egui window.
 /// They differ in exactly two places, and each is a `match` three arms long:
 /// what is laid out for it (see [`Windows::drawn_windows`], which is also
@@ -475,7 +475,7 @@ pub struct Windows {
     /// set as closed regardless of what the view still says, dropping the
     /// entry once the view itself agrees the subject is gone — the same
     /// reconciliation `Folded::corrected` runs for a mispredicted step, one
-    /// layer down. See `docs/client_window_state.md`'s D2.
+    /// layer down. See `docs/client/evidence/2026-08-15-one-owner-for-a-window.md`'s D2.
     ///
     /// # There is no packet and no command behind this
     ///
@@ -680,7 +680,7 @@ pub fn open_split_window(
 /// opened by [`open_local_window`] and closed by the `retain` in
 /// `App::close_window`, so being in `own_windows` *is* the fact and there is no
 /// second copy of it here to disagree with. This function took a `status_open`
-/// argument until step 3 of `docs/window_components.md`, and a `skills_open`
+/// argument until step 3 of `docs/client/design_panes.md`, and a `skills_open`
 /// beside it until step 2; what they were is a window's openness kept somewhere
 /// other than the list of open windows.
 pub fn reconcile_own_windows(

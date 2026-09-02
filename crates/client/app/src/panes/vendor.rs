@@ -1,7 +1,7 @@
 //! A shop's catalogue as a component: the first window kind to own its own
 //! state, lay itself out and answer its own input.
 //!
-//! Step 1 of `docs/window_components.md`, and the kind the plan was written
+//! Step 1 of `docs/client/design_panes.md`, and the kind the plan was written
 //! about — the wheel that became a map zoom over a shop scrolled to its last
 //! row was this window. Two maps on `Windows` keyed by the vendor's serial,
 //! `vendor_scrolls` and `vendor_amounts`, are now two fields of this struct,

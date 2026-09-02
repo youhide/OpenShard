@@ -87,7 +87,8 @@
     Our own client can now speak on either: `chat::Channel` is a selector cycled
     with Tab and drawn in the prompt, rather than a `/` prefix — a channel is a
     property of the line, not of its first character, and a prefix hides the
-    state it sets. See [`client.md`](../../client.md).
+    state it sets. See
+    [`client/evidence/2026-08-15-the-channel-selector.md`](../../client/evidence/2026-08-15-the-channel-selector.md).
 
     An alliance line reaches the alliance's members, which is now one set rather
     than one per speaker — see the entry above for what it used to be.
@@ -96,4 +97,4 @@
     byte, and the **tooltip** now shows here too — the `[ABBR]` suffix and the
     "Warlord, The Silver Serpent" line both. The `0xD6`/`0xDC` half this client
     had never had landed with the guild work rather than after it; see
-    "Tooltips, and the half that was never written" in [`client.md`](../../client.md).
+    [`client/evidence/2026-08-15-tooltips.md`](../../client/evidence/2026-08-15-tooltips.md).

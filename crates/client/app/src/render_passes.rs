@@ -154,7 +154,7 @@ fn draw_radar_view(
 /// container, a paperdoll, the skill sheet, all three through one machinery.
 /// None of them is an egui window: their position, their drag, their
 /// z-order and their hit test are this client's, in gump pixels, which is
-/// decision 5 in `docs/client.md`. See `own_windows`, `crate::gump`,
+/// decision 5 in `docs/client/design_windows.md`. See `own_windows`, `crate::gump`,
 /// `openshard_client_render::container` and
 /// `openshard_client_render::paperdoll`.
 ///
@@ -924,7 +924,7 @@ fn window_text(
         text.labels.iter().flat_map(|(label, _)| label.text.chars()),
     ) {
         // `eprintln!` and a window drawn anyway, the same corner every other
-        // atlas cuts on a failure — see `docs/client.md`.
+        // atlas cuts on a failure — see `docs/client/evidence/2026-08-30-the-client-backlog.md`.
         eprintln!("packing ttf glyphs: {error}");
     }
     // Window pixels to real ones, once: the window's own magnification and

@@ -14,7 +14,7 @@ corpse. The phases below are retained as the implementation record, with the
 remaining adjacent work called out explicitly rather than leaving the opening
 table to describe an earlier revision.
 
-> Read [`client.md`](client.md) first for how a window, a packet arm and a
+> Read [`client/README.md`](client/README.md) first for how a window, a packet arm and a
 > renderer are put together here — every phase below is that shape again. This
 > document does not restate M4's rules; it names which of them apply.
 

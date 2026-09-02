@@ -173,7 +173,8 @@ pub struct Frame {
     /// eviction `AtlasError::Full` triggers, rebuilding every pass from
     /// scratch. Its cost lands inside [`Frame::scene`] like any other world
     /// work, and without this flag a repack and a merely heavy screen are the
-    /// same number: this is the counter `docs/camera.md` asks for, so the
+    /// same number: this is the counter
+    /// `docs/client/evidence/2026-08-14-the-camera-rig-record.md` asks for, so the
     /// panel can name the stall instead of just showing it.
     pub repacked: bool,
 }

@@ -1,7 +1,7 @@
 //! A body's paperdoll as a component: the fifth window kind to own its state,
 //! its layout and its input.
 //!
-//! Step 5 of `docs/window_components.md`, and the first kind whose effects are
+//! Step 5 of `docs/client/design_panes.md`, and the first kind whose effects are
 //! mostly [`Effect::Open`] and [`Effect::Net`]: nearly every control on the
 //! frame asks for another window — the shard's, through a packet, or one of
 //! the two local kinds, through [`Effect::Open`], which had been waiting under

@@ -216,7 +216,7 @@ now a rule rather than four.
 - **`.tele` honours the z the client picked.** Deliberate for staff, and the one
   arrival that *should* name a height: a game master clicking a spot means that
   spot. Left alone.
-- **[`client.md`](../../client.md) has already attributed this report, twice, and the
+- **[the client's backlog](../../client/evidence/2026-08-30-the-client-backlog.md) has already attributed this report, twice, and the
   roadmap's suspect list never mentioned it.** Its "found while drawing the
   ground" and "found while joining the window to the wire" entries call the
   2026-08-02 report one bug with two client-side causes: `GroundQuad` builds its

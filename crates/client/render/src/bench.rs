@@ -1,6 +1,7 @@
 //! What a rig did to a scripted walk, and how ragged it was.
 //!
-//! The bench of `docs/camera.md`, C1. A [`Script`] is a body's whole path as a
+//! The bench of `docs/client/design_camera_rig.md`; how it was built is C1 of
+//! `docs/client/evidence/2026-08-14-the-camera-rig-record.md`. A [`Script`] is a body's whole path as a
 //! function of a virtual instant, [`run`] walks one at a chosen frame rate
 //! through a [`Follower`], and [`Metrics`] is what comes out. No window, no
 //! shard, no clock and no files: ten thousand frames cost under a millisecond,
@@ -294,7 +295,7 @@ pub fn run(rig: Rig, script: &Script, cadence: Cadence) -> Trace {
         // Rounded to a whole virtual pixel, which is the bench's own quantum:
         // it flies at 1:1, where that is exactly the display's. A bench at a
         // magnification would want `Camera::snap` and a zoom to hand it — see
-        // the backlog in `docs/camera.md`.
+        // the backlog in `docs/client/evidence/2026-08-14-the-camera-rig-record.md`.
         let eye = follower.advance(gaze, dt).pixel();
         samples.push(Sample {
             at: now,
@@ -839,7 +840,7 @@ mod tests {
             // Rounded to a whole virtual pixel, which is the bench's own quantum:
             // it flies at 1:1, where that is exactly the display's. A bench at a
             // magnification would want `Camera::snap` and a zoom to hand it — see
-            // the backlog in `docs/camera.md`.
+            // the backlog in `docs/client/evidence/2026-08-14-the-camera-rig-record.md`.
             let eye = follower.advance(gaze, dt).pixel();
             scope.record(dt, gaze, eye, follower.exact().unwrap());
             now += step;

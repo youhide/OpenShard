@@ -1,7 +1,7 @@
 //! An install-shaped hole: everything a pane needs to be *asked a question*,
 //! built out of nothing at all.
 //!
-//! Step 8 of `docs/window_components.md` is one assertion — a catalogue at its
+//! Step 8 of `docs/client/design_panes.md` is one assertion — a catalogue at its
 //! last row takes the notch and asks for no frame — made *through*
 //! [`AnyPane::handle`](crate::panes::AnyPane::handle) rather than through the pane's
 //! own private method. What blocked it for seven steps was a single field: a

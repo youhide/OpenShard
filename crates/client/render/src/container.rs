@@ -360,7 +360,8 @@ pub fn window_highlighted(
 /// picture rather than left as text with nothing behind it.
 ///
 /// This is the fix for "a press on a bag over a window over another bag is
-/// offered a button it cannot see" (`docs/window_components.md`'s backlog):
+/// offered a button it cannot see"
+/// (`docs/client/evidence/2026-08-17-the-pane-router.md`'s backlog):
 /// once the button is a picture in this list, it is exactly as pickable and
 /// exactly as occludable as the background and every icon beside it — the
 /// same [`crate::gump::pick`] walk that already resolves the rest of this

@@ -1,6 +1,6 @@
 //! Walking a bench scenario in the window.
 //!
-//! `docs/camera.md`, C4. The bench flies a rig over a [`Script`] as a *gaze* — a
+//! `docs/client/evidence/2026-08-14-the-camera-rig-record.md`, C4. The bench flies a rig over a [`Script`] as a *gaze* — a
 //! position as a function of time, with no crowd, no glide and no prediction
 //! behind it — which is what makes ten thousand frames cost a millisecond. This
 //! is the other reading of the same script: its [`Knot`]s are events, and each

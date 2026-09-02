@@ -473,7 +473,7 @@ impl App {
             }
             // **Empty, and that is the plan's own milestone.** This arm was
             // `scroll_skills() || scroll_vendor() || zoom()` — the `||` chain
-            // the whole of `docs/window_components.md` was written about, whose
+            // the whole of `docs/client/design_panes.md` was written about, whose
             // one `bool` answered "the notch was taken" and "the list moved" at
             // the same time. Both windows own their wheel now, each answering
             // the two questions as two fields, and the zoom is the caller's

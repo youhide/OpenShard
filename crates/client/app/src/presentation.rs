@@ -2635,7 +2635,7 @@ impl App {
         // Magnified it is the *viewport's* size and the magnification rides in
         // the vertex transform, so the world is drawn at the display's own
         // resolution and the blit below is a copy; minified it is the world's
-        // own larger extent and the blit shrinks it. `docs/camera.md` D11 is the
+        // own larger extent and the blit shrinks it. `docs/client/design_camera_rig.md` D11 is the
         // argument, and the short of it is that an image of virtual resolution
         // cannot express an offset of one real pixel — which is the whole of
         // what made a magnified scroll coarser than the screen it was on.

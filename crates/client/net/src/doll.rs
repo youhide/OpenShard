@@ -20,7 +20,7 @@
 //! Help (`0x9B`), Profile (`0xB8`) and the party manifest (`0xBF 0x06`) have no
 //! packet in `openshard_protocol` yet, and Options is a window of the client's
 //! own that does not exist. Those four buttons press and send nothing, which is
-//! written down in `docs/client.md` rather than papered over with a packet the
+//! written down in `docs/client/design_windows.md` rather than papered over with a packet the
 //! shard would log as unknown.
 
 use openshard_protocol::combat::WarMode;

@@ -5362,7 +5362,7 @@ fn health_colour(notoriety: Notoriety) -> egui::Color32 {
 /// The scope: what the eye is doing, what it is doing it with, and a scenario
 /// to make it do it.
 ///
-/// `docs/camera.md`, C4. From here on every remaining decision about the camera
+/// `docs/client/evidence/2026-08-14-the-camera-rig-record.md`, C4. From here on every remaining decision about the camera
 /// is a matter of looking rather than arguing, and this is what there is to look
 /// at: a preset and a slider per number, the last few seconds of the eye's own
 /// speed and jerk, the same [`Metrics`] the offline bench prints, and the bench's
@@ -5426,7 +5426,7 @@ fn rig_panel(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Req
 
     // The body's ease, under its own heading and with its own copy button,
     // because it is not part of the rig: a rig is the eye's parameter set and
-    // this is a property of the body the eye is looking at (`docs/camera.md`
+    // this is a property of the body the eye is looking at (`docs/client/design_camera_rig.md`
     // D10). They are on one panel because they are looked at together — which
     // is a fact about the sitting, not about the types.
     ui.separator();
@@ -5696,7 +5696,7 @@ fn frames_panel(ui: &mut egui::Ui, hud: &Hud) {
         ui.end_row();
     });
     radar_report(ui, hud, mib);
-    // The counter `docs/camera.md` asks for: without it, a full atlas repack
+    // The counter `docs/client/evidence/2026-08-14-the-camera-rig-record.md` asks for: without it, a full atlas repack
     // is indistinguishable from an ordinary heavy frame, both being a large
     // number in `world` above. `repacked` marks which frame in the window
     // paid for one; the total survives past that window.

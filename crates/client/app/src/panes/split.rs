@@ -369,7 +369,7 @@ mod tests {
     }
 
     /// The gestures, through [`AnyPane::handle`](crate::panes::AnyPane::handle) and against an install that ships
-    /// the five pictures — the shape step 8 of `docs/window_components.md` made
+    /// the five pictures — the shape step 8 of `docs/client/design_panes.md` made
     /// possible, and the only way to assert what the *manager* is asked for.
     mod gestures {
         use openshard_client_render::gump::GumpArt;

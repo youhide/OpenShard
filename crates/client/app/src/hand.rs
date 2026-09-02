@@ -16,7 +16,7 @@
 //! held item was taken from), [`PendingDrop`] (where it has been put while
 //! the shard decides), [`ItemDrag`] (what is on the cursor) and [`Hand`]
 //! itself (held, or dropped and waiting). It is not the *manager* for any of
-//! them: `docs/window_components.md`'s D2 and D7 still decide who is allowed
+//! them: `docs/client/design_panes.md`'s D2 and D7 still decide who is allowed
 //! to write `Windows::hand`, `Windows::grip` and `Windows::world_press`,
 //! and that stays [`crate::windows::Windows`] — this module only names what
 //! those fields hold and the one rule for turning a press into a drag.
@@ -59,7 +59,8 @@ pub struct ItemPress {
 /// magnified because it is half the picker's *own art*, and the cascade
 /// constants are not because they are screen placement — this is the third
 /// kind of constant in that argument, and it answers the way the second does.
-/// See `docs/window_components.md`'s Backlog entry of this name.
+/// See `docs/client/evidence/2026-08-17-the-pane-router.md`'s Backlog entry of
+/// this name.
 const DRAG_SLOP: i32 = 3;
 
 /// Whether the pointer has travelled far enough from where the button went
@@ -245,7 +246,7 @@ pub struct ItemDrag {
 ///
 /// **The client's mirror of the shard's own slot** — `Connection::held`, one
 /// per connection, because a cursor holds one thing — which is the whole of
-/// decision 7 in `docs/window_components.md`. The press that may *become* one
+/// decision 7 in `docs/client/design_panes.md`. The press that may *become* one
 /// of these is not here: it belongs to whichever pane the press landed on (see
 /// [`ItemPress`]), because nothing has been sent while a press is only a press,
 /// and a lift is what puts the shard and this end into the same state.
@@ -333,7 +334,7 @@ mod tests {
     /// the travel is measured by the manager, in the pixels the hand moves
     /// in, and handed to every holder as the same answer.
     ///
-    /// This is the whole of `docs/window_components.md`'s "`DRAG_SLOP` is
+    /// This is the whole of `docs/client/design_panes.md`'s "`DRAG_SLOP` is
     /// measured in whichever pixels its holder counts in" — an icon in a
     /// magnified bag and one lying on the ground now lift after the same
     /// movement of the mouse, because neither of them is what is being

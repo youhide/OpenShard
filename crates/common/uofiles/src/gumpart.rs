@@ -1,6 +1,6 @@
 //! `gumpartLegacyMUL.uop`: the images UO's dialog windows are built from.
 //!
-//! `docs/client.md`'s backlog called this out as the reason the client draws a
+//! `docs/client/evidence/2026-08-30-the-client-backlog.md`'s backlog called this out as the reason the client draws a
 //! placeholder for every `{ gumppic }`: every one of the container's 5,556
 //! entries carries compression flag 3, and [`crate::uop::Uop::entry`]
 //! deliberately refuses to hand back anything compressed. This module is what
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn a_real_containers_entries_are_flag_three_and_this_reader_handles_it() {
         // The claim the whole module rests on, checked against a shipped
-        // file rather than assumed from `docs/client.md`'s backlog note: a
+        // file rather than assumed from `docs/client/evidence/2026-08-30-the-client-backlog.md`'s backlog note: a
         // modern client really does mark every gump entry flag 3, and this is
         // what says the `UnsupportedCompression` arm of `decode_entry` is not
         // one this client ever exercises.

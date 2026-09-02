@@ -18,7 +18,7 @@
 //!
 //! A `0xAA` naming the mobile that is now the target, or naming nobody when the
 //! aim was refused or given up. That answer is what a client draws a highlight
-//! from — not this request. The paperdoll's rule (`docs/client.md`, decision 8)
+//! from — not this request. The paperdoll's rule (`docs/client/design_windows.md`, decision 8)
 //! for the world: **nothing is done locally on the way out.**
 
 use openshard_protocol::combat::AttackRequest;

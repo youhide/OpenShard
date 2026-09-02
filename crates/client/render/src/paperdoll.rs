@@ -44,7 +44,7 @@
 //! occludes (`MobileView.IsCovered`) — shoes under plate legs, arms under a
 //! closed robe. Every arm of that function keys on the item's **wire graphic**,
 //! which is the one graphic [`EquipmentLayer`] does not carry, so it is a
-//! backlog entry in `docs/client.md` and not a silent approximation here. Its
+//! backlog entry in `docs/client/evidence/2026-08-30-the-client-backlog.md` and not a silent approximation here. Its
 //! absence draws a layer that should have been hidden, which is a garment
 //! poking out from under a robe — visible, and not a hole.
 //!
@@ -966,7 +966,7 @@ mod tests {
         assert!(!order.contains(&Layer::MOUNT));
     }
 
-    /// Decision 3 in `docs/client.md`, and the reason [`EquipmentLayer`] carries
+    /// Decision 3 in `docs/client/design_windows.md`, and the reason [`EquipmentLayer`] carries
     /// its layer at all: a female body draws the torso *under* the shirt for
     /// the chest graphics the alternate table was written for, and a male one
     /// draws it over. Same outfit, two orders.

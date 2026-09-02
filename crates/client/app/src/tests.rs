@@ -94,7 +94,7 @@ fn bare_view() -> openshard_client_net::view::WorldView {
 /// The bug this overlay exists to close: a paperdoll this end closed
 /// stays closed even when the next snapshot — cloned from the link
 /// thread's own `WorldView` before it has heard about the close — still
-/// lists it open. `docs/client_window_state.md`'s S3.
+/// lists it open. `docs/client/evidence/2026-08-15-one-owner-for-a-window.md`'s S3.
 #[test]
 fn a_closed_paperdoll_does_not_reopen_on_an_unrelated_world_change() {
     let subject = doll(0x2A);
@@ -146,7 +146,7 @@ fn a_closed_paperdoll_does_not_reopen_on_an_unrelated_world_change() {
     // `App::apply_close_window` writing the same fact into this thread's copy,
     // or the shard taking the mobile away with a `0x1D`; the link thread is
     // never involved, and the `Command::CloseWindow` this comment used to name
-    // has not existed since S2 in `docs/client_window_state.md`.
+    // has not existed since S2 in `docs/client/evidence/2026-08-15-one-owner-for-a-window.md`.
     view.paperdolls.remove(&serial);
     reconcile_own_windows(&view, &mut own_windows, &mut locally_closed);
     assert!(
@@ -162,7 +162,7 @@ fn a_closed_paperdoll_does_not_reopen_on_an_unrelated_world_change() {
 /// A window's pane is its own kind's, and it is gone the moment the window is.
 ///
 /// The invariant `OwnWindow::pane` exists for, and the half of
-/// `docs/window_components.md`'s "no window has private state" that S0 closes: a
+/// `docs/client/design_panes.md`'s "no window has private state" that S0 closes: a
 /// shop's scroll position used to be an entry in a map on `Windows` that
 /// `App::close_window` had to remember to `remove` by hand, so nothing tied it
 /// to the window's lifetime and a reopened shop could inherit the last one's
@@ -230,7 +230,7 @@ fn a_window_carries_a_pane_of_its_own_kind_and_loses_it_with_the_window() {
 /// A `0x11` opens nothing, the button opens one window, and the `retain` that
 /// closes it is the whole of closing it.
 ///
-/// Step 3 of `docs/window_components.md` deleted the `bool` this used to be
+/// Step 3 of `docs/client/design_panes.md` deleted the `bool` this used to be
 /// asked through: `reconcile_own_windows` took a `status_open` and answered
 /// with a window, which is a window's openness kept in two places that could
 /// disagree. What is left is the same three facts, said about the list itself.
@@ -376,7 +376,7 @@ fn a_trade_gump_and_own_paperdoll_stay_open_together() {
 }
 
 // The scroll-pairing rule lives in `panes::paperdoll` since step 5 of
-// `docs/window_components.md`, and so do its tests — including the half the
+// `docs/client/design_panes.md`, and so do its tests — including the half the
 // old rule had to compare and the new shape answers by construction: two
 // clicks on two different dolls cannot pair, because each pane keeps its own
 // `last_scroll`.

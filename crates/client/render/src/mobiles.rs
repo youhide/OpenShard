@@ -33,7 +33,7 @@
 //! progress is a clock, an ease is a filter with state, and both belong to the
 //! layer that ages what it sees — `client/app`'s `crowd.rs`. This crate reads no
 //! clocks (see the crate docs), so a mobile arrives with its position already
-//! decided and the renderer places a picture at it. `docs/camera.md` D10 is the
+//! decided and the renderer places a picture at it. `docs/client/design_camera_rig.md` D10 is the
 //! argument for the ease living on the body rather than on the eye.
 
 use std::rc::Rc;
@@ -112,7 +112,7 @@ pub struct Mobile {
     /// which is where the reason is: a sprite mid-step covers both tiles, so it
     /// has to sort at the nearer of them or the ground it is walking off is
     /// drawn over it. Not derived from [`Mobile::drawn`] — an eased body lags
-    /// its tile even when it is standing (`docs/camera.md` D10), so the pixel
+    /// its tile even when it is standing (`docs/client/design_camera_rig.md` D10), so the pixel
     /// offset cannot tell "walking" from "settling", and this is a question
     /// about the step and not about the picture.
     pub from:      Option<Point>,
@@ -128,7 +128,7 @@ pub struct Mobile {
     ///
     /// **Not derived from [`Mobile::at`], and that is the point.** A body
     /// between two tiles is part way through a step; a body being eased is
-    /// behind its tile by whatever the filter is holding (`docs/camera.md` D10).
+    /// behind its tile by whatever the filter is holding (`docs/client/design_camera_rig.md` D10).
     /// Neither is a function of the tile and both are a function of a clock, so
     /// the caller that owns the clock owns this — `client/app`'s `crowd.rs` — and
     /// this crate draws where it is told.
@@ -192,7 +192,7 @@ pub struct EquipmentLayer {
     /// Carried because the *picture* is not enough to draw a body correctly:
     /// the reference skips hair and a beard on the dead ([`worn_graphic`]), and
     /// nothing about a hair graphic says it is hair. It is also the field a
-    /// paperdoll's layer ordering needs — see `docs/client.md` — which is why
+    /// paperdoll's layer ordering needs — see `docs/client/design_windows.md` — which is why
     /// it is the wire's [`Layer`] and not a smaller local enum: the ordering
     /// table is written against these numbers.
     pub layer:   Layer,
@@ -221,7 +221,7 @@ pub fn world_position(mobile: &Mobile) -> WorldPoint {
 /// The same, where the camera puts it in the drawn image, to a fraction.
 ///
 /// **Snapped to the same lattice the eye is on**, which is the half of
-/// `docs/camera.md` D11 that is not about the camera. Two things decide where a
+/// `docs/client/design_camera_rig.md` D11 that is not about the camera. Two things decide where a
 /// sprite lands on the display — where the body is and where the eye is — and
 /// if only one of them is on the real pixel's grid, the difference is not: the
 /// sprite is resampled by a fraction of a texel against a world that is not, so
