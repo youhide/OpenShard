@@ -140,3 +140,24 @@
     Cotton, flax and wool are still bought rather than farmed or sheared —
     `FarmableCotton`, `FarmableFlax` and shearing a sheep are their own world
     slice.
+  - Found while building that chain, not fixed, each worth its own small slice:
+    - **A dozen further addon deeds are craftable and inert.** Carpentry group 7
+      carries generated rows for ServUO's dartboard, water trough, bulletin
+      board and the rest, all on the same generic `0x14F0` scroll and none with
+      a `kind` or an `addon` — so a carpenter spends the boards and gets a
+      scroll that does nothing. Each wants an `AddonKind`, a deed kind, and
+      whatever the installed thing *does*; the ovens, the loom and the wheel are
+      three worked examples of the same five-line pattern. Only rows that carry
+      an addon are gated today (`no_addon_deed_is_offered_twice`), because
+      "outputs `0x14F0` implies typed" would be an assertion about content this
+      engine has not reached rather than about a defect.
+    - **Cloth does not become bandages.** ServUO's `Cloth.Scissor` and
+      `UncutCloth.Scissor` are both `ScissorHelper(from, new Bandage(), 1)`, and
+      `items/src/cut.rs` is already the seam. Bandages reach a player from a
+      vendor or a corpse today, so this is a missing *route* rather than an
+      unreachable item — which is why it was left out of the cloth chain rather
+      than folded into it.
+    - **`LightYarn` and `LightYarnUnraveled` have no producer**, upstream
+      included: a wheel makes `DarkYarn` whichever wool went on. Both are vendor
+      stock here and both weave, so nothing is broken; noted so a later pass does
+      not read it as a gap this engine opened.
