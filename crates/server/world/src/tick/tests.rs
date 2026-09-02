@@ -19201,7 +19201,7 @@ fn a_chase_does_not_cut_a_corner_past_a_bystander() {
 /// The walkway is the other half: five units up, laid on ground that has no
 /// room under it, so standing on it is standing somewhere `ground_z` does not
 /// report. That is the raised origin
-/// [`docs/map/navigation_spans.md`](../../../../docs/map/navigation_spans.md)'s
+/// [`docs/map/navigation_spans.md`](../../../../../docs/map/navigation_spans.md)'s
 /// N7 asks for by name — the one that would have passed for the wrong reason
 /// before N4 gave the graph a node per place rather than per tile.
 fn two_corridors() -> Scene {
@@ -19266,7 +19266,7 @@ fn walk_toward(world: &mut World, from: Point, to: Point) -> Point {
 /// The shard walks a creature a route the exact search cannot see, and the
 /// baked graph is what carries it.
 ///
-/// **[`docs/map/navigation_spans.md`](../../../../docs/map/navigation_spans.md)'s
+/// **[`docs/map/navigation_spans.md`](../../../../../docs/map/navigation_spans.md)'s
 /// N7**, and the first thing on the shard to read `FacetState::coarse`. The
 /// artifact has been loaded, validated and paid for since the terrain-seam work;
 /// what it had was one test for its only reader. Server AI planned with flat
@@ -19382,7 +19382,7 @@ const DOORWAY: (u16, u16) = (90, 32);
 /// A refused long route is remembered, and the graph is not asked again until
 /// it lapses.
 ///
-/// **[`docs/map/navigation_spans.md`](../../../../docs/map/navigation_spans.md)'s
+/// **[`docs/map/navigation_spans.md`](../../../../../docs/map/navigation_spans.md)'s
 /// N7 finding.** `ai::step_toward` is a pure function of the world, so a body
 /// following something it cannot reach paid the whole endpoint join on *every*
 /// beat and had nowhere to write down that it had already asked. A chase does
