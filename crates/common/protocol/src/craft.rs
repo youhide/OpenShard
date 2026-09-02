@@ -770,8 +770,28 @@ impl EncodePacket for CraftCatalogue {
             out.u8(skill);
             out.u16(value);
         }
-        out.u16(u16::try_from(self.amounts.len()).expect("a craft stock context fits a u16 count"));
-        for &amount in &self.amounts {
+        // Stock rides the wire sparsely.  `amounts` is the full-width table —
+        // one slot per [`CRAFT_STOCK_SELECTORS`] entry — but a backpack holds a
+        // handful of craftable materials, so only the stocked keys are sent and
+        // the decoder rebuilds the rest as zero.  A dense `u32` per key is what
+        // this packet used to send, and at 125 keys that alone was 502 bytes:
+        // the context would have outgrown the packet before the rows it exists
+        // to avoid sending ever did.
+        assert_eq!(
+            self.amounts.len(),
+            CRAFT_KEY_COUNT,
+            "a craft stock context is the full-width key table"
+        );
+        let stocked: Vec<(u16, u32)> = self
+            .amounts
+            .iter()
+            .enumerate()
+            .filter(|&(_, &amount)| amount != 0)
+            .map(|(key, &amount)| (u16::try_from(key).expect("a craft stock key fits a u16"), amount))
+            .collect();
+        out.u16(u16::try_from(stocked.len()).expect("a craft stock context fits a u16 count"));
+        for (key, amount) in stocked {
+            out.u16(key);
             out.u32(amount);
         }
     }
@@ -807,14 +827,19 @@ impl DecodePacket for CraftCatalogue {
         let skills = (0..reader.u8()?)
             .map(|_| Ok((reader.u8()?, reader.u16()?)))
             .collect::<Result<Vec<_>, DecodeError>>()?;
-        let amounts = (0..reader.u16()?)
-            .map(|_| reader.u32().map_err(DecodeError::from))
-            .collect::<Result<Vec<_>, DecodeError>>()?;
-        if amounts.len() != CRAFT_KEY_COUNT {
-            return Err(DecodeError::UnknownValue {
-                field: "craft stock key count",
-                value: u32::try_from(amounts.len()).unwrap_or(u32::MAX),
-            });
+        // The sender wrote only the stocked keys; the table is full width here
+        // so every reader indexes it by `CraftKey` without a lookup.
+        let mut amounts = vec![0u32; CRAFT_KEY_COUNT];
+        for _ in 0..reader.u16()? {
+            let key = reader.u16()?;
+            let amount = reader.u32()?;
+            let Some(slot) = amounts.get_mut(usize::from(key)) else {
+                return Err(DecodeError::UnknownValue {
+                    field: "craft stock key",
+                    value: u32::from(key),
+                });
+            };
+            *slot = amount;
         }
         let mut catalogue = Self {
             gump_id,
@@ -899,7 +924,7 @@ mod tests {
         let bytes = encode_packet(&sent, ClientVersion::TOL);
         assert!(
             bytes.len() < 512,
-            "opening the catalogue sends context, not 492 rows"
+            "opening the catalogue sends context, not the whole recipe table"
         );
         let Some(ServerPacket::CraftCatalogue(found)) =
             ServerPacket::decode(&bytes, ClientVersion::TOL).unwrap()
@@ -908,10 +933,58 @@ mod tests {
         };
         assert_eq!(found, sent, "the wire-owned context round-trips");
         assert_eq!(found.rows.len(), CRAFT_RECIPE_LOCATIONS.len());
-        assert_eq!(found.rows.len(), 492);
+        // A lower bound, not the exact count: the point is that hundreds of
+        // rows appear without a byte of them on the wire, and every new trade
+        // moves an exact literal without saying anything.
+        assert!(found.rows.len() > 400, "the whole catalogue materializes");
         assert!(
             found.rows.iter().all(|row| !row.ready),
             "zero stock keeps every locally materialized recipe unavailable"
+        );
+    }
+
+    /// The context is compact in *materials* as well as in rows: a full-width
+    /// stock table is 125 keys wide and a pack never holds them all, so only the
+    /// stocked keys travel.  Sending them densely is what pushed this packet
+    /// over its budget once Cooking's keys landed.
+    #[test]
+    fn a_stocked_craft_key_round_trips_without_sending_the_empty_ones() {
+        let mut amounts = vec![0; CRAFT_KEY_COUNT];
+        let last = CRAFT_KEY_COUNT - 1;
+        amounts[0] = 42;
+        amounts[last] = 7;
+        let sent = CraftCatalogue {
+            gump_id: GumpId(0x00AD_0001),
+            request_id: 17,
+            catalogue_revision: CRAFT_CATALOGUE_REVISION,
+            craft_projection_revision: 0,
+            backpack_revision: 23,
+            has_pack: true,
+            facilities: 3,
+            skills: vec![(7, 300)],
+            amounts,
+            rows: Vec::new(),
+        };
+        let bytes = encode_packet(&sent, ClientVersion::TOL);
+        assert!(
+            bytes.len() < 512,
+            "two stocked keys must not cost the whole key table"
+        );
+        let Some(ServerPacket::CraftCatalogue(found)) =
+            ServerPacket::decode(&bytes, ClientVersion::TOL).unwrap()
+        else {
+            panic!("the compact catalogue packet must decode");
+        };
+        assert_eq!(
+            found.amounts.len(),
+            CRAFT_KEY_COUNT,
+            "the table is rebuilt full width"
+        );
+        assert_eq!(found.amounts[0], 42);
+        assert_eq!(found.amounts[last], 7);
+        assert!(
+            found.amounts[1..last].iter().all(|&amount| amount == 0),
+            "an unsent key decodes as no stock"
         );
     }
 
