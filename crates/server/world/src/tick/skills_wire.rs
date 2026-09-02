@@ -210,6 +210,20 @@ impl World {
             {
                 self.offer_a_plot(player, item);
             }
+            // Every addon deed carries its `ItemKind` from creation (crafted,
+            // vendor-stocked or admin-made) or restore, whether or not it has
+            // gained the transient `AddonDeed` component yet — that component
+            // is only ever a cache of this same lookup.
+            _ if self
+                .state
+                .registry
+                .get::<openshard_state::components::ItemKind>(item)
+                .is_some_and(|kind| {
+                    openshard_state::components::AddonDeed::from_item_kind(kind.0).is_some()
+                }) =>
+            {
+                self.offer_addon_placement(player, item);
+            }
             // And a house's sign, for the same reason and on the same terms:
             // there is one place a double-clicked item is given a default
             // meaning, and it is this match.

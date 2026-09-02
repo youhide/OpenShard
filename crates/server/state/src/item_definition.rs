@@ -49,6 +49,16 @@ pub struct ItemDefinition {
     pub armor_rating:    Option<u16>,
     /// Closed semantic categories this kind belongs to.
     pub tags:            &'static [ItemTag],
+    /// Whether this kind's `graphic` is deliberately shared with other
+    /// definitions rather than uniquely its own — a house/addon/recipe deed's
+    /// art is one generic scroll (`0x14F0`) regardless of what it builds, the
+    /// classic client draws no other tell, and only the persisted `ItemKind`
+    /// says what a given deed is. A shared graphic is therefore excluded from
+    /// [`kind_from_drawn`]'s reverse lookup: art alone cannot identify one of
+    /// these kinds, so guessing would silently pick whichever definition
+    /// happens to come first rather than refusing, which is the one thing this
+    /// registry exists not to do.
+    pub shared_art:       bool,
 }
 
 /// One material grade and how the classic client represents it.
@@ -169,7 +179,8 @@ pub fn presentation_of(kind: ItemKindId, material: Option<MaterialId>) -> Option
 #[must_use]
 pub fn kind_from_drawn(drawn: Drawn) -> Option<(ItemKindId, Option<MaterialId>)> {
     let item = ITEM_DEFINITIONS.iter().find(|definition| {
-        definition.graphic == drawn.id || definition.legacy_graphics.contains(&drawn.id)
+        !definition.shared_art
+            && (definition.graphic == drawn.id || definition.legacy_graphics.contains(&drawn.id))
     })?;
     let material = match item.material_family {
         None if drawn.hue == Hue::NONE => None,

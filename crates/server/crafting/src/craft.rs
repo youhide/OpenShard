@@ -24,6 +24,7 @@ use openshard_protocol::wire::{
     SoundId,
 };
 use openshard_state::components::{
+    AddonDeed,
     CraftedBy,
     Crafting,
     Name,
@@ -481,6 +482,12 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
 
     let marked = outcome.exceptional && recipe.markable && grandmaster(state, crafter, def);
     if let Some(item) = item {
+        if let Some(addon) = recipe.addon {
+            // Identity is the typed output's `ItemKind`, already installed by
+            // the placement above; this label is cosmetic only.
+            state.registry.insert(item, AddonDeed { addon });
+            state.registry.insert(item, Name(addon.label().to_owned()));
+        }
         if outcome.exceptional {
             state.registry.insert(item, Quality { exceptional: true });
         }

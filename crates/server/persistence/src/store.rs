@@ -660,6 +660,7 @@ mod tests {
             rune:           None,
             runebook:       None,
             locked_down:    None,
+            addon:          None,
             affixes:        Vec::new(),
             location:       crate::record::ItemLocation::Contained {
                 container: Serial::new(container).expect("a valid test serial"),
@@ -692,6 +693,7 @@ mod tests {
             rune:           None,
             runebook:       None,
             locked_down:    None,
+            addon:          None,
             affixes:        Vec::new(),
             location:       crate::record::ItemLocation::Ground {
                 facet: 0,

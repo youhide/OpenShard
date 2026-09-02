@@ -492,6 +492,19 @@ typed material-bearing input of that same family.
 graphic, so scripts can migrate rules without reverse-engineering client
 presentation. The fields remain `None` for still-unmapped legacy items.
 
+The registry now admits one narrow, explicit exception to graphic uniqueness:
+`ItemDefinition::shared_art` (`state/data/items.json`), for a kind whose art is
+deliberately not its own — a house/addon deed's generic scroll (`0x14F0`),
+which several distinct kinds legitimately share and the classic client draws
+no other tell for. A `shared_art` definition's graphic is excluded from
+`kind_from_drawn`'s reverse lookup rather than resolved arbitrarily: art alone
+cannot name one of these kinds, so the registry refuses to guess instead of
+picking whichever definition happens to come first. The build rejects a
+`shared_art` graphic that collides with a graphic already claimed uniquely.
+The first three rows are the oven-deed kinds (110–112); a deed's saved
+identity is its `ItemKind`, exactly like any other typed item, with no
+special-cased persistence of its own.
+
 The item-transaction layer now consumes the generated recipe/identity graph as
 a shared client/server artifact. Each exact semantic or audited legacy selector
 has a dense `CraftKey`; recursive backpack stock maintains totals and ordered

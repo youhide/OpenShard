@@ -38,6 +38,9 @@ impl World {
             openshard_state::TargetPurpose::PlaceHouse { deed } => {
                 self.place_house_from_deed(actor, deed, response.location);
             }
+            openshard_state::TargetPurpose::PlaceAddon { deed } => {
+                self.place_addon_from_deed(actor, deed, response.location);
+            }
             openshard_state::TargetPurpose::HouseList { change } => {
                 self.change_house_list_for(actor, change, response.object);
             }

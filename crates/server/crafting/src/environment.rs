@@ -174,6 +174,13 @@ fn is_oven(id: u16) -> bool {
 }
 
 /// A flour mill — `m_Mills`, which ServUO keeps as loose ids rather than ranges.
+///
+/// `0x1295` and `0x129F` sit oddly inside an otherwise contiguous `0x1920..=0x1934`
+/// run and are almost certainly ServUO's own misprints for `0x1925`/`0x192F` —
+/// but this list is copied verbatim (`CraftItem.cs`'s `m_Mills`), and the other
+/// fourteen ids already cover the mill, so it is harmless for gameplay. Kept as
+/// upstream has it rather than silently "fixed" into parity drift; a real
+/// divergence belongs in `docs/findings.md`, not a quiet edit here.
 fn is_mill(id: u16) -> bool {
     const MILLS: &[u16] = &[
         0x1920, 0x1921, 0x1922, 0x1923, 0x1924, 0x1295, 0x1926, 0x1928, 0x192C, 0x192D, 0x192E, 0x129F,

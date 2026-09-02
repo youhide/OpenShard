@@ -1621,6 +1621,11 @@ pub enum TargetPurpose {
         /// The deed being spent.
         deed: EntityId,
     },
+    /// A house addon waiting for the tile its anchor will occupy.
+    PlaceAddon {
+        /// The deed being spent.
+        deed: EntityId,
+    },
     /// Teleport the targeter to the clicked spot — the cursor `.tele`.
     Teleport,
     /// Say what a look from the targeter to the clicked spot meets — the cursor

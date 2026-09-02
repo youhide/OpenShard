@@ -58,6 +58,7 @@ const SYSTEMS = [
     // Special wood therefore colors a bow but still makes ordinary shafts.
     plainTypes: new Set(['Kindling', 'Shaft', 'Arrow', 'Bolt']),
   },
+  { file: 'DefCooking', module: 'cooking', skill: 'Cooking' },
 ];
 
 // ---------------------------------------------------------------------------

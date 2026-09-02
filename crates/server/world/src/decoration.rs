@@ -63,6 +63,17 @@ pub struct DecorSet {
 
 include!(concat!(env!("OUT_DIR"), "/deco.rs"));
 
+/// A multi-tile addon's component layout by its ServUO class name — the same
+/// `data/deco_addons.json` row the pre-placed decoration above was flattened
+/// from. `None` for a name the file does not carry.
+#[must_use]
+pub fn addon_components(name: &str) -> Option<&'static [AddonComponent]> {
+    ADDON_COMPONENTS
+        .iter()
+        .find(|&&(addon, _)| addon == name)
+        .map(|&(_, components)| components)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

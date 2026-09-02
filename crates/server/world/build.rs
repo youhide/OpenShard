@@ -763,6 +763,32 @@ fn deco(text: &str, addons_text: &str) -> String {
     }
     out.push_str("];\n\n");
 
+    out.push_str(
+        "/// Every multi-tile addon's component layout, keyed by its ServUO class\n\
+         /// name. The same table the statics above are flattened through, so a\n\
+         /// runtime installer (a crafted addon deed's placement) reads the one\n\
+         /// place this geometry is written rather than keeping its own copy that\n\
+         /// could drift from what the world already has standing.\n",
+    );
+    out.push_str(
+        "/// One tile of a multi-tile addon: what it draws as, and where it stands\n\
+         /// relative to the addon's root — `(graphic, dx, dy, dz)`.\n\
+         pub type AddonComponent = (openshard_protocol::wire::Graphic, i16, i16, i8);\n\n",
+    );
+    out.push_str("pub const ADDON_COMPONENTS: &[(&str, &[AddonComponent])] = &[\n");
+    for addon in &addon_file.addons {
+        write!(out, "    ({:?}, &[", addon.name).unwrap();
+        for &(graphic, dx, dy, dz) in &addon.components {
+            write!(
+                out,
+                "(openshard_protocol::wire::Graphic({graphic}), {dx}, {dy}, {dz}), "
+            )
+            .unwrap();
+        }
+        out.push_str("]),\n");
+    }
+    out.push_str("];\n\n");
+
     out.push_str(DECO_DOC);
     out.push_str("#[must_use]\npub fn shipped() -> Vec<DecorSet> {\n    vec![DecorSet {\n");
     writeln!(out, "        verb: {:?},", file.verb).unwrap();

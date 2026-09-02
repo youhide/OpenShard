@@ -295,6 +295,18 @@ pub fn has_room_for(state: &WorldState, house: EntityId, more: usize) -> bool {
     stored(state, house) + more <= allowance(state, house).storage
 }
 
+/// The house's serial, if `actor` is trusted enough to change its storage.
+///
+/// The same gate [`lock_down`] and [`release`] open with, named for callers that
+/// have to ask it *before* acting rather than through the act — taking a whole
+/// house addon down and handing its deed back is one such: the deed has to be in
+/// the player's pack before the oven stops existing, and giving it to somebody
+/// who was never allowed to touch the house would be a refusal arriving one step
+/// too late.
+pub fn may_change(state: &WorldState, actor: EntityId, house: EntityId) -> Result<Serial, StorageRefusal> {
+    trusted(state, actor, house)
+}
+
 /// The house's serial, if `actor` is trusted enough to change it.
 fn trusted(state: &WorldState, actor: EntityId, house: EntityId) -> Result<Serial, StorageRefusal> {
     let (Some(entry), Some(who)) = (

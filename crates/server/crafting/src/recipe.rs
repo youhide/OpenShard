@@ -21,7 +21,10 @@ use openshard_protocol::wire::{
     Graphic,
     Hue,
 };
-use openshard_state::Skill;
+use openshard_state::{
+    AddonKind,
+    Skill,
+};
 
 use crate::system::{
     Needs,
@@ -73,6 +76,8 @@ pub struct Recipe {
     /// row on its graphic/hue adapter until the item catalogue gives it a stable
     /// identity.
     pub kind:               Option<ItemKindId>,
+    /// The house addon this generic-looking deed installs, if any.
+    pub addon:              Option<AddonKind>,
     /// The item art it produces.
     pub graphic:            Graphic,
     /// Its name, for the gump.
@@ -112,6 +117,14 @@ pub struct Recipe {
     /// Tenths knocked off every skill's `min` for the "can you attempt this at
     /// all" gate — ServUO's `SetMinSkillOffset`.
     pub min_skill_offset:   i32,
+    /// This recipe's own floor for [`chance::chance`](crate::chance::chance)'s
+    /// interpolation, in per-mille, overriding the system's
+    /// [`CraftSystemDef::chance_at_min`](crate::system::CraftSystemDef::chance_at_min)
+    /// — ServUO's `CraftSystem.GetChanceAtMin(CraftItem)`, which most systems
+    /// answer with their own constant but a handful special-case by recipe
+    /// (Cooking's `GrapesOfWrath`/`EnchantedApple` start at 50% rather than the
+    /// trade's 0%). `None` for every recipe that does not.
+    pub min_chance:         Option<u32>,
     /// Whether an exceptional one carries its maker's name — ServUO's
     /// `CraftItem.IsMarkable`, which is a list of base classes (armour, weapons,
     /// clothing, jewellery, tools, instruments) and so is data here rather than a

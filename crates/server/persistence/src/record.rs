@@ -402,7 +402,11 @@ mod optional_serial {
 /// - v35: optional `item_kind` and `material` columns. Their absence keeps a
 ///   pre-migration item on the audited graphic/hue restore path; new records
 ///   retain semantic identity directly.
-pub const SCHEMA_VERSION: u32 = 35;
+/// - v36: `addon_kind` and `addon_root` on an item: which installed house addon
+///   a locked-down component is a tile of. Two nullable columns; absent on every
+///   pre-migration row, which is correct — an addon placed before this existed
+///   was never a group and cannot be made one after the fact.
+pub const SCHEMA_VERSION: u32 = 36;
 
 /// One component of a house whose shape nobody shipped.
 ///
@@ -1019,6 +1023,14 @@ pub struct ItemRecord {
     /// one at a time, by a lift that already has the item in hand.
     #[serde(default)]
     pub locked_down:    Option<LockdownData>,
+    /// The installed house addon this item is one tile of, if it is one.
+    /// `None` for every ordinary item, and defaulted so a pre-v36 save loads.
+    ///
+    /// Beside `locked_down` and for its reason: an addon component *is* pinned
+    /// house furniture, and the question "what else is part of this oven" is
+    /// asked one item at a time, by a release that already has one in hand.
+    #[serde(default)]
+    pub addon:          Option<AddonPartData>,
     /// Shard-defined properties of this particular item. A list rather than a
     /// column per property: a sword carries only a few, while new affix kinds
     /// should not force a database redesign. Empty is the ordinary item.
@@ -1065,6 +1077,23 @@ pub struct LockdownData {
     /// live possibility rather than a hypothetical one.
     #[serde(default)]
     pub secure: Option<u8>,
+}
+
+/// One tile of an installed house addon, as saved — a mirror of the world's
+/// `AddonPart` component.
+///
+/// The addon is named by the **`ItemKindId` of the deed that installs it**
+/// rather than by a number of its own: that mapping is already the durable
+/// identity of a deed on disk (`AddonKind::deed_kind`), and a second numbering
+/// beside it would be a second thing to keep in step.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct AddonPartData {
+    /// The deed's registered item-kind id, which names the addon.
+    pub kind: u32,
+    /// The serial of the addon's first component; every part of one addon
+    /// carries the same value, the root included.
+    #[serde(with = "serial")]
+    pub root: Serial,
 }
 
 /// A runebook's contents, as saved.
@@ -1759,6 +1788,10 @@ mod tests {
                     charges:       4,
                     max_charges:   10,
                     default_entry: Some(0),
+                }),
+                addon: Some(AddonPartData {
+                    kind: 110,
+                    root: Serial::new(0x4000_0004).unwrap(),
                 }),
                 affixes: vec![ItemAffixRecord::Slayer {
                     body:          0x0009,

@@ -60,7 +60,7 @@ started.
 - ~~**Resource gathering.**~~ Landed; see **Mining, Lumberjacking and Fishing**
   in §6 below.
 - ~~**Crafting.**~~ Landed; see **Crafting** in §6 `crafting` below. Still open
-  from that entry: the six remaining `Def*` tables, Repair/Enhance/AlterItem/
+  from that entry: the four remaining `Def*` tables, Repair/Enhance/AlterItem/
   Resmelt, recipe scrolls, make-number/make-max and the last-ten list, and the
   two material chains (hides → leather, cotton → cloth) that are addon
   interactions in ServUO rather than crafts.

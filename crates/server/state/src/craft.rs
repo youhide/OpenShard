@@ -64,6 +64,8 @@ pub fn craft_tool(graphic: Graphic) -> Option<CraftToolData> {
         0x0E9B => Skill::Alchemy,
         // Bowcraft/Fletching: both facings of fletcher's tools.
         0x1022 | 0x1023 => Skill::Fletching,
+        // Cooking: skillet, rolling pin, and flour sifter.
+        0x097F | 0x1043 | 0x103E => Skill::Cooking,
         _ => return None,
     };
     Some(CraftToolData {

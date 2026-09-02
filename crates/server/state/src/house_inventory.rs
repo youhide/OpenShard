@@ -593,6 +593,12 @@ impl WorldState {
             }
             None => {
                 self.registry.remove::<LockedDown>(item);
+                // An addon's grouping is a fact about pinned house furniture: a
+                // component that has gone loose — released, or swept into a
+                // collapsed house's crate — is an ordinary item again, not half
+                // of an oven whose other half is now somewhere else. See
+                // [`AddonPart`](crate::components::AddonPart).
+                self.registry.remove::<crate::components::AddonPart>(item);
             }
         }
         let serial = self.registry.serial_of(item);

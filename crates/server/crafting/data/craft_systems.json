@@ -68,6 +68,15 @@
       "chance_at_min": 500,
       "eca": "FiftyPercentChanceMinusTenPercent",
       "craft_sound": "0x0055"
+    },
+    {
+      "trade": "cooking",
+      "note": "Cooking uses ServUO's zero-percent floor and sliding exceptional curve. Individual recipes require a mill, heat, or an oven as their ingredients demand.",
+      "skill": "Cooking",
+      "title": 1044003,
+      "chance_at_min": 0,
+      "eca": "ChanceMinusSixtyToFourtyFive",
+      "craft_sound": "0x0000"
     }
   ]
 }

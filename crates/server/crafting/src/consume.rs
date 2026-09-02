@@ -560,19 +560,6 @@ fn expected_identity_matches(state: &WorldState, item: EntityId, identity: Expec
     }
 }
 
-/// Take what [`check`] resolved. Returns whether every line came out whole.
-///
-/// Each line is all-or-nothing through `items`' own door, so a craft that finds
-/// itself short between the check and the take removes nothing on that line
-/// rather than eating part of it.
-pub fn take(state: &mut WorldState, crafter: EntityId, materials: &Materials, share: Share) -> bool {
-    let Ok(plan) = prepare_withdrawal(state, crafter, materials, share) else {
-        return false;
-    };
-    plan.commit(state);
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use openshard_protocol::item_kind::{

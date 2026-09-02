@@ -349,7 +349,13 @@ CREATE TABLE IF NOT EXISTS items (
     -- Semantic identity. NULL rows predate ItemKind and are migrated on load
     -- through the audited legacy presentation mapping.
     item_kind INTEGER,
-    material INTEGER
+    material INTEGER,
+    -- the installed house addon this item is one tile of: the deed's item-kind
+    -- id, and the serial of the addon's first component. Two columns beside the
+    -- lockdown pair, and for its reason: neither is a list, and the root half is
+    -- what a release sweeps the rest of the oven by.
+    addon_kind INTEGER,
+    addon_root INTEGER
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 -- NPC mobiles and placed decoration, each a JSON record keyed by serial: a
@@ -446,22 +452,38 @@ impl SqliteStore {
         match found {
             // v35 adds nullable semantic identity. Existing rows retain their
             // legacy presentation and are explicitly mapped while restoring.
-            Some(33) if SCHEMA_VERSION == 35 => {
+            // v36 adds the addon grouping, also nullable: an addon placed before
+            // it existed stays two independent lockdowns, because nothing on
+            // disk says which pair of components was ever one oven.
+            Some(33) if SCHEMA_VERSION == 36 => {
                 connection
                     .execute_batch(
                         "ALTER TABLE items ADD COLUMN affixes TEXT; \
                          ALTER TABLE items ADD COLUMN item_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN material INTEGER; \
-                         UPDATE meta SET value = 35 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN addon_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN addon_root INTEGER; \
+                         UPDATE meta SET value = 36 WHERE key = 'schema';",
                     )
                     .map_err(database)?;
             }
-            Some(34) if SCHEMA_VERSION == 35 => {
+            Some(34) if SCHEMA_VERSION == 36 => {
                 connection
                     .execute_batch(
                         "ALTER TABLE items ADD COLUMN item_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN material INTEGER; \
-                         UPDATE meta SET value = 35 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN addon_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN addon_root INTEGER; \
+                         UPDATE meta SET value = 36 WHERE key = 'schema';",
+                    )
+                    .map_err(database)?;
+            }
+            Some(35) if SCHEMA_VERSION == 36 => {
+                connection
+                    .execute_batch(
+                        "ALTER TABLE items ADD COLUMN addon_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN addon_root INTEGER; \
+                         UPDATE meta SET value = 36 WHERE key = 'schema';",
                     )
                     .map_err(database)?;
             }
@@ -609,9 +631,11 @@ impl SqliteStore {
                       corpse, poison_level, poison_charges, trap_kind, trap_power, \
                       trap_level, uses, exceptional, crafter, \
                       rune_facet, rune_x, rune_y, rune_z, runebook, \
-                      lockdown_house, lockdown_secure, affixes, item_kind, material) \
+                      lockdown_house, lockdown_secure, affixes, item_kind, material, \
+                      addon_kind, addon_root) \
                      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,\
-                             ?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37)",
+                             ?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,\
+                             ?38,?39)",
                         params![
                             item.serial.raw(),
                             // `owner` is `NOT NULL`, `0` the sentinel for "no owner" (a
@@ -673,6 +697,8 @@ impl SqliteStore {
                                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
                             item.kind,
                             item.material,
+                            item.addon.map(|part| part.kind),
+                            item.addon.map(|part| part.root.raw()),
                         ],
                     )?;
                     Ok(())
@@ -1014,7 +1040,8 @@ impl SqliteStore {
                      corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, \
                      uses, exceptional, crafter, \
                      rune_facet, rune_x, rune_y, rune_z, runebook, \
-                     lockdown_house, lockdown_secure, affixes, item_kind, material FROM items",
+                     lockdown_house, lockdown_secure, affixes, item_kind, material, \
+                     addon_kind, addon_root FROM items",
                 )
                 .map_err(database)?;
             let rows = statement
@@ -1084,6 +1111,17 @@ impl SqliteStore {
                                     })
                                 }
                                 None => None,
+                            },
+                            // Both halves or neither: a component naming an addon
+                            // whose root serial will not parse belongs to no group
+                            // that can ever be released as one, so it comes back an
+                            // ordinary item rather than an unreleasable half.
+                            addon:          match (
+                                row.get::<_, Option<u32>>(37)?,
+                                row.get::<_, Option<u32>>(38)?.and_then(Serial::new),
+                            ) {
+                                (Some(kind), Some(root)) => Some(crate::record::AddonPartData { kind, root }),
+                                _ => None,
                             },
                             affixes:        Vec::new(),
                             // A placeholder overwritten below; the location cannot be
@@ -1665,6 +1703,7 @@ mod tests {
             rune:           None,
             runebook:       None,
             locked_down:    None,
+            addon:          None,
             affixes:        Vec::new(),
             location:       ItemLocation::Contained {
                 container: Serial::new(container).expect("a valid test serial"),
@@ -2271,6 +2310,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_addon_component_keeps_its_group_across_a_reopen() {
+        // Which components are one house addon is not derivable from anything
+        // else on disk — two tiles of one oven look exactly like two ovens'
+        // worth of tiles — so both halves have to come back or the release rule
+        // silently reverts to taking down half an oven.
+        let path = temp_db("addon-part");
+        let part = crate::record::AddonPartData {
+            kind: 110,
+            root: Serial::new(0x4000_0009).unwrap(),
+        };
+        {
+            let store = SqliteStore::open(&path).expect("open");
+            let mut item = ground(0x4000_0001, 1400, 1600);
+            item.addon = Some(part);
+            let mut snap = snapshot(vec![character(1, 100)], vec![]);
+            snap.ground = Some(vec![item]);
+            store.save(&snap).await.expect("save");
+        }
+        {
+            let store = SqliteStore::open(&path).expect("reopen");
+            let items = store.items().await.expect("read");
+            assert_eq!(items[0].addon, Some(part));
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
     async fn a_spellbook_mask_survives_a_reopen() {
         // The learned-spell bitmask round-trips through the i64 column even with
         // the top bit set (u64::MAX, the full book) — a signed widen would lose
@@ -2529,6 +2595,22 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// Today's schema with the `items` table cut short right after `column`, for
+    /// a migration test that has to stand an *older* database up.
+    ///
+    /// Cut rather than spelled out: the previous version of this pasted the whole
+    /// tail of the table into a `replace`, so the day a column was appended the
+    /// pattern stopped matching, the old schema was created as the new one, and
+    /// the migration under test ran against a database that did not need it.
+    fn items_table_ending_after(column: &str) -> String {
+        let cut = SCHEMA_SQL
+            .find(column)
+            .expect("the items table carries the column to cut after")
+            + column.len();
+        let close = SCHEMA_SQL[cut..].find("\n);").expect("the items table is closed") + cut;
+        format!("{}{}", &SCHEMA_SQL[..cut], &SCHEMA_SQL[close..])
+    }
+
     #[test]
     fn version_33_adds_empty_custom_affixes_without_losing_the_database() {
         // This is the one compatible upgrade: NULL means the old, exact
@@ -2536,10 +2618,7 @@ mod tests {
         let path = temp_db("v33-affixes");
         {
             let connection = Connection::open(&path).expect("raw open");
-            let v33_schema = SCHEMA_SQL.replace(
-                "    lockdown_secure INTEGER,\n    -- Typed per-instance custom properties. A list is JSON because an item\n    -- carries only a few affixes and new kinds do not need new columns.\n    affixes TEXT,\n    -- Semantic identity. NULL rows predate ItemKind and are migrated on load\n    -- through the audited legacy presentation mapping.\n    item_kind INTEGER,\n    material INTEGER\n",
-                "    lockdown_secure INTEGER\n",
-            );
+            let v33_schema = items_table_ending_after("    lockdown_secure INTEGER");
             connection
                 .execute_batch(&v33_schema)
                 .expect("create the v33 tables");
@@ -2563,6 +2642,44 @@ mod tests {
             .expect("affixes column");
         assert_eq!(version, SCHEMA_VERSION);
         assert!(has_affixes);
+        drop(connection);
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn version_35_gains_the_addon_grouping_columns_without_losing_the_database() {
+        // The other compatible upgrade, for the same reason: NULL means "part of
+        // no addon", which is exactly what every row written before the grouping
+        // existed was.
+        let path = temp_db("v35-addons");
+        {
+            let connection = Connection::open(&path).expect("raw open");
+            let v35_schema = items_table_ending_after("    material INTEGER");
+            connection
+                .execute_batch(&v35_schema)
+                .expect("create the v35 tables");
+            connection
+                .execute("INSERT INTO meta (key, value) VALUES ('schema', 35)", [])
+                .expect("stamp a v35 database");
+        }
+        let store = SqliteStore::open(&path).expect("migrate");
+        let connection = store.connection.lock().expect("connection");
+        let version: u32 = connection
+            .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |row| {
+                row.get(0)
+            })
+            .expect("schema version");
+        let columns: u32 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('items') \
+                 WHERE name IN ('addon_kind', 'addon_root')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("addon columns");
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(columns, 2, "the addon grouping columns were not added");
         drop(connection);
         drop(store);
         let _ = std::fs::remove_file(&path);

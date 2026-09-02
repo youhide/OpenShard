@@ -1,0 +1,439 @@
+{
+  "groups": [1044495, 1044496, 1044497, 1044498, 1073108, 1080001, 1155736],
+  "recipes": [
+    {
+      "graphic": "0x1039",
+      "name": 1024153,
+      "group": 0,
+      "needs": { "mill": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1EBD", "amount": 2, "name": 1044489, "message": 1044490 }
+      ]
+    },
+    {
+      "graphic": "0x103D",
+      "name": 1024157,
+      "group": 0,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103A", "amount": 1, "name": 1044468, "message": 1151092 },
+        { "graphic": "0x1F9D", "amount": 1, "name": 1046458, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x103D",
+      "name": 1041340,
+      "group": 0,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x09EC", "amount": 1, "name": 1044472, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x103F",
+      "name": 1041002,
+      "group": 0,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103A", "amount": 1, "name": 1044468, "message": 1151092 },
+        { "graphic": "0x103D", "amount": 1, "name": 1044475, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x103F",
+      "name": 1024159,
+      "group": 0,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x09EC", "amount": 1, "name": 1044472, "message": 1044253 },
+        { "graphic": "0x103D", "amount": 1, "name": 1044475, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1044",
+      "name": 1079998,
+      "group": 0,
+      "hue": "0x0457",
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x0F7C", "amount": 1, "name": 1080530, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x103F",
+      "name": 1079999,
+      "group": 0,
+      "hue": "0x046A",
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x0F7C", "amount": 1, "name": 1080530, "message": 1044253 },
+        { "graphic": "0x15FD", "amount": 1, "name": 1025629, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1042",
+      "name": 1041339,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x09B5", "amount": 1, "name": 1044477, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1042",
+      "name": 1041338,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x09F1", "amount": 1, "name": 1044482, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1083",
+      "name": 1041337,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x09C0", "amount": 1, "name": 1044483, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1083",
+      "name": 1041341,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x097E", "amount": 1, "name": 1044486, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1042",
+      "name": 1041334,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x0994", "amount": 1, "name": 1044481, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1042",
+      "name": 1041335,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x09D2", "amount": 1, "name": 1044480, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1042",
+      "name": 1041336,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x09D0", "amount": 1, "name": 1044479, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1042",
+      "name": 1041342,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x0C6A", "amount": 1, "name": 1044484, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x09EC",
+      "name": 1040000,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 550, "max": 1050 }],
+      "resources": [
+        { "graphic": "0x103A", "amount": 1, "name": 1044468, "message": 1151092 },
+        { "graphic": "0x09D0", "amount": 1, "name": 1046460, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x2808",
+      "name": 1030249,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 900, "max": 1200 }],
+      "resources": [
+        { "graphic": "0x09B5", "amount": 1, "name": 1044477, "message": 1044253 },
+        { "graphic": "0x103A", "amount": 3, "name": 1044468, "message": 1151092 }
+      ]
+    },
+    {
+      "graphic": "0x2FD6",
+      "name": 1032246,
+      "group": 1,
+      "skills": [{ "skill": "Cooking", "min": 375, "max": 875 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x09EC", "amount": 1, "name": 1044472, "message": 1044253 },
+        { "graphic": "0x097A", "amount": 10, "name": 1044476, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x103B",
+      "name": 1024156,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x160B",
+      "name": 1025643,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103F", "amount": 1, "name": 1044474, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x09E9",
+      "name": 1022537,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103F", "amount": 1, "name": 1044471, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x09EB",
+      "name": 1022539,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044475, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1041",
+      "name": 1041345,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1042", "amount": 1, "name": 1044518, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1041",
+      "name": 1041347,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1042", "amount": 1, "name": 1044519, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1040",
+      "name": 1044517,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1083", "amount": 1, "name": 1044520, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1040",
+      "name": 1044516,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1083", "amount": 1, "name": 1044521, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1041",
+      "name": 1041346,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1042", "amount": 1, "name": 1044522, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1041",
+      "name": 1041344,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1042", "amount": 1, "name": 1044523, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1041",
+      "name": 1041343,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1042", "amount": 1, "name": 1044524, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1041",
+      "name": 1041348,
+      "group": 2,
+      "needs": { "oven": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1042", "amount": 1, "name": 1046461, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x09B7",
+      "name": 1022487,
+      "group": 3,
+      "use_all_res": true,
+      "never_exceptional": true,
+      "needs": { "heat": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x09B9", "amount": 1, "name": 1044470, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1608",
+      "name": 1025640,
+      "group": 3,
+      "use_all_res": true,
+      "never_exceptional": true,
+      "needs": { "heat": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1607", "amount": 1, "name": 1044473, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x097B",
+      "name": 1022427,
+      "group": 3,
+      "use_all_res": true,
+      "never_exceptional": true,
+      "needs": { "heat": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x097A", "amount": 1, "name": 1044476, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x09B6",
+      "name": 1022486,
+      "group": 3,
+      "use_all_res": true,
+      "never_exceptional": true,
+      "needs": { "heat": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x09B5", "amount": 1, "name": 1044477, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x160A",
+      "name": 1025642,
+      "group": 3,
+      "use_all_res": true,
+      "never_exceptional": true,
+      "needs": { "heat": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1609", "amount": 1, "name": 1044478, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x09F2",
+      "name": 1022546,
+      "group": 3,
+      "use_all_res": true,
+      "never_exceptional": true,
+      "needs": { "heat": true },
+      "skills": [{ "skill": "Cooking", "min": 0, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x09F1", "amount": 1, "name": 1044485, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x1BD1",
+      "name": 1072951,
+      "group": 4,
+      "skills": [{ "skill": "Cooking", "min": 750, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x103D", "amount": 1, "name": 1044469, "message": 1044253 },
+        { "graphic": "0x09EC", "amount": 1, "name": 1044472, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x2FD8",
+      "name": 1072952,
+      "group": 4,
+      "never_exceptional": true,
+      "min_chance": 500,
+      "skills": [{ "skill": "Cooking", "min": 600, "max": 850 }],
+      "resources": [
+        { "graphic": "0x09D0", "amount": 1, "name": 1044479, "message": 1044253 },
+        { "graphic": "0x0F0C", "amount": 1, "name": 1073467, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x2FD7",
+      "name": 1072953,
+      "group": 4,
+      "never_exceptional": true,
+      "min_chance": 500,
+      "skills": [{ "skill": "Cooking", "min": 950, "max": 1200 }],
+      "resources": [
+        { "graphic": "0x09D1", "amount": 1, "name": 1073468, "message": 1044253 },
+        { "graphic": "0x0F09", "amount": 1, "name": 1073466, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x2D4F",
+      "name": 1072950,
+      "group": 4,
+      "skills": [{ "skill": "Cooking", "min": 550, "max": 1050 }],
+      "resources": [
+        { "graphic": "0x15F8", "amount": 1, "name": 1073472, "message": 1044253 },
+        { "graphic": "0x0994", "amount": 3, "name": 1044481, "message": 1044253 },
+        { "graphic": "0x09D0", "amount": 3, "name": 1044479, "message": 1044253 },
+        { "graphic": "0x171F", "amount": 3, "name": 1073470, "message": 1044253 }
+      ]
+    },
+    {
+      "graphic": "0x0F10",
+      "name": 1079994,
+      "group": 5,
+      "hue": "0x0465",
+      "skills": [{ "skill": "Cooking", "min": 150, "max": 1000 }],
+      "resources": [
+        { "graphic": "0x1039", "amount": 1, "name": 1079997, "message": 1044253 },
+        { "graphic": "0x1044", "amount": 1, "name": 1079998, "message": 1044253 },
+        { "graphic": "0x103F", "amount": 1, "name": 1079999, "message": 1044253 }
+      ]
+    }
+  ]
+}

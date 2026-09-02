@@ -238,7 +238,10 @@ CREATE TABLE IF NOT EXISTS items (
     -- Semantic identity. NULL rows predate ItemKind and are migrated on load
     -- through the audited legacy presentation mapping.
     item_kind INTEGER,
-    material INTEGER
+    material INTEGER,
+    -- the installed house addon this item is one tile of. See the sqlite schema.
+    addon_kind INTEGER,
+    addon_root BIGINT
 );
 CREATE INDEX IF NOT EXISTS items_owner ON items (owner);
 CREATE TABLE IF NOT EXISTS mobiles (
@@ -341,23 +344,38 @@ impl PgStore {
         match found {
             // v35 adds nullable semantic identity. Existing rows retain their
             // legacy presentation and are explicitly mapped while restoring.
-            Some(33) if SCHEMA_VERSION == 35 => {
+            // v36 adds the addon grouping, also nullable — see the sqlite side.
+            Some(33) if SCHEMA_VERSION == 36 => {
                 client
                     .batch_execute(
                         "ALTER TABLE items ADD COLUMN IF NOT EXISTS affixes TEXT; \
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS item_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS material INTEGER; \
-                         UPDATE meta SET value = 35 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_root BIGINT; \
+                         UPDATE meta SET value = 36 WHERE key = 'schema';",
                     )
                     .await
                     .map_err(database)?;
             }
-            Some(34) if SCHEMA_VERSION == 35 => {
+            Some(34) if SCHEMA_VERSION == 36 => {
                 client
                     .batch_execute(
                         "ALTER TABLE items ADD COLUMN IF NOT EXISTS item_kind INTEGER; \
                          ALTER TABLE items ADD COLUMN IF NOT EXISTS material INTEGER; \
-                         UPDATE meta SET value = 35 WHERE key = 'schema';",
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_root BIGINT; \
+                         UPDATE meta SET value = 36 WHERE key = 'schema';",
+                    )
+                    .await
+                    .map_err(database)?;
+            }
+            Some(35) if SCHEMA_VERSION == 36 => {
+                client
+                    .batch_execute(
+                        "ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_kind INTEGER; \
+                         ALTER TABLE items ADD COLUMN IF NOT EXISTS addon_root BIGINT; \
+                         UPDATE meta SET value = 36 WHERE key = 'schema';",
                     )
                     .await
                     .map_err(database)?;
@@ -793,7 +811,8 @@ impl PgStore {
                  corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, \
                  uses, exceptional, crafter, \
                  rune_facet, rune_x, rune_y, rune_z, runebook, \
-                 lockdown_house, lockdown_secure, affixes, item_kind, material FROM items",
+                 lockdown_house, lockdown_secure, affixes, item_kind, material, \
+                 addon_kind, addon_root FROM items",
                 &[],
             )
             .await
@@ -1163,9 +1182,10 @@ async fn insert_item(
               loc_kind, facet, x, y, z, parent, grid, layer, price, name, spellbook, \
               corpse, poison_level, poison_charges, trap_kind, trap_power, trap_level, uses, \
               exceptional, crafter, rune_facet, rune_x, rune_y, rune_z, runebook, \
-              lockdown_house, lockdown_secure, affixes, item_kind, material) \
+              lockdown_house, lockdown_secure, affixes, item_kind, material, \
+              addon_kind, addon_root) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21, \
-                     $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37) \
+                     $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39) \
              ON CONFLICT (serial) DO UPDATE SET \
              owner = EXCLUDED.owner, graphic = EXCLUDED.graphic, hue = EXCLUDED.hue, \
              amount = EXCLUDED.amount, stackable = EXCLUDED.stackable, gump = EXCLUDED.gump, \
@@ -1181,7 +1201,8 @@ async fn insert_item(
              rune_x = EXCLUDED.rune_x, rune_y = EXCLUDED.rune_y, rune_z = EXCLUDED.rune_z, \
              runebook = EXCLUDED.runebook, lockdown_house = EXCLUDED.lockdown_house, \
              lockdown_secure = EXCLUDED.lockdown_secure, affixes = EXCLUDED.affixes, \
-             item_kind = EXCLUDED.item_kind, material = EXCLUDED.material",
+             item_kind = EXCLUDED.item_kind, material = EXCLUDED.material, \
+             addon_kind = EXCLUDED.addon_kind, addon_root = EXCLUDED.addon_root",
             &[
                 &i64::from(item.serial.raw()),
                 // `owner` is `NOT NULL BIGINT` with `0` the sentinel for "no owner" —
@@ -1243,6 +1264,10 @@ async fn insert_item(
                     .kind
                     .map(|kind| i32::try_from(kind).expect("item kind id fits PostgreSQL INTEGER")),
                 &item.material.map(i32::from),
+                &item
+                    .addon
+                    .map(|part| i32::try_from(part.kind).expect("a deed's item kind id fits INTEGER")),
+                &item.addon.map(|part| i64::from(part.root.raw())),
             ],
         )
         .await
@@ -1385,6 +1410,23 @@ fn item_from_row(row: &Row) -> Option<Result<ItemRecord, StoreError>> {
                     }
                 }),
             affixes: crate::item_json(row.get(34), "affixes")?.unwrap_or_default(),
+            // Both halves or neither — the sqlite reader's reasoning: a component
+            // naming an addon whose root will not parse belongs to no group that
+            // could ever be released as one.
+            addon: match (
+                row.get::<_, Option<i32>>(37),
+                row.get::<_, Option<i64>>(38)
+                    .and_then(|raw| u32::try_from(raw).ok())
+                    .and_then(Serial::new),
+            ) {
+                (Some(kind), Some(root)) => {
+                    Some(crate::record::AddonPartData {
+                        kind: u32::try_from(kind).map_err(|_| corrupt("addon_kind"))?,
+                        root,
+                    })
+                }
+                _ => None,
+            },
             location,
         }))
     }

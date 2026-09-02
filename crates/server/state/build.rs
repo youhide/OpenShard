@@ -129,6 +129,11 @@ struct ItemDefinitionRow {
     armor_rating:    Option<u16>,
     #[serde(default)]
     tags:            Vec<String>,
+    /// Declares that `graphic` is deliberately shared with other definitions
+    /// (a generic deed's art) rather than this kind's own unique tell. See
+    /// `ItemDefinition::shared_art`.
+    #[serde(default)]
+    shared_art:      bool,
 }
 
 /// One material grade and its legacy presentation hue.
@@ -175,15 +180,14 @@ fn item_definitions(items: &str, materials: &str) -> String {
     let materials: Vec<MaterialDefinitionRow> = serde_json::from_str(materials).expect("materials.json");
 
     let mut item_ids = BTreeSet::new();
+    // Two passes so the check does not depend on file order: every uniquely
+    // owned graphic is collected first, then a `shared_art` row is checked
+    // against the *complete* set rather than whatever had been seen so far.
     let mut graphics = BTreeSet::new();
     for row in &items {
-        assert!(row.id != 0, "item definition {:?} has reserved id 0", row.name);
-        assert!(
-            !row.name.trim().is_empty(),
-            "item definition {} has an empty name",
-            row.id
-        );
-        assert!(item_ids.insert(row.id), "duplicate item definition id {}", row.id);
+        if row.shared_art {
+            continue;
+        }
         for graphic in std::iter::once(&row.graphic)
             .chain(&row.legacy_graphics)
             .map(|raw| id(raw))
@@ -193,6 +197,28 @@ fn item_definitions(items: &str, materials: &str) -> String {
                 "legacy graphic {:#06X} maps to multiple item definitions",
                 graphic
             );
+        }
+    }
+    for row in &items {
+        assert!(row.id != 0, "item definition {:?} has reserved id 0", row.name);
+        assert!(
+            !row.name.trim().is_empty(),
+            "item definition {} has an empty name",
+            row.id
+        );
+        assert!(item_ids.insert(row.id), "duplicate item definition id {}", row.id);
+        if row.shared_art {
+            for graphic in std::iter::once(&row.graphic)
+                .chain(&row.legacy_graphics)
+                .map(|raw| id(raw))
+            {
+                assert!(
+                    !graphics.contains(&graphic),
+                    "{:?} declares shared_art on graphic {:#06X}, which a unique item definition already owns",
+                    row.name,
+                    graphic
+                );
+            }
         }
         if let Some(family) = &row.material_family {
             let _ = material_family(family);
@@ -311,7 +337,7 @@ fn item_definitions(items: &str, materials: &str) -> String {
             .unwrap_or_else(|| "None".to_owned());
         writeln!(
             out,
-            "    ItemDefinition {{ id: ItemKindId({}), name: {:?}, graphic: Graphic({}), legacy_graphics: &[{}], container_gump: {}, material_family: {}, armor_rating: {:?}, tags: &[{}] }},",
+            "    ItemDefinition {{ id: ItemKindId({}), name: {:?}, graphic: Graphic({}), legacy_graphics: &[{}], container_gump: {}, material_family: {}, armor_rating: {:?}, tags: &[{}], shared_art: {} }},",
             row.id,
             row.name,
             id(&row.graphic),
@@ -320,6 +346,7 @@ fn item_definitions(items: &str, materials: &str) -> String {
             family,
             row.armor_rating,
             tags,
+            row.shared_art,
         )
         .unwrap();
     }

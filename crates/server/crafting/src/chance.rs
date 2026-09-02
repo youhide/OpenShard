@@ -78,8 +78,9 @@ pub fn chance(state: &WorldState, crafter: EntityId, system: &CraftSystemDef, re
             main = Some((floor, want.max, value));
         }
     }
+    let chance_at_min = recipe.min_chance.unwrap_or(system.chance_at_min);
     let success = match (all_skills, main) {
-        (true, Some((floor, max, value))) => interpolate(system.chance_at_min, floor, max, value),
+        (true, Some((floor, max, value))) => interpolate(chance_at_min, floor, max, value),
         // No main-skill line at all is a malformed recipe rather than a hard
         // craft; refusing it is the safe reading.
         _ => 0,

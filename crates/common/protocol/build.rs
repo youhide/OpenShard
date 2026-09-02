@@ -514,6 +514,7 @@ fn skill_id(name: &str) -> u8 {
         "Blacksmith" => 7,
         "Fletching" => 8,
         "Carpentry" => 11,
+        "Cooking" => 13,
         "Magery" => 25,
         "Musicianship" => 29,
         "Tailoring" => 34,

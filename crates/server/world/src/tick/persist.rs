@@ -631,6 +631,19 @@ impl World {
                         secure: pinned.secure.map(|access| access.code()),
                     }
                 }),
+            // And which installed addon it is a tile of, if it is one. Without it
+            // a restart turns an oven back into two unrelated locked-down
+            // graphics, and releasing one leaves the other half standing.
+            addon: registry
+                .get::<openshard_state::components::AddonPart>(item)
+                .map(|part| {
+                    openshard_persistence::record::AddonPartData {
+                        // The deed's kind id is the addon's durable name; `.0` at
+                        // the record seam, like the facet above.
+                        kind: part.addon.deed_kind().0,
+                        root: part.root,
+                    }
+                }),
             affixes: registry
                 .get::<ItemAffixes>(item)
                 .map(|affixes| {
@@ -718,7 +731,8 @@ impl World {
     }
 
     /// Put a saved item's travel state back: where a rune points, and what a
-    /// runebook holds.
+    /// runebook holds — and, since they ride the same two restore paths, what
+    /// house it is pinned in and which installed addon it is a tile of.
     ///
     /// One helper for the same reason [`restore_craftsmanship`] is one: both
     /// restore paths want it, and a second copy is how a rune in a bank box
@@ -775,6 +789,23 @@ impl World {
                         .and_then(openshard_state::components::Standing::from_code),
                 }),
             );
+        }
+        // The addon grouping goes back on *after* the lockdown: clearing a
+        // lockdown drops the grouping by design, so the two must be restored in
+        // this order. An addon kind this build does not know reads as no group at
+        // all — the components stay where they stand, which is the recoverable
+        // direction, and none of them claims to belong to something unnameable.
+        if let Some(part) = record.addon {
+            if let Some(addon) = openshard_state::components::AddonKind::from_deed_kind(ItemKindId(part.kind))
+            {
+                self.state.registry.insert(
+                    entity,
+                    openshard_state::components::AddonPart {
+                        addon,
+                        root: part.root,
+                    },
+                );
+            }
         }
     }
 
@@ -1409,6 +1440,15 @@ impl World {
         if let Some(name) = &record.name {
             self.state.registry.insert(entity, Name(name.clone()));
         }
+        // An addon deed's identity is its `ItemKind` (installed above by
+        // `restore_item_identity`), never its display name — several deeds
+        // share the same generic scroll art and only the kind tells them
+        // apart.
+        if let Some(&ItemKind(kind)) = self.state.registry.get::<ItemKind>(entity) {
+            if let Some(deed) = openshard_state::AddonDeed::from_item_kind(kind) {
+                self.state.registry.insert(entity, deed);
+            }
+        }
         if let Some(mask) = record.spellbook {
             self.state.registry.insert(entity, Spellbook(mask));
         }
@@ -1583,6 +1623,13 @@ impl World {
             }
             if let Some(name) = &record.name {
                 self.state.registry.insert(entity, Name(name.clone()));
+            }
+            // See the ground-item restore above: identity is `ItemKind`, not
+            // the display name.
+            if let Some(&ItemKind(kind)) = self.state.registry.get::<ItemKind>(entity) {
+                if let Some(deed) = openshard_state::AddonDeed::from_item_kind(kind) {
+                    self.state.registry.insert(entity, deed);
+                }
             }
             if let Some(mask) = record.spellbook {
                 self.state.registry.insert(entity, Spellbook(mask));
