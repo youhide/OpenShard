@@ -295,6 +295,13 @@ impl WorldMap {
     /// a block's items be found by one number; a length that disagrees is an
     /// importer disagreeing with itself, and every lookup past the short end
     /// would silently be a block with nothing on it.
+    ///
+    /// In a debug build, also if a static's own coordinates fall outside the
+    /// block its count claims it for. The two checks above are `O(1)` and only
+    /// catch an importer that miscounted; they wave through one that put the
+    /// *right* number of items in the *wrong* block, which lands them in a
+    /// neighbour's span and makes every lookup on both blocks quietly wrong
+    /// instead of loud. This pass is `O(statics)`, so a release build skips it.
     #[must_use]
     pub fn from_parts(land: LandGrid, mut statics: Vec<StaticItem>, counts: &[u32]) -> Self {
         assert_eq!(
@@ -318,6 +325,43 @@ impl WorldMap {
             statics.len(),
             "an importer's block counts do not add up to the statics it handed over",
         );
+
+        // Debug-only: the counts and their sum above catch an importer that
+        // miscounted, but not one that put the *right* number of items in the
+        // *wrong* block — that passes both, lands the items in a neighbour's
+        // span, and leaves every later lookup on both blocks quietly wrong.
+        // This walks every static once and checks its own coordinates against
+        // the block its count claims it for.
+        //
+        // Gated on `cfg!(debug_assertions)` around the whole loop, not just
+        // `debug_assert!` on each check: the loop body is one check per static
+        // — up to 2.9M of them on Felucca — and that is real work the compiler
+        // is not obliged to elide just because `debug_assert!` compiles away
+        // inside it. The `if` makes the entire pass vanish in release rather
+        // than hoping the optimiser notices an empty loop.
+        if cfg!(debug_assertions) {
+            for (want_index, block) in land.blocks().zip(&blocks) {
+                let from = block.base as usize;
+                let to = from + block.count as usize;
+                for item in &statics[from..to] {
+                    let actual = land
+                        .block_of(item.x, item.y)
+                        .and_then(|coord| land.index_of(coord));
+                    debug_assert!(
+                        actual == Some(want_index),
+                        "an importer put the static at ({}, {}) in block {}'s part of the run, \
+                         but its coordinates belong to {}",
+                        item.x,
+                        item.y,
+                        want_index.get(),
+                        match actual {
+                            Some(index) => format!("block {}", index.get()),
+                            None => "no block on the facet".to_string(),
+                        },
+                    );
+                }
+            }
+        }
 
         for block in &blocks {
             let from = block.base as usize;
@@ -1329,6 +1373,38 @@ mod tests {
             vec![Graphic(10), Graphic(30)],
         );
         assert_eq!(map.static_count(), 5);
+    }
+
+    /// Right counts in the wrong block still sum correctly — the two
+    /// `assert_eq!`s in [`from_parts`](WorldMap::from_parts) wave it through —
+    /// but the misplaced item's own coordinates give it away: it lands in a
+    /// block that is not the one its own `(x, y)` falls in.
+    #[test]
+    #[should_panic(expected = "belong to")]
+    fn from_parts_catches_a_static_in_the_wrong_blocks_part_of_the_run() {
+        let land = LandGrid::from_blocks(BlockExtent { wide: 2, down: 1 }, |_, _| LandCell::default());
+        let item = |tile, x, y| {
+            StaticItem {
+                tile: Graphic(tile),
+                x,
+                y,
+                z: 0,
+                hue: Hue(0),
+            }
+        };
+        // Same three-and-two split as the sort test above, but the fourth item —
+        // the one block 1's count of two claims — sits at (1, 2), which is
+        // block 0's tile, not block 1's. The counts are right and so is their
+        // sum against `statics.len()`; only the item's own coordinates say it
+        // was put in the wrong block's part of the run.
+        let statics = vec![
+            item(10, 3, 5),
+            item(20, 1, 2),
+            item(30, 3, 5),
+            item(40, 1, 2),
+            item(50, 12, 0),
+        ];
+        let _ = WorldMap::from_parts(land, statics, &[3, 2]);
     }
 
     // ---- S3: a block is replaced where it stands ---------------------------
