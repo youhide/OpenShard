@@ -135,6 +135,16 @@ started.
   (`Trap`/`TrapKind` and `tick/traps.rs` exist). The genuinely blocked ones are
   Telekinesis, Incognito and Polymorph. (The eight summons and the three dispels
   behind them were the rest of this list, and have landed.)
+- **Two functions answer "where is this mobile's backpack".**
+  `openshard_items::backpack_of` finds the item on the backpack layer *and*
+  checks it is a `Container`; `World::caster_pack`
+  ([`tick/spells.rs`](../../../crates/server/world/src/tick/spells.rs)) does the
+  same walk without that second half, so a non-container worn on the backpack
+  layer would be handed to `pay_and_roll` as the pack reagents come out of. Found
+  while wiring the scroll cast, which reaches the pack through the *other* one —
+  so a cast now asks two different questions about the same backpack depending on
+  which half of it is running. One of them should go.
+
 - **House catalogue material-family umbrella rows.** The generated house item
   catalogue currently emits a material-less semantic identity as well as every
   concrete material for metal, wood and leather families. That material-less
