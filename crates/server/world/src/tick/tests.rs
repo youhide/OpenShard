@@ -2087,7 +2087,8 @@ fn a_cotton_plant_pays_cotton_once_and_stands_picked() {
     );
     assert_eq!(
         world.registry().get::<Drawn>(plant).map(|drawn| drawn.id),
-        Some(openshard_state::components::CropKind::Cotton.picked_art()),
+        // Cotton leaves one furrow behind, so its list of stubs has one entry.
+        Some(openshard_state::components::CropKind::Cotton.picked_arts()[0]),
         "and is drawn as the bare furrow"
     );
 
@@ -2272,6 +2273,8 @@ fn a_sheep(world: &mut World, at: Point, now: Instant) -> Serial {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -4718,6 +4721,8 @@ fn spawn_mobile_full(
         skills: Vec::new(),
         stock: Vec::new(),
         escort_to: None,
+        mana: 0,
+        spells: openshard_state::components::Spellbook(0),
         quests: Vec::new(),
     });
     world.tick(now);
@@ -5562,6 +5567,8 @@ fn spawn_healer(world: &mut World, at: Point, now: Instant) -> (EntityId, Serial
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -6095,6 +6102,8 @@ fn a_creature_dies_with_its_own_voice() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -7318,6 +7327,8 @@ fn a_creature_can_be_given_combat_skills() {
         skills:      vec![(WRESTLING_SKILL, 700), (TACTICS_SKILL, 500)],
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -13187,6 +13198,8 @@ fn spawn_creature(world: &mut World, point: Point, sight: u8, wander: bool, now:
         skills: Vec::new(),
         stock: Vec::new(),
         escort_to: None,
+        mana: 0,
+        spells: openshard_state::components::Spellbook(0),
         quests: Vec::new(),
     });
     world.tick(now);
@@ -15018,6 +15031,8 @@ fn placing_the_townsfolk_twice_does_not_double_the_town() {
                 name:      "iron ingot".to_owned(),
             }],
             escort_to:   None,
+            mana:        0,
+            spells:      openshard_state::components::Spellbook(0),
             quests:      Vec::new(),
         }
     };
@@ -15092,6 +15107,8 @@ fn a_townsperson_of_another_trade_may_share_a_post() {
             skills:      Vec::new(),
             stock:       Vec::new(),
             escort_to:   None,
+            mana:        0,
+            spells:      openshard_state::components::Spellbook(0),
             quests:      Vec::new(),
         }
     };
@@ -15817,6 +15834,8 @@ fn a_spawner_fills_to_its_ceiling_and_clear_empties_it() {
         ranged_kind: DamageType::Physical,
         wander:      false,
         skills:      Vec::new(),
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
     };
     let area = SpawnArea {
         x:      START.x,
@@ -15895,6 +15914,8 @@ fn clear_also_removes_placed_npcs_and_their_gear_but_not_players() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -16571,6 +16592,8 @@ fn two_different_regions_over_one_box_are_both_laid() {
             ranged_kind: DamageType::Physical,
             wander:      false,
             skills:      Vec::new(),
+            mana:        0,
+            spells:      openshard_state::components::Spellbook(0),
         }
     };
     // An orc camp, and the undead patch that overlaps it.
@@ -16762,6 +16785,8 @@ fn a_vendor_and_its_priced_stock_survive_a_restart() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     home.tick(now);
@@ -16928,6 +16953,8 @@ fn a_wounded_spawner_creature_survives_a_restart_and_is_counted() {
         ranged_kind: DamageType::Physical,
         wander:      false,
         skills:      Vec::new(),
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
     };
     let area = SpawnArea {
         x:      START.x,
@@ -17205,6 +17232,8 @@ fn spawn_banker(world: &mut World, at: Point, now: Instant) {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -17314,6 +17343,8 @@ pub(super) fn spawn_townsperson(world: &mut World, trade: &str, at: Point, now: 
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -17492,6 +17523,8 @@ fn spawn_creature_with_standing(world: &mut World, fame: i32, karma: i32, now: I
         skills: Vec::new(),
         stock: Vec::new(),
         escort_to: None,
+        mana: 0,
+        spells: openshard_state::components::Spellbook(0),
         quests: Vec::new(),
     });
     world.tick(now);
@@ -17813,6 +17846,8 @@ fn a_non_human_townsperson_keeps_its_own_body() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -18160,6 +18195,8 @@ fn a_criminal_is_refused_at_every_door_into_a_shop() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -18253,6 +18290,8 @@ fn spawn_shopkeeper(world: &mut World, now: Instant) -> (EntityId, Serial) {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -18472,6 +18511,8 @@ fn a_townsperson_walks_home_at_night_when_the_shard_asks_for_it() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -18788,6 +18829,8 @@ fn a_spawn_stands_on_the_floor_not_under_it() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -18840,6 +18883,8 @@ fn an_unnamed_creature_takes_its_body_default_name() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -19029,6 +19074,8 @@ pub(super) fn spawn_stocked_vendor(world: &mut World, point: Point, now: Instant
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -20162,6 +20209,8 @@ fn a_creature_does_not_notice_prey_through_a_shut_door() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -20237,6 +20286,8 @@ fn spawn_brained(world: &mut World, body: u16, at: Point, sight: u8, now: Instan
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -21618,6 +21669,8 @@ fn spawn_postured(world: &mut World, at: Point, sight: u8, aggression: u8, now: 
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -21794,6 +21847,8 @@ fn spawn_horse(world: &mut World, at: Point, now: Instant) -> (EntityId, Serial)
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -22231,6 +22286,8 @@ fn a_shop_sells_goods_and_buys_them_back() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -22416,6 +22473,8 @@ fn a_shop_keyword_needs_the_vendor_named_and_an_empty_sell_answers_overhead() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -22565,6 +22624,8 @@ fn a_bought_out_shelf_refills_when_its_hour_is_up() {
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -22713,6 +22774,8 @@ fn spawn_archer_bodied(world: &mut World, body: u16, at: Point, now: Instant) ->
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);
@@ -23043,6 +23106,8 @@ fn lod_a_spawner_with_no_player_near_stays_dormant_then_wakes() {
         ranged_kind: DamageType::Physical,
         wander:      false,
         skills:      Vec::new(),
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
     };
     // Far beyond the LOD radius of the player at START.
     let area = SpawnArea {

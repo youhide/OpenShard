@@ -1525,6 +1525,17 @@ pub struct Casting {
     pub spell:       SpellId,
     /// The tick the cast finishes and resolves.
     pub complete_at: WorldTick,
+    /// The mobile this cast was aimed at when it began, for a caster that has no
+    /// cursor to raise.
+    ///
+    /// `None` for a person: a player's targeted spell asks at the *end* of the
+    /// delay, through the target cursor, which is the whole of why a mage can
+    /// start a fireball before choosing whom to burn. A mobile with no client
+    /// cannot be asked, so it aims first and the aim rides here for
+    /// [`Self::scroll`]'s reason — the mark can die during the delay, and a
+    /// resolution that re-derived it would land the spell on whatever the
+    /// caster is fighting *now*.
+    pub aim:         Option<Serial>,
     /// The scroll the spell is being cast *from*, or `None` when it comes out of
     /// the caster's own spellbook — ServUO's `Spell.Scroll`, the same nullable
     /// item and read for the same three things: no reagents, two circles' relief
@@ -1594,6 +1605,33 @@ impl Spellbook {
     pub const fn full() -> Self {
         Self(u64::MAX) // all 64 bits; the client reads only the first 64 spells
     }
+}
+
+/// The spells a creature knows by nature, and when it may next spend one.
+///
+/// **Why a creature does not simply carry a spellbook.** A person casts what is
+/// written in a book in their pack, which is what [`Spellbook`] is and what
+/// `items::carries_spell` looks for. A creature has no pack; giving it one with
+/// a book in it would put a lootable spellbook on every lich, and make a
+/// creature's repertoire depend on an item that can be stolen off it. So the
+/// spells sit on the mobile, in the same mask and the same numbering the book
+/// uses — a creature and a book name a spell the same way, which is what keeps
+/// the cast gate one question rather than two.
+///
+/// Data and timing on one component for [`Brain`]'s reason: `spells` is what the
+/// spawn authored and `next_cast` is where this creature has got to, and the two
+/// are one fact about one creature.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Repertoire {
+    /// Which spells it knows.
+    pub spells:    Spellbook,
+    /// The earliest tick it may begin another cast.
+    ///
+    /// Armed when a cast begins, from the spell's own delay and recovery rather
+    /// than from a per-creature knob: a creature that has just thrown an
+    /// eighth-circle spell is slower to throw the next one than one that flicked
+    /// a magic arrow, and that is a fact about the spell.
+    pub next_cast: WorldTick,
 }
 
 /// The 64 Magery spells, first through eighth circle.

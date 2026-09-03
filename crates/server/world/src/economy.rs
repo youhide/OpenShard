@@ -865,10 +865,10 @@ mod tests {
     ///   it or drops it, so `DefCooking`'s fruit bowl is unbuildable on OSI's own
     ///   shards. `0x0F7C`, cocoa pulp, comes off a Time of Legends cocoa tree,
     ///   and behind it `0x1044` cocoa butter.
-    /// - `0x171F`, a **banana**: sold by the innkeeper alone, and this shard's
-    ///   twenty-two innkeepers were placed without a shelf.
-    /// - `0x573B`, **crushed glass**: alchemy makes it out of a blue diamond, and
-    ///   the recipe is not in `alchemy.json`.
+    /// - `0x573B`, **crushed glass**: the alchemy row that spends it is
+    ///   `if (Core.SA)` upstream and the blacksmithy row that *makes* it is too —
+    ///   the consumer was imported and the producer was not, so this is an era
+    ///   that leaked rather than a source that is missing.
     ///
     /// **Rows leave this list as their sources land, and eleven have.** For the
     /// record of what each fix was shaped like: `0x0F7E` a bone, loot off the
@@ -879,11 +879,13 @@ mod tests {
     /// and `0x0F8A`/`0x0F8F` two necromancer reagents, all three of them vendor
     /// lines the converter dropped because they were not `GenericBuyInfo` rows;
     /// and `0x103D`, `0x103F`, `0x1042`, `0x1083`, which were only ever waiting
-    /// on the water.
+    /// on the water. `0x171F`, a banana, went with the innkeeper's shelf — the
+    /// one vendor upstream sells one from, and one of the twenty-odd shopkeepers
+    /// this shard placed with an outfit and no stock at all.
     const UNSOURCED_ART: &[u16] = &[
-        0x0EF0, 0x0F7C, 0x1044, 0x1374, 0x14F8, 0x15F8, 0x171F, 0x1879, 0x1E25, 0x2F57, 0x2F5C, 0x315A,
-        0x3183, 0x3184, 0x3185, 0x3186, 0x3187, 0x3188, 0x3189, 0x318A, 0x318B, 0x318C, 0x318D, 0x318E,
-        0x4005, 0x573B,
+        0x0EF0, 0x0F7C, 0x1044, 0x1374, 0x14F8, 0x15F8, 0x1879, 0x1E25, 0x2F57, 0x2F5C, 0x315A, 0x3183,
+        0x3184, 0x3185, 0x3186, 0x3187, 0x3188, 0x3189, 0x318A, 0x318B, 0x318C, 0x318D, 0x318E, 0x4005,
+        0x573B,
     ];
 
     /// What only Mondain's Legacy pays out — the three harvest bonus tables.

@@ -37,6 +37,7 @@ use openshard_state::components::{
     Healer,
     Hitpoints,
     Karma,
+    Mana,
     MeleeDamage,
     Movement,
     Name,
@@ -44,8 +45,10 @@ use openshard_state::components::{
     Npc,
     Position,
     RangedAttack,
+    Repertoire,
     Resistance,
     Skills,
+    Spellbook,
     SwingSpeed,
     Title,
     body_opens_doors,
@@ -152,6 +155,16 @@ pub struct SpawnSpec {
     /// sheet, so its blows always land unscaled (the combat gate); with them it
     /// rolls to hit and scales damage like a player.
     pub skills:      Vec<(Skill, u16)>,
+    /// The mana it casts out of; `0` for a creature that does not cast.
+    pub mana:        u16,
+    /// The spells it knows, in the same mask a spellbook uses. Empty exactly when
+    /// `mana` is zero — see [`Repertoire`].
+    ///
+    /// Magery is **not** implied by either: a creature that means to land its
+    /// spells needs the skill in `skills` like any other roll, and one without it
+    /// casts at the bottom of the band and fizzles most of what it throws. That
+    /// is the same sheet gate a blow goes through, deliberately.
+    pub spells:      Spellbook,
 }
 
 struct PreparedSpawn {
@@ -310,6 +323,29 @@ fn insert_combat_components(state: &mut WorldState, entity: EntityId, spec: &Spa
             RangedAttack {
                 range,
                 kind: spec.ranged_kind,
+            },
+        );
+    }
+    // And a repertoire makes it a caster. Both components or neither: the pool
+    // and the spells are one fact (the spawn data asserts it), and half of it is
+    // a creature that reads as a mage and never throws anything.
+    //
+    // Full, and free to cast on the beat it appears: a lich that had to sit and
+    // regenerate before its first spell would spend the fight it was spawned for
+    // meditating. `WorldTick::ZERO` is in the past for every tick but the first.
+    if spec.mana > 0 {
+        state.registry.insert(
+            entity,
+            Mana {
+                current: spec.mana,
+                max:     spec.mana,
+            },
+        );
+        state.registry.insert(
+            entity,
+            Repertoire {
+                spells:    spec.spells,
+                next_cast: openshard_state::WorldTick::ZERO,
             },
         );
     }

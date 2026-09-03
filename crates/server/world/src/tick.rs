@@ -1171,6 +1171,8 @@ impl World {
             healer,
             equipment,
             skills,
+            mana,
+            spells,
             stock,
             escort_to,
             quests: offers,
@@ -1221,6 +1223,8 @@ impl World {
                 healer,
                 equipment,
                 skills,
+                mana,
+                spells,
             },
         );
         // Both were a second command keyed by serial, and the serial did not
@@ -1982,18 +1986,30 @@ impl World {
             }
             // A pet does not decide anything: it carries out its last order, which
             // is a different beat from a wild brain's and takes the place of it.
-            let step = if self
+            // Its orders are steps and blows only — a commanded cast would be a
+            // pet's own vocabulary, not a wild brain's.
+            let beat = if self
                 .state
                 .registry
                 .has::<openshard_state::components::Pet>(creature)
             {
-                ai::pet_beat(&mut self.state, creature)
+                ai::Beat::Move(ai::pet_beat(&mut self.state, creature))
             } else {
                 ai::think_one(&mut self.state, creature)
             };
-            if let Some(dir) = step {
-                if let Some(serial) = self.state.registry.serial_of(creature) {
-                    self.step(serial, dir);
+            match beat {
+                ai::Beat::Move(None) => {}
+                ai::Beat::Move(Some(dir)) => {
+                    if let Some(serial) = self.state.registry.serial_of(creature) {
+                        self.step(serial, dir);
+                    }
+                }
+                // The one thing beside a step that a brain decides and cannot do
+                // itself: the cast sequence is `World`'s, and the whole of it —
+                // the refusals, the mana, the roll, the gesture — is the one a
+                // player's cast goes through.
+                ai::Beat::Cast { spell, target } => {
+                    self.begin_creature_cast(creature, spell, target);
                 }
             }
             // A hunter re-beats at its own pace (or the shard's); idle life

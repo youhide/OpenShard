@@ -1,11 +1,12 @@
 //! Creature behaviour: what a brain decides to do with its beat.
 //!
 //! A brain only *decides*. [`think_one`] reads the world, works out whether a
-//! creature should chase, fight, or drift, and turns that into at most one thing:
-//! a direction to step, returned to the caller. Engaging a foe it does itself (it
+//! creature should chase, fight, cast or drift, and turns that into at most one
+//! thing: a [`Beat`], returned to the caller. Engaging a foe it does itself (it
 //! hands the creature a [`Combat`], and `combat::swings` fights with it exactly as
-//! a player would); moving it leaves to the world, which owns the step. So `ai`
-//! reuses combat and movement — it never reimplements them.
+//! a player would); moving it and casting it leaves to the world, which owns the
+//! step and the cast sequence both. So `ai` reuses combat, movement and the spell
+//! table — it never reimplements them.
 //!
 //! The decision uses the world's seeded [`Rng`](openshard_state::Rng), so a fight
 //! or a wander replays identically.
@@ -14,6 +15,7 @@ use openshard_combat as combat;
 use openshard_combat::MobileDamaged;
 use openshard_entities::EntityId;
 use openshard_items as items;
+use openshard_magic as magic;
 use openshard_map::overlay::Doors;
 use openshard_movement::{
     COARSE_MIN_DISTANCE,
@@ -25,6 +27,7 @@ use openshard_movement::{
     search_path,
     step_from,
 };
+use openshard_protocol::casting::SpellId;
 use openshard_protocol::direction::Direction;
 use openshard_protocol::serial::Serial;
 use openshard_protocol::world::{
@@ -35,16 +38,21 @@ use openshard_protocol::world::{
 use openshard_state::components::{
     Aggression,
     Brain,
+    Casting,
     Client,
     Combat,
     Heading,
     Hitpoints,
+    Mana,
     Pet,
     PetOrder,
     Position,
     RangedAttack,
+    Repertoire,
     Route,
     RouteRefused,
+    SPELL_COUNT,
+    Spellbook,
 };
 use openshard_state::sectors::{
     distance,
@@ -595,23 +603,49 @@ fn remember(
     );
 }
 
-/// One creature's beat: chase and fight what it has, pick a fight if it sees one,
-/// or drift.
+/// What a creature decided to do with its beat.
 ///
-/// Returns the direction the creature wants to step this beat — chasing a
-/// foe or wandering — or `None` if it stood its ground (in reach of its target,
-/// newly engaged, or idle). Engaging is done here, by giving the creature a
-/// [`Combat`]; stepping is the caller's to apply, since the world owns movement.
-pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction> {
-    let &Position(pos) = state.registry.get::<Position>(creature)?;
-    let brain = *state.registry.get::<Brain>(creature)?;
+/// The world applies it, because both arms are things a brain cannot do itself:
+/// movement is the world's, and so is the cast sequence — see
+/// `World::begin_creature_cast`. An enum rather than two fields because they are
+/// alternatives: a creature that is casting is standing, and one that is stepping
+/// is not casting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Beat {
+    /// Step this way, or stand — in reach of its target, newly engaged, holding
+    /// a cast, or simply idle.
+    Move(Option<Direction>),
+    /// Throw `spell` at `target`, and stand while it is thrown.
+    Cast { spell: SpellId, target: Serial },
+}
+
+/// One creature's beat: chase, fight or cast at what it has, pick a fight if it
+/// sees one, or drift.
+///
+/// Engaging is done here, by giving the creature a [`Combat`]; stepping and
+/// casting are the caller's to apply, since the world owns movement and the cast
+/// sequence.
+pub fn think_one(state: &mut WorldState, creature: EntityId) -> Beat {
+    let Some(&Position(pos)) = state.registry.get::<Position>(creature) else {
+        return Beat::Move(None);
+    };
+    let Some(&brain) = state.registry.get::<Brain>(creature) else {
+        return Beat::Move(None);
+    };
     let facet = state.facet_of(creature);
 
+    // A cast in progress roots the caster, exactly as it roots a player: the
+    // mobile is committed until `Casting` resolves or something breaks it. A
+    // creature that walked out of its own cast would be two systems each
+    // believing they own it for the next second.
+    if state.registry.has::<Casting>(creature) {
+        return Beat::Move(None);
+    }
     // Standing watch after a chase that found no way through: hold still until
     // the timer runs out, then go back to living. A quarry that becomes
     // reachable is re-acquired below, the normal way.
     if brain.guard_until > state.ticks {
-        return None;
+        return Beat::Move(None);
     }
     // A creature a bard has calmed picks no fights and chases nobody — ServUO's
     // `BardPacified`, read where the decision is made rather than folded into the
@@ -620,26 +654,27 @@ pub fn think_one(state: &mut WorldState, creature: EntityId) -> Option<Direction
         .registry
         .has::<openshard_state::components::Pacified>(creature)
     {
-        return None;
+        return Beat::Move(None);
     }
 
     match fight_phase(state, creature, pos, facet, brain) {
         FightPhase::NoFight => {}
-        FightPhase::Decided(direction) => return direction,
+        FightPhase::Decided(beat) => return beat,
     }
     if acquire_phase(state, creature, pos, facet, brain) {
-        return None;
+        return Beat::Move(None);
     }
-    wander_phase(state, creature, brain)
+    Beat::Move(wander_phase(state, creature, brain))
 }
 
 /// Whether the fight half of a beat had nothing to do, or made the beat's
-/// decision. `Decided(None)` is deliberately distinct from `NoFight`: standing
-/// to strike or shoot must not fall through into acquiring prey or wandering.
+/// decision. `Decided(Beat::Move(None))` is deliberately distinct from
+/// `NoFight`: standing to strike, shoot or cast must not fall through into
+/// acquiring prey or wandering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FightPhase {
     NoFight,
-    Decided(Option<Direction>),
+    Decided(Beat),
 }
 
 /// Follow, fight or abandon the creature's current target.
@@ -669,7 +704,18 @@ fn fight_phase(
     ) {
         if should_flee(state, creature, brain) {
             state.registry.remove::<Route>(creature);
-            return FightPhase::Decided(flee_step(state, creature, facet, pos, target_pos));
+            return FightPhase::Decided(Beat::Move(flee_step(state, creature, facet, pos, target_pos)));
+        }
+        // A caster throws rather than closes — the branch above the melee one,
+        // and above the bow's too: a creature that has both a reach and a
+        // repertoire is a mage with a wand, and the spell is the interesting
+        // half of it. Standing, like a shooter in range: `Decided` and not a
+        // step, so the beat is spent on the cast.
+        if let Some(spell) = spell_choice(state, creature, pos, facet, brain, target_pos) {
+            return FightPhase::Decided(Beat::Cast {
+                spell,
+                target: target_serial,
+            });
         }
         // A ranged fighter kites: back off from a foe at its heels, stand
         // and shoot inside its reach (`combat::commit_actions` does the
@@ -681,20 +727,22 @@ fn fight_phase(
             let gap = distance(pos, target_pos);
             if gap <= KITE_GAP {
                 state.registry.remove::<Route>(creature);
-                return FightPhase::Decided(kite_step(state, creature, facet, pos, target_pos));
+                return FightPhase::Decided(Beat::Move(kite_step(state, creature, facet, pos, target_pos)));
             }
             let clear =
                 openshard_movement::sight_clear(&state.footing(facet, Doors::AsTheyStand), pos, target_pos);
             if gap <= u32::from(range.get()) && clear {
-                return FightPhase::Decided(None); // in reach: stand and loose
+                return FightPhase::Decided(Beat::Move(None)); // in reach: stand and loose
             }
         }
         if in_range(pos, target_pos, combat::MELEE_RANGE) {
             // Arrived; the route served.
             state.registry.remove::<Route>(creature);
-            return FightPhase::Decided(None);
+            return FightPhase::Decided(Beat::Move(None));
         }
-        return FightPhase::Decided(chase_step(state, creature, facet, pos, target_pos, brain));
+        return FightPhase::Decided(Beat::Move(chase_step(
+            state, creature, facet, pos, target_pos, brain,
+        )));
     }
     // Out of sight, or too far to keep after: the creature drops the fight
     // rather than aiming at a memory. `disengage` and not `clear_target`,
@@ -707,6 +755,76 @@ fn fight_phase(
     state.disengage(creature);
     state.registry.remove::<Route>(creature);
     FightPhase::NoFight
+}
+
+/// The spell this creature throws at its foe this beat, or `None` if it throws
+/// none.
+///
+/// Four questions, and a `None` from any of them is a beat spent the ordinary
+/// way — closing, kiting or swinging:
+///
+/// - **Does it cast at all**, which is having a [`Repertoire`] and a [`Mana`]
+///   pool. A creature with neither is every creature the shard has today.
+/// - **Is it off its recovery** ([`Repertoire::next_cast`]) — otherwise a mage
+///   would throw one spell per beat until its mana ran out.
+/// - **Is the mark in reach**, which is as far as the creature can *see* and no
+///   further, with a clear line to it. Sight rather than a reach of its own: a
+///   spell has no range in this engine, so the honest bound is "what it can pick
+///   out", and it is the same number the fight was started on. The sight line is
+///   the shooter's own test, for the shooter's reason — a bolt does not bend
+///   round a wall, and a caster that threw one through a keep would be fighting
+///   from somewhere the player cannot fight back from.
+/// - **What can it pay for**, which is [`affordable`] below.
+///
+/// The *choice* is the thin half on purpose. Which spell a fight actually calls
+/// for — harm, heal, curse, escape — is the next phase of
+/// `plans/npc/creature_casting/PLAN.md`, and until it lands this picks the
+/// strongest thing the creature can pay for, which is a rule rather than a
+/// placeholder: a lich with the mana for a flamestrike throws one.
+fn spell_choice(
+    state: &WorldState,
+    creature: EntityId,
+    pos: Point,
+    facet: Facet,
+    brain: Brain,
+    target_pos: Point,
+) -> Option<SpellId> {
+    let &Repertoire { spells, next_cast } = state.registry.get::<Repertoire>(creature)?;
+    if state.ticks < next_cast {
+        return None;
+    }
+    let &Mana { current, .. } = state.registry.get::<Mana>(creature)?;
+    if distance(pos, target_pos) > u32::from(brain.sight.0) {
+        return None;
+    }
+    if !openshard_movement::sight_clear(&state.footing(facet, Doors::AsTheyStand), pos, target_pos) {
+        return None;
+    }
+    affordable(spells, current)
+}
+
+/// The strongest spell in `spells` that costs no more than `mana` and is aimed
+/// at a mobile.
+///
+/// **Strongest** is highest id, which is highest circle: `magic`'s table is the
+/// eight circles in order, eight spells each, so counting down from the end is
+/// counting down from the eighth circle. It spends what it has rather than
+/// hoarding for a spell it will never afford.
+///
+/// **Aimed at a mobile** because that is the only aim a creature has. A
+/// self-cast or a location spell in a creature's repertoire is content asking
+/// for something this phase does not do — the categories that make sense of a
+/// heal or a field are the next phase — and casting one *at a foe* would land it
+/// on the caster instead, which is worse than not casting it.
+fn affordable(spells: Spellbook, mana: u16) -> Option<SpellId> {
+    (0..u16::from(SPELL_COUNT))
+        .rev()
+        .map(SpellId)
+        .filter(|&spell| spells.has(spell))
+        .find(|&spell| {
+            magic::info(spell)
+                .is_some_and(|info| info.target == magic::SpellTarget::Mobile && magic::mana(info) <= mana)
+        })
 }
 
 /// Acquire visible prey when this brain starts fights. Returns whether the
@@ -1198,6 +1316,30 @@ mod tests {
         )
     }
 
+    /// The same world with its default facet actually loaded, for the decisions
+    /// that read the ground — a sight line is one, and `WorldState::footing`
+    /// insists on a facet that exists.
+    fn world_with_ground() -> WorldState {
+        let tiles = openshard_tiles::TileData::empty();
+        let facet = openshard_state::FacetState::new(
+            None,
+            None,
+            64,
+            64,
+            openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+            None,
+            &tiles,
+        );
+        WorldState::new(
+            BTreeMap::from([(Facet(0), facet)]),
+            Facet(0),
+            tiles,
+            Default::default(),
+            openshard_map::grid::Tile::new(0, 0),
+            1,
+        )
+    }
+
     fn mobile(state: &mut WorldState, at: Point) -> (EntityId, Serial) {
         let (entity, serial) = state
             .registry
@@ -1237,7 +1379,221 @@ mod tests {
 
         assert_eq!(
             fight_phase(&mut state, creature, at, Facet(0), brain),
-            FightPhase::Decided(None)
+            FightPhase::Decided(Beat::Move(None))
         );
+    }
+
+    /// Spell ids from `magic`'s own table, named here so a test that changes
+    /// meaning when the table is renumbered fails loudly rather than quietly
+    /// asserting about a different spell.
+    const MAGIC_ARROW: SpellId = SpellId(4);
+    const HARM: SpellId = SpellId(11);
+    const FIREBALL: SpellId = SpellId(17);
+    /// `Create Food` — first circle, and cast at nobody.
+    const CREATE_FOOD: SpellId = SpellId(1);
+
+    fn knowing(spells: &[SpellId]) -> Spellbook {
+        let mut book = Spellbook(0);
+        for &spell in spells {
+            book.learn(spell);
+        }
+        book
+    }
+
+    /// The named ids are the spells this file's tests think they are.
+    #[test]
+    fn the_named_spells_are_the_ones_the_table_holds() {
+        for (spell, name) in [
+            (MAGIC_ARROW, "Magic Arrow"),
+            (HARM, "Harm"),
+            (FIREBALL, "Fireball"),
+            (CREATE_FOOD, "Create Food"),
+        ] {
+            assert_eq!(magic::info(spell).expect("a spell").name, name);
+        }
+    }
+
+    /// It spends what it has: the strongest thing it can pay for, not the first
+    /// thing it knows.
+    #[test]
+    fn a_caster_throws_the_best_it_can_afford() {
+        let book = knowing(&[MAGIC_ARROW, HARM, FIREBALL]);
+        let fireball = magic::mana(magic::info(FIREBALL).expect("a spell"));
+        let harm = magic::mana(magic::info(HARM).expect("a spell"));
+        assert_eq!(affordable(book, fireball), Some(FIREBALL));
+        assert_eq!(
+            affordable(book, fireball - 1),
+            Some(HARM),
+            "short of a fireball, it throws the next one down"
+        );
+        assert_eq!(affordable(book, harm - 1), Some(MAGIC_ARROW));
+        assert_eq!(affordable(book, 0), None, "nothing is free");
+    }
+
+    /// A spell aimed at nobody is not a spell to aim at a foe: cast at one it
+    /// would land on the caster, which is worse than not casting it.
+    #[test]
+    fn a_spell_that_takes_no_mark_is_never_chosen() {
+        let book = knowing(&[CREATE_FOOD]);
+        assert_eq!(affordable(book, u16::MAX), None);
+        assert_eq!(
+            affordable(knowing(&[CREATE_FOOD, HARM]), u16::MAX),
+            Some(HARM),
+            "and it does not stop the rest of the repertoire being reached"
+        );
+    }
+
+    /// An empty repertoire is every creature the shard has today, and it must
+    /// cost the fight nothing.
+    #[test]
+    fn a_creature_that_knows_nothing_casts_nothing() {
+        assert_eq!(affordable(Spellbook(0), u16::MAX), None);
+    }
+
+    /// The four gates, one at a time: a creature with the mana, the spells and
+    /// the mark in front of it casts, and each missing piece stops it.
+    #[test]
+    fn a_caster_casts_only_when_every_gate_is_open() {
+        let mut state = world_with_ground();
+        let at = Point::new(10, 10, 0);
+        let target_pos = Point::new(13, 10, 0);
+        let (creature, _) = mobile(&mut state, at);
+        let brain = Brain {
+            sight: Sight(12),
+            ..Brain::default()
+        };
+
+        assert_eq!(
+            spell_choice(&state, creature, at, Facet(0), brain, target_pos),
+            None,
+            "no repertoire, no cast"
+        );
+
+        state.registry.insert(
+            creature,
+            Repertoire {
+                spells:    knowing(&[MAGIC_ARROW, HARM, FIREBALL]),
+                next_cast: WorldTick::ZERO,
+            },
+        );
+        assert_eq!(
+            spell_choice(&state, creature, at, Facet(0), brain, target_pos),
+            None,
+            "a repertoire with no pool to spend is still no cast"
+        );
+
+        state.registry.insert(
+            creature,
+            Mana {
+                current: 1000,
+                max:     1000,
+            },
+        );
+        assert_eq!(
+            spell_choice(&state, creature, at, Facet(0), brain, target_pos),
+            Some(FIREBALL)
+        );
+
+        // Out past what it can pick out: the fight is still on — `foe_in_sight`
+        // pursues further than it acquires — but the spell is not thrown.
+        let far = Point::new(10 + i32::from(brain.sight.0) as u16 + 1, 10, 0);
+        assert_eq!(
+            spell_choice(&state, creature, at, Facet(0), brain, far),
+            None,
+            "further than it can see"
+        );
+
+        // And within its recovery.
+        state.registry.insert(
+            creature,
+            Repertoire {
+                spells:    knowing(&[MAGIC_ARROW, HARM, FIREBALL]),
+                next_cast: state.ticks + 10,
+            },
+        );
+        assert_eq!(
+            spell_choice(&state, creature, at, Facet(0), brain, target_pos),
+            None,
+            "still recovering from the last one"
+        );
+    }
+
+    /// The branch order the plan asks for: a caster in reach throws rather than
+    /// closes, and the beat is spent standing.
+    #[test]
+    fn the_cast_branch_stands_above_the_chase() {
+        let mut state = world_with_ground();
+        let at = Point::new(10, 10, 0);
+        let (creature, _) = mobile(&mut state, at);
+        // Out of melee reach, so without a repertoire this beat would be a step.
+        let (_, target) = mobile(&mut state, Point::new(15, 10, 0));
+        let brain = Brain {
+            sight: Sight(12),
+            ..Brain::default()
+        };
+        state
+            .registry
+            .insert(creature, Combat::creature_engaged(target, WorldTick::ZERO));
+
+        let closing = fight_phase(&mut state, creature, at, Facet(0), brain);
+        assert!(
+            matches!(closing, FightPhase::Decided(Beat::Move(Some(_)))),
+            "a creature with no spells closes in: {closing:?}"
+        );
+
+        state.registry.insert(
+            creature,
+            Repertoire {
+                spells:    knowing(&[HARM]),
+                next_cast: WorldTick::ZERO,
+            },
+        );
+        state.registry.insert(
+            creature,
+            Mana {
+                current: 1000,
+                max:     1000,
+            },
+        );
+        assert_eq!(
+            fight_phase(&mut state, creature, at, Facet(0), brain),
+            FightPhase::Decided(Beat::Cast { spell: HARM, target }),
+            "and one with them throws instead"
+        );
+    }
+
+    /// A creature holding a cast is committed to it: it does not walk out of its
+    /// own spell, which is the rooting a player already has.
+    #[test]
+    fn a_rooted_caster_stands() {
+        let mut state = world_with_ground();
+        let at = Point::new(10, 10, 0);
+        let (creature, _) = mobile(&mut state, at);
+        let (_, target) = mobile(&mut state, Point::new(15, 10, 0));
+        state.registry.insert(
+            creature,
+            Brain {
+                sight: Sight(12),
+                ..Brain::default()
+            },
+        );
+        state
+            .registry
+            .insert(creature, Combat::creature_engaged(target, WorldTick::ZERO));
+        assert!(
+            matches!(think_one(&mut state, creature), Beat::Move(Some(_))),
+            "it would close in"
+        );
+
+        state.registry.insert(
+            creature,
+            Casting {
+                spell:       HARM,
+                complete_at: state.ticks + 10,
+                scroll:      None,
+                aim:         Some(target),
+            },
+        );
+        assert_eq!(think_one(&mut state, creature), Beat::Move(None));
     }
 }

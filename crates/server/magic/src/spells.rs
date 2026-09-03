@@ -1118,6 +1118,23 @@ pub fn cast_delay_ticks(info: &SpellInfo, ticks_per_second: u64) -> u64 {
     (u64::from(info.circle.get()) + 1) * ticks_per_second / 4
 }
 
+/// How long after a cast *begins* before the caster may begin another, in ticks
+/// — the delay it is held for, and then a breath.
+///
+/// ServUO's `Spell.GetCastRecovery`, which is a flat half-second at zero Faster
+/// Cast Recovery and is charged *after* the cast delay, not instead of it. It is
+/// the whole of the gap between two of a mage's spells, and it is why an
+/// eighth-circle caster does not throw one every tick.
+///
+/// A player never asks this: their next cast is gated by their own hand on the
+/// spellbook, and by the [`crate::Casting`] one-at-a-time rule while a rooted
+/// one is held. It exists for a caster whose hand is a brain, which would
+/// otherwise ask again on its very next beat — see `Repertoire::next_cast`.
+#[must_use]
+pub fn cast_recovery_ticks(info: &SpellInfo, ticks_per_second: u64) -> u64 {
+    cast_delay_ticks(info, ticks_per_second) + ticks_per_second / 2
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

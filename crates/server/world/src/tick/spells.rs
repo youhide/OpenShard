@@ -38,6 +38,7 @@ use openshard_protocol::wire::{
 };
 use openshard_state::components::{
     Casting,
+    Repertoire,
     Skills,
 };
 use openshard_state::{
@@ -69,7 +70,23 @@ impl World {
         let Some(&caster) = self.state.players.get(&connection) else {
             return;
         };
-        self.start_cast(caster, spell, None);
+        self.start_cast(caster, spell, None, None);
+    }
+
+    /// A creature's brain decided to throw `spell` at `target`. Begin it through
+    /// the very same sequence a player's goes through.
+    ///
+    /// The aim is taken **now**, before the delay, because the only thing that
+    /// could be asked at the end of one is a client and a creature has none. That
+    /// is the whole of the difference; every refusal, the mana, the roll, the
+    /// gesture, the resist and the effect art below are the ones that already
+    /// exist, and nothing under this line is told which kind of caster it has.
+    ///
+    /// It is `World`'s and not the brain's for [`crate::tick::World::think`]'s
+    /// reason: the deciding is `ai::think_one`'s, and the world applies what a
+    /// brain cannot do itself — a step, and now a cast.
+    pub(super) fn begin_creature_cast(&mut self, caster: EntityId, spell: SpellId, target: Serial) {
+        self.start_cast(caster, spell, None, Some(target));
     }
 
     /// Begin a cast, either out of the caster's spellbook (`scroll` is `None`) or
@@ -79,7 +96,10 @@ impl World {
     /// one `Spell` object and hands it the scroll or a null, rather than having
     /// two cast paths that would drift apart the first time one of them learned a
     /// new refusal.
-    fn start_cast(&mut self, caster: EntityId, spell: SpellId, scroll: Option<Serial>) {
+    ///
+    /// `aim` is the mark a caster with no cursor to raise chose before it began —
+    /// see [`Casting::aim`]. `None` is a caster that will be asked at the end.
+    fn start_cast(&mut self, caster: EntityId, spell: SpellId, scroll: Option<Serial>, aim: Option<Serial>) {
         let Some(info) = magic::info(spell) else {
             return; // past the eighth circle; not a spell
         };
@@ -148,7 +168,13 @@ impl World {
         // point of power words is that everyone nearby hears what is coming, and
         // a mantra that waited for the spell to land would be a warning that
         // arrives with the fireball.
-        self.say_mantra(caster, info.mantra);
+        // The words, but only from a person. ServUO's `SayMantra` ends with
+        // `m_Caster.Player`, so a creature holds its power words: the warning a
+        // mantra gives is a courtesy between players, and a forest of liches
+        // announcing every magic arrow would be noise rather than warning.
+        if self.state.registry.has::<Client>(caster) {
+            self.say_mantra(caster, info.mantra);
+        }
         let gesture = match info.gesture {
             magic::CastGesture::Directed => openshard_state::Action::CastDirected,
             magic::CastGesture::Area => openshard_state::Action::CastArea,
@@ -158,7 +184,7 @@ impl World {
                 // Nothing to wait out: the gesture and the effect are the same
                 // instant, so the animation is given no duration to hold for.
                 self.state.animate(caster, gesture);
-                self.resolve_cast(caster, spell, scroll);
+                self.resolve_cast(caster, spell, scroll, aim);
             }
             CastStyle::Stop => {
                 let delay = magic::cast_delay_ticks(info, TICKS_PER_SECOND);
@@ -173,9 +199,24 @@ impl World {
                         spell,
                         complete_at: self.state.ticks + delay,
                         scroll,
+                        aim,
                     },
                 );
             }
+        }
+        // And the caster's own recovery, for a caster whose hand is a brain. A
+        // player's next cast is gated by the player; a creature would ask again
+        // on its very next beat, which under the Sphere style — where a cast
+        // resolves the instant it is asked and roots nothing — is every beat
+        // until the mana runs out.
+        //
+        // Armed here rather than by the brain because this is where the spell's
+        // own delay is already known, and because it must be armed by the cast
+        // that was *accepted*: every refusal above returns, so nothing that was
+        // turned away pays a recovery for it.
+        let recovery = self.state.ticks + magic::cast_recovery_ticks(info, TICKS_PER_SECOND);
+        if let Some(repertoire) = self.state.registry.get_mut::<Repertoire>(caster) {
+            repertoire.next_cast = recovery;
         }
     }
 
@@ -236,16 +277,16 @@ impl World {
         }
         // Then the casts whose delay is up.
         let now = self.state.ticks;
-        let ready: Vec<(EntityId, SpellId, Option<Serial>)> = self
+        let ready: Vec<(EntityId, SpellId, Option<Serial>, Option<Serial>)> = self
             .state
             .registry
             .query::<Casting>()
             .filter(|(_, casting)| now >= casting.complete_at)
-            .map(|(entity, casting)| (entity, casting.spell, casting.scroll))
+            .map(|(entity, casting)| (entity, casting.spell, casting.scroll, casting.aim))
             .collect();
-        for (caster, spell, scroll) in ready {
+        for (caster, spell, scroll, aim) in ready {
             self.state.registry.remove::<Casting>(caster);
-            self.resolve_cast(caster, spell, scroll);
+            self.resolve_cast(caster, spell, scroll, aim);
         }
     }
 
@@ -256,7 +297,13 @@ impl World {
     /// `scroll` is the scroll the cast came off, and it changes three things and
     /// nothing else: no reagents are taken, the roll is two circles easier, and
     /// the scroll itself is spent when the cast lands.
-    fn resolve_cast(&mut self, caster: EntityId, spell: SpellId, scroll: Option<Serial>) {
+    fn resolve_cast(
+        &mut self,
+        caster: EntityId,
+        spell: SpellId,
+        scroll: Option<Serial>,
+        aim: Option<Serial>,
+    ) {
         let Some(info) = magic::info(spell) else {
             return;
         };
@@ -287,7 +334,13 @@ impl World {
         // So does a scroll, whatever the knob says — ServUO's
         // `Spell.ConsumeReagents` returns true unconditionally once the cast came
         // off one, because the scroll was already paid for at the scribe's.
-        let reagents: Vec<(Graphic, u16)> = if reagents_required && scroll.is_none() {
+        //
+        // And so does a caster with nobody behind it, by the very next line of
+        // that same method: `if (!m_Caster.Player) return true`. A creature has
+        // no pack to draw from, so a reagent list would not be a cost — it would
+        // be a fizzle every time, and a shard whose liches never cast.
+        let by_a_person = self.state.registry.has::<Client>(caster);
+        let reagents: Vec<(Graphic, u16)> = if reagents_required && scroll.is_none() && by_a_person {
             info.reagents.iter().map(|&graphic| (graphic, 1)).collect()
         } else {
             Vec::new()
@@ -333,22 +386,35 @@ impl World {
         match info.target {
             SpellTarget::SelfCast => {
                 // No cursor: it lands on the caster or the ground around them.
-                self.state.bus.send(magic::SpellCast {
-                    caster,
-                    serial,
-                    spell,
-                    target: None,
-                    success,
-                });
-                if success {
-                    let at = self.caster_position(caster);
-                    self.apply_spell_effect(caster, spell, None, at);
-                }
+                let at = self.caster_position(caster);
+                self.land_cast(caster, spell, None, at, success);
             }
             SpellTarget::Mobile | SpellTarget::Location | SpellTarget::Item => {
-                // Raise the cursor; the effect and the `SpellCast` wait for the
-                // aim (see `handle_target`). A creature with no client cannot aim,
-                // so its targeted cast simply lapses.
+                // A caster that chose its mark before the delay lands it now,
+                // through the same two steps the cursor's answer takes — see
+                // [`Self::land_cast`], which is that answer and this one both.
+                if let Some(aim) = aim {
+                    match self
+                        .state
+                        .registry
+                        .entity_of(aim)
+                        .and_then(|entity| self.state.registry.get::<Position>(entity))
+                        .map(|position| position.0)
+                    {
+                        Some(at) => self.land_cast(caster, spell, Some(aim), at, success),
+                        // The mark died, or left the world, while the cast was
+                        // held. The mana went at the roll and does not come back
+                        // — ServUO's `CheckSequence` charges before it looks —
+                        // but there is nothing left to land it on, and a spell
+                        // aimed at a mobile is not a spell aimed at the tile the
+                        // mobile was standing on.
+                        None => self.land_cast(caster, spell, None, self.caster_position(caster), false),
+                    }
+                    return;
+                }
+                // Otherwise raise the cursor; the effect and the `SpellCast` wait
+                // for the aim (see `handle_target`). A caster with neither a
+                // client nor an aim simply lapses.
                 //
                 // An item-targeted spell raises the *object* cursor, so the client
                 // itself refuses bare ground — "Select Marked item." wants a thing,
@@ -370,6 +436,39 @@ impl World {
                     );
                 }
             }
+        }
+    }
+
+    /// A cast that has been paid for and rolled arrives at its aim: say so, and
+    /// run the effect if the roll took.
+    ///
+    /// **The one place a cast lands**, and the three ways in are the three ways a
+    /// spell finds out what it is aimed at — a self-cast, which needs no asking;
+    /// a player's target cursor coming back (`handle_target`); and a caster that
+    /// chose its mark before the delay. All three do exactly this, and a fourth
+    /// copy of "announce it, then apply it" is how the announcement and the
+    /// effect come to disagree about whether a spell happened.
+    pub(super) fn land_cast(
+        &mut self,
+        caster: EntityId,
+        spell: SpellId,
+        target: Option<Serial>,
+        at: Point,
+        success: bool,
+    ) {
+        // The announcement first, so a pack that watches for casts hears about
+        // one that failed too — a fizzle is a thing that happened.
+        if let Some(serial) = self.state.registry.serial_of(caster) {
+            self.state.bus.send(magic::SpellCast {
+                caster,
+                serial,
+                spell,
+                target,
+                success,
+            });
+        }
+        if success {
+            self.apply_spell_effect(caster, spell, target, at);
         }
     }
 
@@ -864,7 +963,9 @@ impl World {
         let Some(scroll) = self.state.registry.serial_of(scroll) else {
             return true;
         };
-        self.start_cast(reader, spell, Some(scroll));
+        // A scroll is read by a person, and a person is asked for the aim at the
+        // end of the cast like any other: no mark is chosen here.
+        self.start_cast(reader, spell, Some(scroll), None);
         true
     }
 
@@ -885,6 +986,16 @@ impl World {
     /// a scroll asks exactly the same question, and one of the two would have
     /// gone stale the first time the other learnt something.
     pub(super) fn caster_has_spell(&self, caster: EntityId, spell: SpellId) -> bool {
+        // A creature knows what it knows: no book, no pack, nothing to steal off
+        // it. See [`Repertoire`] for why the spells sit on the mobile.
+        if self
+            .state
+            .registry
+            .get::<Repertoire>(caster)
+            .is_some_and(|repertoire| repertoire.spells.has(spell))
+        {
+            return true;
+        }
         let Some(serial) = self.state.registry.serial_of(caster) else {
             return false;
         };
@@ -1113,5 +1224,281 @@ mod scroll_tests {
             !world.cast_from_scroll(player, gold),
             "gold was read as a spell scroll"
         );
+    }
+}
+
+/// A creature's cast — here beside the scroll's for the same reason, and because
+/// the claim being made is about this module: **the sequence is the one a player
+/// goes through**, and nothing under `start_cast` is told which kind of caster it
+/// has.
+#[cfg(test)]
+mod creature_cast_tests {
+    use std::time::Instant;
+
+    use openshard_state::components::{
+        Brain,
+        Mana,
+        Repertoire,
+        Spellbook,
+    };
+
+    use super::*;
+    use crate::tick::tests::{
+        enter,
+        packets_for,
+        world,
+    };
+
+    /// Harm — second circle, aimed at a mobile, and the only spell the caster
+    /// below knows, so what lands can only have come from it.
+    const HARM: SpellId = SpellId(11);
+
+    /// What a mage-brigand knows and what it costs, out of the table rather than
+    /// written down twice.
+    fn harm_mana() -> u16 {
+        magic::mana(magic::info(HARM).expect("Harm is in the table"))
+    }
+
+    /// A caster standing a couple of tiles off the player, knowing exactly one
+    /// spell, with the Magery to land it and the mana for several.
+    ///
+    /// Aggressive and sighted, so its own beat picks the fight: nothing here
+    /// engages it by hand, which is the point — the cast has to come out of the
+    /// ordinary brain beat and not out of the test.
+    fn a_caster(world: &mut World, at: Point, now: Instant) -> EntityId {
+        world.queue(Command::SpawnMobile {
+            body:        Graphic(24), // a lich
+            hue:         Hue(0),
+            hits:        200,
+            notoriety:   openshard_protocol::mobile::Notoriety::from_bits(5),
+            damage:      1,
+            resistance:  openshard_protocol::world::PhysicalResistance::new(0),
+            swing:       0,
+            sight:       openshard_protocol::world::Sight(10),
+            aggression:  openshard_state::components::Aggression::from_bits(2),
+            beat:        1,
+            ranged:      None,
+            ranged_kind: openshard_protocol::world::DamageType::Physical,
+            wander:      false,
+            position:    at,
+            facet:       Facet(0),
+            name:        None,
+            title:       None,
+            shoe:        0,
+            fame:        0,
+            karma:       0,
+            night_home:  None,
+            banker:      false,
+            vendor:      false,
+            healer:      false,
+            equipment:   Vec::new(),
+            // Grandmaster, so the roll is not what a failure here is about.
+            skills:      vec![(openshard_state::Skill::Magery, 1000)],
+            mana:        harm_mana() * 4,
+            spells:      {
+                let mut book = Spellbook(0);
+                book.learn(HARM);
+                book
+            },
+            stock:       Vec::new(),
+            escort_to:   None,
+            quests:      Vec::new(),
+        });
+        world.tick(now);
+        world
+            .state
+            .registry
+            .query::<Brain>()
+            .map(|(entity, _)| entity)
+            .find(|&entity| world.state.registry.has::<Repertoire>(entity))
+            .expect("the caster was spawned")
+    }
+
+    /// Beat the world forward, a tick at a time, until `done` or the ticks run
+    /// out. Returns whether it happened.
+    fn tick_until(world: &mut World, from: Instant, ticks: u64, done: impl Fn(&World) -> bool) -> bool {
+        let mut later = from;
+        for _ in 0..ticks {
+            if done(world) {
+                return true;
+            }
+            later += TICK_INTERVAL;
+            world.tick(later);
+        }
+        done(world)
+    }
+
+    /// The whole of C1 in one run: a creature that has mana and a spell throws
+    /// it at the player its brain picked a fight with, out of its own beat, and
+    /// the spell that lands is the one the table already had.
+    #[test]
+    fn a_creature_with_mana_and_a_spell_throws_it() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let player = world.state.players[&connection];
+        let at = world
+            .state
+            .registry
+            .get::<Position>(player)
+            .expect("the player stands somewhere")
+            .0;
+        let caster = a_caster(&mut world, Point::new(at.x + 3, at.y, at.z), now);
+        let full = world.state.registry.get::<Mana>(caster).expect("a pool").current;
+        let hits = world
+            .state
+            .registry
+            .get::<Hitpoints>(player)
+            .expect("a player has hit points")
+            .current;
+
+        let spent = tick_until(&mut world, now, 200, |world| {
+            world
+                .state
+                .registry
+                .get::<Mana>(caster)
+                .is_some_and(|mana| mana.current < full)
+        });
+        assert!(spent, "the caster never spent a point of mana");
+
+        let hurt = tick_until(&mut world, now, 200, |world| {
+            world
+                .state
+                .registry
+                .get::<Hitpoints>(player)
+                .is_some_and(|now| now.current < hits)
+        });
+        assert!(hurt, "the spell was cast and nothing landed");
+    }
+
+    /// A creature pays no reagents and carries no pack — ServUO's
+    /// `ConsumeReagents` returns true for anything that is not a player — so a
+    /// shard running with reagents on still has liches that cast.
+    #[test]
+    fn a_creature_needs_no_reagents() {
+        let now = Instant::now();
+        let mut world = world();
+        assert!(
+            world.state.gameplay.reagents,
+            "this test is only worth running on a shard that charges reagents"
+        );
+        let connection = enter(&mut world, now);
+        let player = world.state.players[&connection];
+        let at = world
+            .state
+            .registry
+            .get::<Position>(player)
+            .expect("the player stands somewhere")
+            .0;
+        let caster = a_caster(&mut world, Point::new(at.x + 3, at.y, at.z), now);
+        assert!(
+            world.caster_pack(serial_of_entity(&world, caster)).is_none(),
+            "the caster was given a backpack, which would make this prove nothing"
+        );
+        let full = world.state.registry.get::<Mana>(caster).expect("a pool").current;
+
+        assert!(
+            tick_until(&mut world, now, 200, |world| {
+                world
+                    .state
+                    .registry
+                    .get::<Mana>(caster)
+                    .is_some_and(|mana| mana.current < full)
+            }),
+            "an empty pack fizzled the cast"
+        );
+    }
+
+    /// Its power words stay in its own head: ServUO says a mantra only for a
+    /// player, and a wood full of liches announcing every spell would be noise.
+    #[test]
+    fn a_creature_says_no_mantra() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let player = world.state.players[&connection];
+        let at = world
+            .state
+            .registry
+            .get::<Position>(player)
+            .expect("the player stands somewhere")
+            .0;
+        let caster = a_caster(&mut world, Point::new(at.x + 3, at.y, at.z), now);
+        let full = world.state.registry.get::<Mana>(caster).expect("a pool").current;
+        let _ = packets_for(&mut world, connection);
+
+        let mut said: Vec<u8> = Vec::new();
+        let mut later = now;
+        for _ in 0..200 {
+            later += TICK_INTERVAL;
+            world.tick(later);
+            // `0x1C` and `0xAE` are the two ways anything on this shard speaks.
+            said.extend(
+                packets_for(&mut world, connection)
+                    .iter()
+                    .map(|packet| packet[0])
+                    .filter(|kind| matches!(kind, 0x1C | 0xAE)),
+            );
+        }
+        assert!(
+            world
+                .state
+                .registry
+                .get::<Mana>(caster)
+                .is_some_and(|mana| mana.current < full),
+            "nothing was cast, so the silence proves nothing"
+        );
+        assert!(said.is_empty(), "the creature spoke its mantra: {said:02X?}");
+    }
+
+    /// Recovery, which is what keeps a mage from emptying its pool in one beat:
+    /// after a cast it is held off until the spell's own delay and a breath have
+    /// passed.
+    #[test]
+    fn a_cast_arms_the_creatures_recovery() {
+        let now = Instant::now();
+        let mut world = world();
+        let connection = enter(&mut world, now);
+        let player = world.state.players[&connection];
+        let at = world
+            .state
+            .registry
+            .get::<Position>(player)
+            .expect("the player stands somewhere")
+            .0;
+        let caster = a_caster(&mut world, Point::new(at.x + 3, at.y, at.z), now);
+        let full = world.state.registry.get::<Mana>(caster).expect("a pool").current;
+
+        assert!(
+            tick_until(&mut world, now, 200, |world| {
+                world
+                    .state
+                    .registry
+                    .get::<Mana>(caster)
+                    .is_some_and(|mana| mana.current < full)
+            }),
+            "nothing was cast"
+        );
+        let ticks = world.state.ticks;
+        let next = world
+            .state
+            .registry
+            .get::<Repertoire>(caster)
+            .expect("a repertoire")
+            .next_cast;
+        assert!(
+            next > ticks,
+            "the cast left the caster free to throw another on its next beat"
+        );
+    }
+
+    /// A caster's own serial — `tests::serial_of` answers for a *connection*,
+    /// and a creature has none.
+    fn serial_of_entity(world: &World, entity: EntityId) -> Serial {
+        world
+            .state
+            .registry
+            .serial_of(entity)
+            .expect("a spawned mobile has a serial")
     }
 }

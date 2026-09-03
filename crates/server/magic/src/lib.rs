@@ -53,6 +53,7 @@ pub use spells::{
     SpellTarget,
     SpellVisual,
     cast_delay_ticks,
+    cast_recovery_ticks,
     cast_skills,
     info,
     mana,

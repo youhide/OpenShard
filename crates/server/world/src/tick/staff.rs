@@ -201,20 +201,8 @@ impl World {
                 }
             }
             openshard_state::TargetPurpose::Spell { spell, success } => {
-                // The cast already paid and rolled; now it has its aim. Announce
-                // it (so the pack can react) and run the core effect if it took.
-                if let Some(serial) = self.state.registry.serial_of(actor) {
-                    self.state.bus.send(magic::SpellCast {
-                        caster: actor,
-                        serial,
-                        spell,
-                        target: response.object,
-                        success,
-                    });
-                }
-                if success {
-                    self.apply_spell_effect(actor, spell, response.object, response.location);
-                }
+                // The cast already paid and rolled; now it has its aim.
+                self.land_cast(actor, spell, response.object, response.location, success);
             }
         }
     }

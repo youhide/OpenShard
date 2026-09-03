@@ -11,10 +11,10 @@ What a creature *looks* like and where it came from is
 
 ## A brain only decides
 
-`think_one(state, creature) -> Option<Direction>` is the whole of the seam. It
-reads the world, works out whether the creature should fight, chase, flee, kite
-or drift, and turns that into at most one thing: a direction to step, handed back
-to the caller. Two consequences follow, and they are why the crate is a crate:
+`think_one(state, creature) -> Beat` is the whole of the seam. It reads the
+world, works out whether the creature should fight, chase, flee, kite, cast or
+drift, and turns that into at most one thing: a `Beat`, handed back to the
+caller. Three consequences follow, and they are why the crate is a crate:
 
 - **Engaging is done directly**, because engaging is not a step. The brain hands
   the creature a `Combat` aimed at its quarry, and `combat::swings` fights with
@@ -23,6 +23,14 @@ to the caller. Two consequences follow, and they are why the crate is a crate:
 - **Stepping is left to the world**, because a step is bound to terrain, to the
   walk budget and to the announcement that follows it. `world::tick` calls
   `step`. `ai` never moves anything.
+- **Casting is left to the world too**, and for the same kind of reason: the cast
+  sequence — the refusals, the mana, the skill roll, the gesture, the resist and
+  the effect art — lives on `World`, and it is the one a player's cast goes
+  through unchanged. `Beat::Cast` names a spell and a mark and `world::tick`
+  calls `begin_creature_cast`. There is no creature spell path either.
+
+`Beat` is an enum and not two fields because its arms are alternatives: a
+creature that is casting is standing, and one that is stepping is not casting.
 
 The decision spends the world's seeded `Rng` and reads `state.ticks`, never a
 wall clock. A populated facet therefore replays: the same seed puts the same
@@ -43,8 +51,9 @@ Each beat runs the phases in order and stops at the first one that has something
 to say.
 
 1. **Fight.** There is a quarry. It is dropped if it died, fled the facet or
-   drifted past the chase limit; otherwise the creature closes, kites or backs
-   off, and swings when it is in reach.
+   drifted past the chase limit; otherwise the creature flees, **casts**, kites,
+   closes, and swings when it is in reach — in that order, so a caster throws
+   rather than closes and a mage with a bow is a mage first.
 2. **Acquire.** No quarry: look for one. The nearest player within `Sight` that
    the creature can actually *see* becomes the quarry.
 3. **Wander.** Nothing to fight and a `wander` flag: a three-in-eight chance of a
@@ -64,6 +73,40 @@ behind them has done something.
 Sight bounds acquisition; it does not bound the chase. A creature chases to twice
 its own sight, with a floor of twelve tiles so that a defensive animal with no
 hunting sight of its own still answers whoever hit it.
+
+It bounds the **cast**, though, and with the ray as well as the radius. A spell
+has no range of its own in this engine, so the honest bound on a creature's is
+what it can pick out — the same number the fight was started on — and a bolt does
+not bend round a wall any more than an arrow does. A caster that could throw
+through a keep would be fighting from somewhere the player cannot fight back
+from.
+
+## A creature that casts
+
+Two components make one, both authored by the spawn (`data/spawns.json`, the
+`mana` and `spells` columns): a `Mana` pool and a `Repertoire` — the spells it
+knows, in the same bit mask and the same numbering a player's spellbook uses. A
+creature carries no book and no pack, so its spells sit on the mobile; nothing
+can be stolen off a lich to stop it casting.
+
+The choice is four questions and a pick: does it cast at all, is it off the
+recovery its last spell armed, is the mark in sight with a clear line, and what
+can it pay for. The pick is the strongest thing it can afford that is aimed at a
+mobile — which is a rule and not a placeholder, though it is a thin one: harm,
+heal, curse and escape as *categories* are the next phase of
+[`plans/npc/creature_casting/PLAN.md`](../../plans/npc/creature_casting/PLAN.md).
+
+Below the decision there is no creature-shaped code at all. `begin_creature_cast`
+hands `start_cast` a mark instead of a cursor to raise, and everything from the
+spellbook gate down runs unchanged — which is why a creature's cast fizzles,
+resists, disturbs and draws its art exactly as a player's does. Two rules do read
+"is there a person behind this mobile", and both are ServUO's own: a mantra is
+said only by a player (`Spell.SayMantra` ends with `m_Caster.Player`), and
+reagents are consumed only from one (`Spell.ConsumeReagents` returns true for
+anything else).
+
+A cast roots its caster the way it roots a player: a creature holding a `Casting`
+stands, and its beat is spent doing so.
 
 ## Two searches, in the order the client asks them in
 

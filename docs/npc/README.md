@@ -71,7 +71,7 @@ mover is a call somewhere it is forgotten.
 | Guilds: five ranks, war, named alliances, guild and alliance chat | ✅ shipping | the guildstone is not an item — row 10 | the same, § a guild |
 | Notoriety answered per viewer, murderer and criminal before guild | ✅ shipping | — | the same, § notoriety |
 | Quests: four objectives, a log, the ported window, turn-in, escorts | ✅ shipping | reward choice, chains, two objective kinds, the converter — row 6 | [`design_quests.md`](design_quests.md) |
-| A creature that casts a spell | ⬜ not built | the whole decision layer — row 1 | [`plans/npc/creature_casting/PLAN.md`](../../plans/npc/creature_casting/PLAN.md) |
+| A creature that casts a spell: mana and a repertoire as spawn data, a cast branch above the melee one, the player's own cast sequence below it | 🟡 C1 built | it throws the strongest thing it can afford and nothing chooses by *category* — heal, curse, escape are C2; the cadence clauses beyond rooting are C3 — row 1 | [`plans/npc/creature_casting/PLAN.md`](../../plans/npc/creature_casting/PLAN.md), [`evidence/2026-09-03-a-creature-that-casts.md`](evidence/2026-09-03-a-creature-that-casts.md) |
 | A channel window (`0xB3`/`0xB5`) | ⬜ not built | row 8 | — |
 | The Town Crier | ⬜ not built | row 9 | — |
 
@@ -169,12 +169,17 @@ mover is a call somewhere it is forgotten.
 
 ## What is open, ranked
 
-**1. 🚩 Nothing but a player ever casts.** `crates/server/ai` has no notion of a
-spell: no mana on a creature, no choice in `fight_phase`, no cast in the beat. A
-lich, a mage-brigand and a healing dragon are all impossible, which makes the
-whole of the magic domain one-directional. The cast path itself is reusable —
-`begin_cast` is the client seam, `resolve_cast` and `apply_spell_effect` below it
-are not — so what is missing is the *decision*: which spell, at whom, how often.
+**1. A creature casts, but it does not choose.** The magic domain stopped being
+one-directional on 2026-09-03: a creature carries a `Mana` pool and a
+`Repertoire` from its spawn data, `fight_phase` throws before it closes, and the
+cast goes through the sequence a player's does — see
+[`evidence/2026-09-03-a-creature-that-casts.md`](evidence/2026-09-03-a-creature-that-casts.md).
+What is left is the half the plan calls the decision. It throws the **strongest
+spell it can afford that is aimed at a mobile**, which means nothing heals, buffs,
+curses or teleports away: a healing dragon is still impossible, and a lich at one
+hit point fights on rather than escaping. Those are categories, and the category
+choice is C2. C3 is the rest of the cadence — a caster is rooted already, but LOD
+may still doze one mid-cast and the determinism claim has no test.
 [`plans/npc/creature_casting/PLAN.md`](../../plans/npc/creature_casting/PLAN.md).
 
 **2. 🚩 A kiting archer can livelock, and that is how a tick-rate change was

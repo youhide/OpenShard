@@ -133,6 +133,8 @@ fn populate(gameplay: Gameplay, folk: u32, decor: u32, players: u32) -> World {
                 skills:      Vec::new(),
                 stock:       Vec::new(),
                 escort_to:   None,
+                mana:        0,
+                spells:      openshard_state::components::Spellbook(0),
                 quests:      Vec::new(),
             });
             placed += 1;

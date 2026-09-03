@@ -19,6 +19,7 @@ use openshard_protocol::world::{
     RangedRange,
     Sight,
 };
+use openshard_state::components::Spellbook;
 use openshard_state::{
     LockKind,
     Skill,
@@ -681,6 +682,13 @@ pub enum Command {
         /// Trained combat skills, `(skill id, value in tenths)` — what turns on the
         /// to-hit roll and damage scaling for the creature.
         skills:      Vec<(Skill, u16)>,
+        /// The mana it casts out of; `0` for a creature that does not cast, which
+        /// is what leaves it with no mana pool at all.
+        mana:        u16,
+        /// The Magery spells it knows, in the same mask a spellbook uses. Empty
+        /// exactly when `mana` is zero — a repertoire with nothing to spend and a
+        /// pool with nothing to spend it on are both a caster that never casts.
+        spells:      Spellbook,
         /// What it sells, if it is a shopkeeper. Applied the moment it exists.
         ///
         /// # Why this rides on the spawn

@@ -24,6 +24,7 @@ use openshard_protocol::world::{
     RangedRange,
     Sight,
 };
+use openshard_state::components::Spellbook;
 use openshard_state::{
     Skill,
     SpawnerId,
@@ -68,6 +69,11 @@ pub struct CreatureTemplate {
     /// Trained combat skills, `(skill id, value in tenths)` — what makes a
     /// spawner's monsters roll to hit and scale damage like a player.
     pub skills:      Vec<(Skill, u16)>,
+    /// The mana it casts out of; `0` for a creature that does not cast.
+    pub mana:        u16,
+    /// The spells it knows, in the same mask a spellbook uses. Empty for a
+    /// creature that does not cast, and empty exactly when `mana` is zero.
+    pub spells:      Spellbook,
 }
 
 /// The box a region spawns within: a top-left tile, a size, and a facet.

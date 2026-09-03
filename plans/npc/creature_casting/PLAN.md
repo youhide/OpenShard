@@ -20,16 +20,34 @@ creature does not need a new spell system.
 
 So what is missing is the **decision**: which spell, at whom, and how often.
 
-## C1 — a creature has mana, and a spell to spend it on
+## C1 — a creature has mana, and a spell to spend it on — **built 2026-09-03**
 
-- [ ] A creature carries `Mana` and a small spell list, both spawn data — the
+- [x] A creature carries `Mana` and a small spell list, both spawn data — the
       same shape `ranged` and `sight` already have, so a pack authors a lich by
-      naming spells rather than by writing behaviour.
-- [ ] `fight_phase` gains one branch above the melee one: if a spell is
-      affordable, in range and off cooldown, cast it instead of closing.
-- [ ] The cast goes through the same `resolve_cast` a player's does, so the
-      words, the gesture, the resist roll and the effect art are the ones that
-      already exist. **Nothing about a spell may learn that a creature cast it.**
+      naming spells rather than by writing behaviour. `data/spawns.json` gained a
+      `mana` and a `spells` column, and the two must be given together or the
+      build refuses the file: a repertoire with nothing to spend and a pool with
+      nothing to spend it on are both a caster that never casts. The lich, the
+      lich lord and the skeletal mage are authored with them.
+- [x] `fight_phase` gains one branch above the melee one — and above the bow's
+      too: a creature with both is a mage with a wand, and the spell is the
+      interesting half. Off recovery, in sight with a clear line, and something
+      it can pay for, or the beat is spent the ordinary way.
+- [x] The cast goes through the same `resolve_cast` a player's does. Nothing
+      about a spell learns that a creature cast it; the difference is one field
+      on `Casting` — the mark a caster with no cursor to raise chose before the
+      delay — and two rules that ask "is there a person behind this mobile",
+      both of which are ServUO's own (no mantra, no reagents).
+- [x] And one clause borrowed early from C3, because leaving it out would have
+      shipped a visible defect: a creature holding a `Casting` stands. The rest
+      of C3 — LOD, disturbance, the determinism claim — is still open.
+
+What C1 deliberately did **not** do is choose well. It throws the strongest
+thing it can afford that is aimed at a mobile, which is a rule rather than a
+placeholder but a thin one, and it is exactly what C2 replaces.
+
+The record is
+[`docs/npc/evidence/2026-09-03-a-creature-that-casts.md`](../../../docs/npc/evidence/2026-09-03-a-creature-that-casts.md).
 
 ## C2 — the choice, which is the part with a decision in it
 
@@ -59,14 +77,20 @@ same content.
 - [ ] Determinism: the choice spends the world's seeded `Rng` like every other
       brain decision, so a fight against a mage still replays.
 
-## What has to be decided before C1 rather than during it
+## What had to be decided before C1 — **decided: data**
 
 **Whether a creature's spell list is data or a body default.** `creature_name`
 and `creature_base_sound` are keyed by body and defaulted in core with the pack
-free to override; a spell list could be the same, or it could be per-spawn only.
-The two answers produce different files, and the choice is the same one the
-body-table sweep is already open about — see the domain README's row on the three
-tables that share the `body` key.
+free to override; a spell list could have been the same, or per-spawn only.
+
+It is **per-spawn data**, for two reasons. A repertoire is not an identity the
+way a name and a howl are: two liches out of the same body are the same creature
+called the same thing, and a shard that wants one of them to throw flamestrikes
+and the other magic arrows is authoring content rather than correcting a table.
+And a fourth file keyed by `body` would grow exactly the drift the domain
+README's row 15 is already about — three tables that share a key, disagree about
+which bodies share a row, and are kept in step by prose. So the columns sit
+beside `ranged` and `sight`, which are the fields they most resemble.
 
 **And a scroll cast is a player's alone until this lands.** A creature reaches no
 double-click, so the scroll path is not a second gap; it is this one.

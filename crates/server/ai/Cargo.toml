@@ -17,6 +17,9 @@ openshard-items.workspace = true
 openshard-entities.workspace = true
 # `Doors`: which reading of the shut doors a route is planned under.
 openshard-map.workspace = true
+# The spell table: what a spell costs and what it aims at, which is what a
+# creature's choice of one is made of.
+openshard-magic.workspace = true
 openshard-movement.workspace = true
 openshard-protocol.workspace = true
 openshard-state.workspace = true

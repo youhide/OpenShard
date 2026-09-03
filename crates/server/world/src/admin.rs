@@ -536,6 +536,11 @@ pub fn place_creature(state: &mut WorldState, actor: EntityId, kind: u16, positi
             healer: false,
             equipment: Vec::new(),
             skills: Vec::new(),
+            // A staff-summoned specimen is the creature table's own stat block,
+            // and nothing in that table casts: the spawn data is what authors a
+            // caster (`data/spawns.json`), and `.creature` is a viewing tool.
+            mana: 0,
+            spells: openshard_state::components::Spellbook(0),
         },
     );
     if spawned.is_some() {

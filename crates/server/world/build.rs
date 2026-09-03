@@ -147,6 +147,14 @@ struct Creature {
     /// The ranged attack's damage type, as the wire value.
     #[serde(default)]
     ranged_kind: u8,
+    /// The mana it casts out of. Zero for everything that does not cast, which
+    /// is what leaves it without the component at all.
+    #[serde(default)]
+    mana:        u16,
+    /// The Magery spells it knows, by 0-based spell id — the same numbering a
+    /// spellbook and `magic::info` use. Empty for everything that does not cast.
+    #[serde(default)]
+    spells:      Vec<u8>,
     /// Whether it drifts when idle.
     #[serde(default)]
     wander:      bool,
@@ -290,6 +298,17 @@ fn creature_expr(name: &str, c: &Creature, indent: &str) -> String {
     .unwrap();
     writeln!(out, "{indent}    wander: {},", c.wander).unwrap();
     writeln!(out, "{indent}    skills: {skills},").unwrap();
+    writeln!(out, "{indent}    mana: {},", c.mana).unwrap();
+    // The list becomes the mask here rather than at spawn, because this is where
+    // the ids can be checked against a name a reader recognises. `1u64 << id` is
+    // `Spellbook::learn`'s own arithmetic, and the range assert in [`spawns`] is
+    // what keeps a typo from folding into the wrong bit.
+    let mask = c.spells.iter().fold(0u64, |mask, &id| mask | 1u64 << id);
+    writeln!(
+        out,
+        "{indent}    spells: openshard_state::components::Spellbook({mask}),"
+    )
+    .unwrap();
     write!(out, "{indent}}}").unwrap();
     out
 }
@@ -355,6 +374,25 @@ fn spawns(text: &str) -> String {
             c.resistance <= 100,
             "{name} resists {}% of physical damage",
             c.resistance
+        );
+        // The mask is built by shifting, so an id past the eighth circle would
+        // shift off the end of a `u64` — in release that is an id that silently
+        // becomes another spell. There are 64 Magery spells and this is the
+        // range of them.
+        for &spell in &c.spells {
+            assert!(
+                spell < 64,
+                "{name} knows spell {spell}, and there are only 64 Magery spells"
+            );
+        }
+        // Mana and spells are one fact stated in two fields, and either half
+        // alone is content that reads as a caster and never casts: a repertoire
+        // with nothing to spend, or a pool with nothing to spend it on.
+        assert!(
+            c.spells.is_empty() == (c.mana == 0),
+            "{name} has {} mana and knows {} spell(s); a caster needs both",
+            c.mana,
+            c.spells.len()
         );
     }
 
@@ -1280,6 +1318,11 @@ fn townsfolk(text: &str) -> String {
         writeln!(out, "                healer: {},", person.healer).unwrap();
         writeln!(out, "                equipment: {equipment},").unwrap();
         out.push_str("                skills: Vec::new(),\n");
+        // No townsperson casts. A shopkeeper with a repertoire would be a mage
+        // who fights back, which is the guard's job on this shard and not the
+        // baker's; `data/townsfolk.json` has no column for one on purpose.
+        out.push_str("                mana: 0,\n");
+        out.push_str("                spells: openshard_state::components::Spellbook(0),\n");
         writeln!(out, "                stock: {stock},").unwrap();
         writeln!(out, "                escort_to: {escort},").unwrap();
         let offers: Vec<String> = person

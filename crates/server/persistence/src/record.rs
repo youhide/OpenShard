@@ -1267,6 +1267,15 @@ pub struct CreatureData {
     /// save (no skills) restores as a skill-less creature.
     #[serde(default)]
     pub skills:      Vec<(u8, u16)>,
+    /// The mana it casts out of; `0` for a creature that does not cast. Defaulted
+    /// like `skills`, so a save written before creatures could cast restores
+    /// regions of creatures that do not.
+    #[serde(default)]
+    pub mana:        u16,
+    /// The spells it knows, as the bit mask a spellbook holds. Defaulted for the
+    /// same reason, and empty exactly when `mana` is zero.
+    #[serde(default)]
+    pub spells:      u64,
 }
 
 /// A spawn region, as saved.
@@ -1358,6 +1367,19 @@ pub struct MobileRecord {
     pub ranged_kind: DamageType,
     /// Whether it drifts when idle.
     pub wander: bool,
+    /// The mana it casts out of, as it stood at the save — a spent caster stays
+    /// spent, the way a wounded one stays wounded. Zero for anything that does
+    /// not cast, which is what leaves it with no pool at all. Defaulted, so a
+    /// save written before creatures could cast restores none of them casting.
+    #[serde(default)]
+    pub mana_current: u16,
+    /// The most mana it can hold.
+    #[serde(default)]
+    pub mana_max: u16,
+    /// The spells it knows, as the bit mask a spellbook holds. Defaulted for the
+    /// same reason.
+    #[serde(default)]
+    pub spells: u64,
     /// Whether it offers banking.
     pub banker: bool,
     /// Whether it keeps a shop.

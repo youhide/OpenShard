@@ -548,6 +548,9 @@ fn place_dummy(state: &mut WorldState, actor: EntityId, args: &[&str]) {
             healer: false,
             equipment: vec![(scarecrow::ROBE, scarecrow::ROBE_LAYER, scarecrow::HUE)],
             skills: Vec::new(),
+            // A scarecrow is a prop: no brain, no blow, and nothing to cast with.
+            mana: 0,
+            spells: openshard_state::components::Spellbook(0),
         },
     ) else {
         notify(state, actor, "No room for a scarecrow.");

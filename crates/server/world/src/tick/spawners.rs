@@ -121,6 +121,8 @@ impl World {
                     healer: false,
                     equipment: Vec::new(),
                     skills: creature.skills.clone(),
+                    mana: creature.mana,
+                    spells: creature.spells,
                 },
             ) {
                 self.state.registry.insert(entity, SpawnedBy(id));
@@ -220,6 +222,8 @@ impl World {
                                     .iter()
                                     .map(|(skill, value)| (skill.id(), *value))
                                     .collect(),
+                                mana:        c.mana,
+                                spells:      c.spells.0,
                             }
                         })
                         .collect(),
@@ -269,6 +273,8 @@ impl World {
                                 openshard_state::Skill::from_id(id).map(|skill| (skill, value))
                             })
                             .collect(),
+                        mana:        c.mana,
+                        spells:      openshard_state::components::Spellbook(c.spells),
                     }
                 })
                 .collect();

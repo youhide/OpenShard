@@ -1492,6 +1492,8 @@ fn spawn_mobile_body(world: &mut World, body: u16, at: Point, now: Instant) -> S
         skills:      Vec::new(),
         stock:       Vec::new(),
         escort_to:   None,
+        mana:        0,
+        spells:      openshard_state::components::Spellbook(0),
         quests:      Vec::new(),
     });
     world.tick(now);

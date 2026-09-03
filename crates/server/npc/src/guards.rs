@@ -45,6 +45,7 @@ use openshard_state::components::{
     Hitpoints,
     Murders,
     Position,
+    Spellbook,
     Staff,
 };
 
@@ -242,6 +243,10 @@ fn make_guard(state: &mut WorldState, target: EntityId) {
             healer: false,
             equipment: GUARD_KIT.to_vec(),
             skills: Vec::new(),
+            // A guard kills by decree, not by spell — see `execute` below, which
+            // is the whole of its violence.
+            mana: 0,
+            spells: Spellbook(0),
         },
     ) else {
         return;

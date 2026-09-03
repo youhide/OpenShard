@@ -41,6 +41,7 @@ use openshard_protocol::world::{
 use openshard_state::components::{
     Position,
     Skills,
+    Spellbook,
     SummonKind,
     Summoned,
 };
@@ -149,6 +150,13 @@ pub fn summon(state: &mut WorldState, caster: EntityId, kind: SummonKind, at: Po
             healer: false,
             equipment: Vec::new(),
             skills: data.skills.to_vec(),
+            // Nothing summonable casts. ServUO's summons are all melee — the
+            // one that is not, the Energy Vortex, fights by touch here too —
+            // and a summoned caster would want a repertoire in
+            // `openshard_state::summon`'s table rather than a number invented
+            // at this call site.
+            mana: 0,
+            spells: Spellbook(0),
         },
     )?;
     // Its master's, by the one path a creature becomes somebody's — so a summon

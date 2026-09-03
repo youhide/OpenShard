@@ -55,6 +55,7 @@ use openshard_state::components::{
     QuestLog,
     QuestState,
     RangedAttack,
+    Repertoire,
     Restock,
     RuneMark,
     Runebook,
@@ -898,6 +899,16 @@ impl World {
                 .map_or((None, DamageType::Physical), |ranged| {
                     (Some(ranged.range), ranged.kind)
                 });
+            // A caster's pool and its repertoire, or the zeroes `spawn` builds
+            // neither from — the same "no component reads back as the values that
+            // rebuild none" rule the brain above is saved by.
+            let mana = registry.get::<Mana>(entity).copied().unwrap_or(Mana {
+                current: 0,
+                max:     0,
+            });
+            let spells = registry
+                .get::<Repertoire>(entity)
+                .map_or(0, |repertoire| repertoire.spells.0);
             let npc = registry.get::<Npc>(entity).copied();
             records.push(MobileRecord {
                 serial,
@@ -930,6 +941,9 @@ impl World {
                 ranged,
                 ranged_kind,
                 wander,
+                mana_current: mana.current,
+                mana_max: mana.max,
+                spells,
                 banker: registry.has::<Banker>(entity),
                 vendor: registry.has::<Vendor>(entity),
                 healer: registry.has::<Healer>(entity),
@@ -1907,6 +1921,28 @@ impl World {
                 RangedAttack {
                     range,
                     kind: record.ranged_kind,
+                },
+            );
+        }
+        // The same both-or-neither rule `spawn` applies, read off the pool rather
+        // than the mask: a saved caster that had spent itself down to nothing is
+        // still a caster, and a mask of zero is a lich that has forgotten every
+        // spell it knew. Free to cast at once, like a fresh spawn — the recovery
+        // is about the spell just thrown, and there is no such spell after a
+        // restart.
+        if record.mana_max > 0 {
+            registry.insert(
+                mobile.entity,
+                Mana {
+                    current: record.mana_current.min(record.mana_max),
+                    max:     record.mana_max,
+                },
+            );
+            registry.insert(
+                mobile.entity,
+                Repertoire {
+                    spells:    Spellbook(record.spells),
+                    next_cast: WorldTick::ZERO,
                 },
             );
         }

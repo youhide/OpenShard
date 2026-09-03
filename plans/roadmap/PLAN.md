@@ -36,12 +36,18 @@ phase record at all: `npc` was the last batch, on 2026-09-03, and it took
 and [`docs/roadmap/README.md`](../../docs/roadmap/README.md) is now an index of
 where every phase record went.
 
-What comes next is a choice between areas rather than another migration, and the
-first of them is **a creature that casts**: `crates/server/ai` has no notion of a
-spell, so the whole of magic is one-directional — the player casts at the world
-and the world never casts back. The cast path below the client seam is already
-reusable, so what is missing is the decision layer.
-[`plans/npc/creature_casting/PLAN.md`](../npc/creature_casting/PLAN.md).
+What comes next is a choice between areas rather than another migration. The
+first of them was **a creature that casts**, and its first phase landed on
+2026-09-03: a creature carries mana and a repertoire from its spawn data, throws
+before it closes, and the cast goes through the sequence a player's does. Magic
+is no longer one-directional.
+
+What is still open there is the half that plan calls the decision — a creature
+throws the strongest thing it can afford and nothing chooses by *category*, so
+nothing heals, curses or escapes. That is C2, with C3's cadence behind it:
+[`plans/npc/creature_casting/PLAN.md`](../npc/creature_casting/PLAN.md), and the
+record is
+[`docs/npc/evidence/2026-09-03-a-creature-that-casts.md`](../../docs/npc/evidence/2026-09-03-a-creature-that-casts.md).
 
 ## Gameplay
 
