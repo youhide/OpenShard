@@ -59,6 +59,10 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
             match command.subcommand.interpret() {
                 EncodedSubcommand::QuestGumpRequest => Some(Command::QuestLogRequest { connection: id }),
                 EncodedSubcommand::GuildGumpRequest => Some(Command::GuildWindowRequest { connection: id }),
+                // The design editor closed. The only design subcommand routed
+                // so far: the verbs that *change* a design are the rest of
+                // `plans/housing/customisation/PLAN.md`.
+                EncodedSubcommand::EndCustomisation => Some(Command::EndDesignSession { connection: id }),
                 // Named, not routed: combat has no weapon abilities. Naming it
                 // means the byte layout is not re-derived the day it lands.
                 EncodedSubcommand::SetAbility => None,
@@ -455,6 +459,25 @@ mod tests {
             ),
             Some(Command::HouseInventory { connection, request })
         );
+    }
+
+    /// The first `0xD7` design subcommand this engine routes, and the neighbour
+    /// it must not be: `0x0C` closes the editor, `0x0D` lays a stair and is
+    /// still nothing here.
+    #[test]
+    fn closing_the_design_window_attaches_only_the_connection() {
+        let connection = ConnectionId::from_raw(42);
+        let encoded = |subcommand: u16| {
+            ClientPacket::Encoded(openshard_protocol::encoded::EncodedCommand {
+                serial:     openshard_protocol::encoded::RawEncodedSerial(1),
+                subcommand: openshard_protocol::encoded::RawEncodedSubcommand(subcommand),
+            })
+        };
+        assert_eq!(
+            dispatch_world_packet(encoded(0x0C), connection),
+            Some(Command::EndDesignSession { connection })
+        );
+        assert_eq!(dispatch_world_packet(encoded(0x0D), connection), None);
     }
 
     #[test]

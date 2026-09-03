@@ -57,7 +57,8 @@ its shape is somewhere different every few seconds.
 | `0xD8` and `0xBF 0x1D`, both ends, with the sparse-by-elevation layout read out of the reference | ✅ shipping | — | [`evidence/2026-08-24-the-design-phases.md`](evidence/2026-08-24-the-design-phases.md) C1 |
 | A foundation placed with a derived design, deed included; `.hdesign` copies a shape onto a house | ✅ shipping | — | the same, C2 |
 | Imported house templates: legacy Sphere packs converted to JSON, read at boot, placed as `.house @name` | ✅ shipping | documented only here — row 4 | `housing/src/{template,wsc}.rs` and its two examples |
-| The `0xD7` editor — a player reshaping their own house | ⬜ not built | the whole session, and validation — row 2 | [`plans/housing/customisation/PLAN.md`](../../plans/housing/customisation/PLAN.md) |
+| The design session's brackets: the sign's Customise button, `0xD7 0x0C`, and the `0xBF 0x20` the editor's own client sees | ✅ shipping | — | [`design_customisation.md`](design_customisation.md) C7 |
+| The `0xD7` editor — a player reshaping their own house | ⬜ not built | every verb that *changes* a design, and validation — row 2 | [`plans/housing/customisation/PLAN.md`](../../plans/housing/customisation/PLAN.md) |
 | A ship moored, blocking as a hull and carrying as a deck, saved and restored | ✅ shipping | — | [`design_boats.md`](design_boats.md) B1–B4 |
 | A ship that sails on a cadence, with the crew it is actually carrying | ✅ shipping | no plank, so nothing boards deliberately — row 3 | [`evidence/2026-08-25-the-boat-phases.md`](evidence/2026-08-25-the-boat-phases.md) B2 |
 | `0xF6` smooth movement for High Seas clients | ⬜ not built | two packets per watcher per tile until then — row 6 | [`plans/housing/boats/PLAN.md`](../../plans/housing/boats/PLAN.md) |
@@ -112,7 +113,14 @@ its shape is somewhere different every few seconds.
   arithmetic, and only the real template on the real map tile can prove a body
   gets in. `a_placed_house_stair_reaches_its_first_floor` is its fixture-sized
   sibling.
-- **82 tests in `housing` and 25 in `boats`**, plus the `moored_boat` survey,
+- **A design session outlives nothing, and each of the three enders is named.**
+  `logging_out_ends_a_design_session` and `dying_ends_a_design_session` in the
+  world crate, `demolishing_a_house_ends_the_session_over_it` in housing. Each
+  is a state that would otherwise sit on a house for ever, refusing its own
+  owner with `AlreadyOpen` at the next login — and the logout one is an ordering
+  as much as a rule: the session names its editor by a serial the disconnect is
+  about to release.
+- **101 tests in `housing` and 25 in `boats`**, plus the `moored_boat` survey,
   which keeps the *retired* reading of a plank written out so the number that
   retired it stays reproducible.
 
@@ -129,9 +137,13 @@ it registered. What it needs first is a decision about the id space —
 
 **2. 🚩 No player can change the shape of their own house.** Every design on this
 shard is either a shipped multi, a staff `.hdesign` copy, or an imported
-template. The seam, both packets, the save and the foundation are all built and
-tested; what is missing is the `0xD7` session — enter, build, erase, commit,
-revert — and the validation behind it.
+template. The seam, both packets, the save, the foundation and now the session's
+own brackets are built and tested — an owner can open the editor over their own
+house and close it again — but **the session has no verbs**: build, erase,
+select-floor, commit and revert are all still missing, and so is the validation
+behind them. A session that can be opened and cannot change anything is exactly
+the half worth having first, because every one of those verbs assumes a session
+that cannot be left dangling.
 [`plans/housing/customisation/PLAN.md`](../../plans/housing/customisation/PLAN.md).
 
 **3. 🚩 Nothing boards a ship on purpose.** A swimmer used to clamber over the

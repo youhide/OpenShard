@@ -235,6 +235,28 @@ Entry is the owner's, asked through `standing_of` — reused rather than rewritt
 which is the third time that has been the right answer after `Standing` itself
 and the door. **Redesigning is the owner's and not a co-owner's**: a co-owner may
 lock things down and let people in; neither changes what the building *is*.
+Staff read as a co-owner there, so the door is shut on them too, and that is the
+right answer rather than an oversight: `.hdesign` is the staff path to a shape.
+
+**The way in is the house's own window and the way out is the client's.** The
+asymmetry is the reference's and it is not arbitrary. A session *begins*
+server-side, from a button on the sign's window — ServUO's `HouseGumpAOS` draws
+"Customize this house" and there is no packet a client can send to open one —
+because the authority is a fact about the house, and asking a client to assert it
+would be asking the wrong end. It *ends* from the client, `0xD7 0x0C`
+(`Designer_Close`), because closing the window is the thing the client is the
+only witness to. What the editing client sees at either end is `0xBF 0x20` with
+the type byte `0x04` or `0x05`, and it goes to that one client: a session is a
+state of one screen, and everyone else is still being shown the committed design.
+
+**Three refusals beyond the standing.** A **classic** house is refused
+(`NotDesignable`) because its shape is a multi id in every client's own files and
+there is nothing here to edit — inventing a design for one would give it walls no
+client could draw. A house **already open** is refused, because two working
+copies of one house are two commits racing to be the shape. And a client below
+`Feature::CustomMulti` is refused, which is the one that is a lifetime argument
+rather than a permission: such a client has no editor to open *and no way to say
+it closed one*, so a session opened for it could only ever be ended by a logout.
 
 **Commit is six steps and the fifth is the one that gets forgotten:** validate
 the working design; replace `HouseDesign` and bump `revision`; `unblock` the old
@@ -261,6 +283,21 @@ which is a fact about this house, and the operator-constant failure is untouched
 **A session outlives nothing.** Logout, death and `collapse_houses` all have to
 end one. Named because a dangling `DesignSession` on a despawned house surfaces
 as a panic rather than as a missing feature.
+
+Built as three calls, and the third covers two events: `session::end_for` from
+the disconnect and from `become_ghost`, and `session::end_over` from
+`decay::demolish` — which is the one call that destroys a house, so the clock's
+collapse and the owner's own Demolish button need no hook of their own. The
+logout one is an **ordering** as much as a rule: the session names its editor by
+serial, and the disconnect releases that serial a few lines further down, so the
+ender runs before the despawn or it is naming nobody. Death ends one for the
+entry rule's own reason — a ghost is refused a session, so one left open would be
+a state the entry says cannot exist.
+
+**A session is never saved**, and it is the only thing in this document that is
+not. Both ends of it are gone at the next boot: the player, and the editor window
+on their client. A restored session would be a house nobody is editing and
+nothing can close.
 
 **C8 — a client that has no shape for a house draws nothing, and picks nothing.**
 `net_command::multi_pieces` expands `0x4000 | id` against the client's own table.

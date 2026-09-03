@@ -3181,6 +3181,55 @@ pub struct HouseDesign {
     pub revision:   u32,
 }
 
+/// A house that is open in somebody's design editor.
+///
+/// # Why the session is a component and not a field on [`House`]
+///
+/// Absence-as-no-component is what a sparse set is for, and almost no house is
+/// ever in a session — a field would be a `Vec<Component>` carried by every
+/// house on the shard so that one of them can be edited. See
+/// `docs/housing/design_customisation.md`'s C7.
+///
+/// # The working design touches nothing
+///
+/// This is the decision the whole editor is tractable because of: while a
+/// session is open the world still **shows and blocks the committed design**.
+/// [`working`](Self::working) is the shard's private copy until a commit swaps
+/// it in, so there is no incremental obstruction churn, no partial design on the
+/// wire, and no question about what a stranger standing outside sees. One
+/// commit, one swap.
+///
+/// # It is never saved
+///
+/// A session is a state of one live connection, and both ends of it — the
+/// player and the editor window on their client — are gone at the next boot. A
+/// restored session would be a house that nobody is editing and that nothing
+/// can close. It ends at logout, at death and at demolition for exactly that
+/// reason: a dangling session on a house that is no longer there surfaces as a
+/// panic rather than as a missing feature.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DesignSession {
+    /// Who is editing, by serial.
+    ///
+    /// A serial and not an [`EntityId`](openshard_entities::EntityId) for the
+    /// reason every other back-pointer in housing is one: it is the name a house
+    /// knows people by, so `editor` and [`House::owner`] can be compared without
+    /// a lookup in between. The session is ended before the serial is released,
+    /// so it never names nobody.
+    pub editor:  openshard_protocol::serial::Serial,
+    /// The design being edited, which nothing outside this component can see.
+    ///
+    /// Starts as a copy of the committed [`HouseDesign`] — an editor opens on
+    /// the house as it stands — and diverges from it as the editing verbs land.
+    pub working: Vec<openshard_uofiles::multi::Component>,
+    /// Which storey the editing verbs apply to, counted from one.
+    ///
+    /// ServUO's `DesignContext.Level`, which its constructor sets to 1: the
+    /// ground floor is a storey like any other, and a zero would make "no floor
+    /// chosen" representable in a state where it cannot happen.
+    pub floor:   u8,
+}
+
 /// The sign standing outside a house — the thing you double-click to see who
 /// owns it and to change who may come in.
 ///

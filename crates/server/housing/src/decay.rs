@@ -254,6 +254,19 @@ pub fn demolish(state: &mut WorldState, house: EntityId) -> Result<Option<Entity
         Err(reason) => return Err(DemolishError::CurrentShapeUnreadable(reason)),
     };
 
+    // Whoever had it open in the design editor loses the house they were
+    // editing, so the session goes with it — after the preflight above, which
+    // may still refuse, and before anything is taken apart. This is the one call
+    // that destroys a house, so the clock's collapse and the owner's own
+    // Demolish button are both covered here rather than at each caller. See
+    // `session`'s header for why a dangling session is worse than a missing
+    // feature.
+    if let Some(editor) = crate::session::end_over(state, house) {
+        if let Some(entity) = state.registry.entity_of(editor) {
+            state.system_message(entity, "The house you were designing is gone.");
+        }
+    }
+
     // Everything the house was keeping, and everything inside the secures. Read
     // before anything is unpinned, because the pin is what identifies it.
     let pinned: Vec<EntityId> = state

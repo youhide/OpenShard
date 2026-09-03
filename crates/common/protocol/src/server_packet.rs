@@ -277,6 +277,9 @@ pub enum ServerPacket {
     /// reaches a client as `Event::Undecoded` with the bytes intact — see
     /// [`crate::design`].
     DesignRevision(crate::design::DesignRevision),
+    /// `0xBF` subcommand `0x20` — open or close the design editor over a house,
+    /// on the one client that is editing it.
+    HouseCustomisation(crate::design::HouseCustomisation),
     /// `0xBF` subcommand `0xE001` — the authority this shard holds the
     /// connection's character at.
     ///
@@ -407,6 +410,7 @@ impl ServerPacket {
             Self::SellList(_) => <SellList as EncodePacket>::ID,
             Self::TooltipRevision(_) => <TooltipRevision as EncodePacket>::ID,
             Self::DesignRevision(_) => <crate::design::DesignRevision as EncodePacket>::ID,
+            Self::HouseCustomisation(_) => <crate::design::HouseCustomisation as EncodePacket>::ID,
             Self::AuthorityNotice(_) => <crate::access::AuthorityNotice as EncodePacket>::ID,
             Self::ChunkData(_) => <crate::chunks::ChunkData as EncodePacket>::ID,
             Self::WorldNotice(_) => <crate::chunks::WorldNotice as EncodePacket>::ID,
@@ -502,6 +506,7 @@ impl ServerPacket {
             Self::SellList(_) => SellList::LENGTH,
             Self::TooltipRevision(_) => TooltipRevision::LENGTH,
             Self::DesignRevision(_) => <crate::design::DesignRevision as EncodePacket>::LENGTH,
+            Self::HouseCustomisation(_) => <crate::design::HouseCustomisation as EncodePacket>::LENGTH,
             Self::AuthorityNotice(_) => <crate::access::AuthorityNotice as EncodePacket>::LENGTH,
             Self::ChunkData(_) => <crate::chunks::ChunkData as EncodePacket>::LENGTH,
             Self::WorldNotice(_) => <crate::chunks::WorldNotice as EncodePacket>::LENGTH,
@@ -599,6 +604,7 @@ impl ServerPacket {
             Self::SellList(packet) => packet.encode_body(out, version),
             Self::TooltipRevision(packet) => packet.encode_body(out, version),
             Self::DesignRevision(packet) => packet.encode_body(out, version),
+            Self::HouseCustomisation(packet) => packet.encode_body(out, version),
             Self::AuthorityNotice(packet) => packet.encode_body(out, version),
             Self::ChunkData(packet) => packet.encode_body(out, version),
             Self::WorldNotice(packet) => packet.encode_body(out, version),
@@ -698,6 +704,11 @@ fn decode_extended(packet: &[u8], version: ClientVersion) -> Result<Option<Serve
             decode_server(packet, version)
                 .map(ServerPacket::DesignRevision)
                 .map_err(ServerDecodeError::DesignRevision)?
+        }
+        crate::design::HouseCustomisation::SUBCOMMAND => {
+            decode_server(packet, version)
+                .map(ServerPacket::HouseCustomisation)
+                .map_err(ServerDecodeError::HouseCustomisation)?
         }
         crate::access::AuthorityNotice::SUBCOMMAND => {
             decode_server(packet, version)
@@ -1292,6 +1303,8 @@ pub enum ServerDecodeError {
     TooltipRevision(DecodeError),
     /// `0xBF 0x1D` did not decode.
     DesignRevision(DecodeError),
+    /// `0xBF 0x20` did not decode.
+    HouseCustomisation(DecodeError),
     /// `0xBF 0xE001` did not decode.
     AuthorityNotice(DecodeError),
     /// `0xBF 0xE003` did not decode.
@@ -1364,6 +1377,7 @@ impl fmt::Display for ServerDecodeError {
             Self::GumpDisplay(error) => ("0xB0 gump display", error),
             Self::TooltipRevision(error) => ("0xDC tooltip revision", error),
             Self::DesignRevision(error) => ("0xBF 0x1D design revision", error),
+            Self::HouseCustomisation(error) => ("0xBF 0x20 customisation bracket", error),
             Self::AuthorityNotice(error) => ("0xBF 0xE001 authority notice", error),
             Self::ChunkData(error) => ("0xBF 0xE003 chunk data", error),
             Self::WorldNotice(error) => ("0xBF 0xE004 world notice", error),
@@ -1692,6 +1706,7 @@ mod tests {
         BuyList,
         SellList,
         DesignRevision,
+        HouseCustomisation,
         AuthorityNotice,
         ChunkData,
         WorldNotice,
@@ -2047,6 +2062,10 @@ mod tests {
             ServerPacket::DesignRevision(crate::design::DesignRevision {
                 serial:   crate::serial::RawSerial(0x4000_0100),
                 revision: crate::design::Revision(7),
+            }),
+            ServerPacket::HouseCustomisation(crate::design::HouseCustomisation {
+                serial:  crate::serial::RawSerial(0x4000_0100),
+                bracket: crate::design::CustomisationBracket::Begin,
             }),
             ServerPacket::PartyMemberList(PartyMemberList {
                 members: vec![serial, crate::serial::Serial::new(0x0000_002B).unwrap()],

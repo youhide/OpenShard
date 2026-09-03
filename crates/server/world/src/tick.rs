@@ -1692,6 +1692,14 @@ impl World {
             Command::QuestLogRequest { connection } => {
                 quests::open_log(&mut self.state, connection);
             }
+            Command::EndDesignSession { connection } => {
+                // `None` for a client that had none, which is the ordinary
+                // answer to a window closing twice or to one closed by a logout
+                // race — the state it asks for is the state it ends in.
+                if let Some(&player) = self.state.players.get(&connection) {
+                    openshard_housing::session::end(&mut self.state, player);
+                }
+            }
             Command::CloseGump { serial, gump_id } => self.close_gump(serial, gump_id),
             Command::Message { serial, text } => {
                 if let Some(entity) = self.state.registry.entity_of(serial) {
@@ -2137,6 +2145,14 @@ impl World {
         // `openshard_party::on_logout`.
         openshard_party::on_logout(&mut self.state, entity);
         let serial = self.state.registry.serial_of(entity);
+        // A design session is the same shape of fact and ends for the same
+        // reason, one step earlier: it names the editor by serial, and this
+        // serial is released a few lines below. A session left standing would
+        // sit on a house forever, refusing every later owner with
+        // `AlreadyOpen`. See `openshard_housing::session`.
+        if let Some(serial) = serial {
+            openshard_housing::session::end_for(&mut self.state, entity, serial);
+        }
         let facet = self.state.facet_of(entity);
 
         // Save before despawning, and not by marking it dirty: a `touch` is a

@@ -115,6 +115,7 @@ impl RawEncodedSubcommand {
     pub const fn interpret(self) -> EncodedSubcommand {
         match self.0 {
             EncodedSubcommand::SET_ABILITY => EncodedSubcommand::SetAbility,
+            EncodedSubcommand::END_CUSTOMISATION => EncodedSubcommand::EndCustomisation,
             EncodedSubcommand::GUILD_GUMP_REQUEST => EncodedSubcommand::GuildGumpRequest,
             EncodedSubcommand::QUEST_GUMP_REQUEST => EncodedSubcommand::QuestGumpRequest,
             other => EncodedSubcommand::Other(other),
@@ -129,6 +130,13 @@ pub enum EncodedSubcommand {
     /// Set a weapon's special ability (AoS). Not acted on: combat has no
     /// abilities yet. Named so the byte layout is not re-derived when it does.
     SetAbility,
+    /// The house-design window was closed — end the customisation session.
+    ///
+    /// The **only** design subcommand that is a bracket rather than an edit, and
+    /// the first of the family this engine speaks. Its opposite number is not
+    /// here: customisation *begins* from the house's own window, server-side,
+    /// exactly as the reference's `BeginCustomize` does.
+    EndCustomisation,
     /// The paperdoll's Guild button — the shard answers it with the guild window.
     GuildGumpRequest,
     /// The paperdoll's Quest button — open the quest log.
@@ -139,6 +147,10 @@ pub enum EncodedSubcommand {
 
 impl EncodedSubcommand {
     const SET_ABILITY: u16 = 0x19;
+    /// ServUO's `Designer_Close`, registered at `HouseFoundation.cs:815`. The
+    /// hex is read out of the reference rather than guessed, per `style.md`'s
+    /// "ports name their source".
+    const END_CUSTOMISATION: u16 = 0x0C;
     const GUILD_GUMP_REQUEST: u16 = 0x28;
     const QUEST_GUMP_REQUEST: u16 = 0x32;
 }
@@ -207,6 +219,24 @@ mod tests {
         assert_eq!(
             EncodedCommand::decode(&guild).unwrap().subcommand.interpret(),
             EncodedSubcommand::GuildGumpRequest
+        );
+    }
+
+    /// The one design subcommand this engine reads, and the neighbour it must
+    /// not be confused with: `0x0C` closes the editor, `0x0D` lays a stair.
+    #[test]
+    fn the_close_subcommand_is_the_one_the_reference_registers() {
+        assert_eq!(
+            EncodedCommand::decode(&packet(1, 0x0C))
+                .unwrap()
+                .subcommand
+                .interpret(),
+            EncodedSubcommand::EndCustomisation
+        );
+        assert_eq!(
+            RawEncodedSubcommand(0x0D).interpret(),
+            EncodedSubcommand::Other(0x0D),
+            "the stair subcommand is not the close one"
         );
     }
 

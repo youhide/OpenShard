@@ -1165,6 +1165,15 @@ pub enum Command {
         /// Whose.
         connection: ConnectionId,
     },
+    /// A client closed its house-design window (`0xD7`/`0x0C`) — end whatever
+    /// design session it had open.
+    ///
+    /// There is no opposite command: a session *begins* from the house's own
+    /// window, server-side, exactly as the reference's `BeginCustomize` does.
+    EndDesignSession {
+        /// Whose.
+        connection: ConnectionId,
+    },
     /// Close an open gump on a player's client — the dialog a page chain is
     /// replacing.
     CloseGump {
@@ -1393,6 +1402,7 @@ impl Command {
             Self::MakeEscortable { .. } => "MakeEscortable",
             Self::QuestLogRequest { .. } => "QuestLogRequest",
             Self::GuildWindowRequest { .. } => "GuildWindowRequest",
+            Self::EndDesignSession { .. } => "EndDesignSession",
             Self::CloseGump { .. } => "CloseGump",
             Self::Message { .. } => "Message",
             Self::PlaySound { .. } => "PlaySound",

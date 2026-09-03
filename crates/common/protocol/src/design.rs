@@ -15,6 +15,12 @@
 //!   neighbourhood re-fetches every design in it on every approach.
 //! - [`DesignDetail`] (`0xD8`) is the design itself, deflated.
 //!
+//! And one packet that is about the *editor* rather than about the picture:
+//! [`HouseCustomisation`] (`0xBF` subcommand `0x20`) opens and closes the design
+//! window on the one client that is editing. It carries no design — the working
+//! copy is the shard's alone until it commits, which is what
+//! `docs/housing/design_customisation.md`'s C7 buys.
+//!
 //! # `0xD8`'s layout, and why it is shaped like that
 //!
 //! ```text
@@ -232,6 +238,137 @@ impl DesignDetailsRequest {
             out.u16(Self::SUBCOMMAND);
             out.u32(self.serial.0);
         })
+    }
+}
+
+/// Which end of a customisation session a [`HouseCustomisation`] announces.
+///
+/// The two the shard sends. `0xBF` subcommand `0x20` carries three other type
+/// bytes — 1 update, 2 remove, 3 update multi position — which are the classic
+/// client's housing-update family and are not this bracket; they are deliberately
+/// not named here, because a type this engine never writes and never reads is a
+/// name with nothing behind it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CustomisationBracket {
+    /// The client opens its house-design editor over this house.
+    Begin,
+    /// It closes it again, and the house goes back to being an ordinary multi
+    /// on its screen.
+    End,
+}
+
+impl CustomisationBracket {
+    /// ServUO's `BeginHouseCustomization`, `HouseFoundation.cs:2237`.
+    const BEGIN: u8 = 0x04;
+    /// And its `EndHouseCustomization`, twenty lines below it.
+    const END: u8 = 0x05;
+
+    /// The type byte on the wire.
+    const fn byte(self) -> u8 {
+        match self {
+            Self::Begin => Self::BEGIN,
+            Self::End => Self::END,
+        }
+    }
+
+    /// The bracket a type byte names, or `None` for one of `0x20`'s other three
+    /// roles.
+    const fn of_byte(byte: u8) -> Option<Self> {
+        match byte {
+            Self::BEGIN => Some(Self::Begin),
+            Self::END => Some(Self::End),
+            _ => None,
+        }
+    }
+}
+
+/// `0xBF` subcommand `0x20` — "open (or close) the design editor over this
+/// house".
+///
+/// Sent to the one player who is editing, and to nobody else: a session is a
+/// state of *that client's* screen, and everyone else goes on seeing the
+/// committed design. See `docs/housing/design_customisation.md`'s C7.
+///
+/// # The four fields that say nothing
+///
+/// The body is `[serial u32][type u8][graphic u16][x u16][y u16][z i8]`, and a
+/// bracket has no graphic and no place — so the reference writes `0x0000`,
+/// `0xFFFF`, `0xFFFF`, `0xFF` into the last four rather than omitting them,
+/// because the client reads all six unconditionally before it looks at the type
+/// (ClassicUO's `PacketHandlers.cs:4585`). They are written here for the same
+/// reason and are not fields on this type: a sentinel with a name invites
+/// somebody to set it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct HouseCustomisation {
+    /// The house being edited.
+    pub serial:  RawSerial,
+    /// Which end of the session this is.
+    pub bracket: CustomisationBracket,
+}
+
+impl HouseCustomisation {
+    /// The packet id — the extended-command envelope.
+    pub const ID: u8 = 0xBF;
+    /// Which `0xBF` this is.
+    pub const SUBCOMMAND: u16 = 0x20;
+    /// The whole framed packet, id and length included — ServUO's
+    /// `EnsureCapacity(17)`.
+    pub const LENGTH_BYTES: u8 = 17;
+    /// The graphic a bracket carries, which is none.
+    const NO_GRAPHIC: u16 = 0x0000;
+    /// And the place, which is nowhere.
+    const NOWHERE: u16 = 0xFFFF;
+    /// The z of nowhere, as the byte the reference writes.
+    const NO_HEIGHT: u8 = 0xFF;
+
+    /// Encode the whole packet.
+    #[must_use]
+    pub fn encode(self) -> Vec<u8> {
+        crate::packet::encode_packet(&self, ClientVersion::new(4, 0, 0, 0))
+    }
+}
+
+/// Fixed under `0xBF` for [`DesignRevision`]'s reason: the body never varies in
+/// length, so the constant is written by hand.
+impl EncodePacket for HouseCustomisation {
+    const ID: u8 = 0xBF;
+    const LENGTH: PacketLength = PacketLength::Fixed(17);
+
+    fn encode_body(&self, out: &mut PacketWriter, _version: ClientVersion) {
+        out.u16(u16::from(Self::LENGTH_BYTES));
+        out.u16(Self::SUBCOMMAND);
+        out.u32(self.serial.0);
+        out.u8(self.bracket.byte());
+        out.u16(Self::NO_GRAPHIC);
+        out.u16(Self::NOWHERE);
+        out.u16(Self::NOWHERE);
+        out.u8(Self::NO_HEIGHT);
+    }
+}
+
+impl DecodePacket for HouseCustomisation {
+    const ID: u8 = 0xBF;
+
+    /// Refuses a `0x20` whose type byte is one of the three this engine does not
+    /// speak, rather than reading an update as a bracket: the bytes would decode
+    /// and the meaning would be wrong.
+    fn decode_body(reader: &mut PacketReader<'_>, _version: ClientVersion) -> Result<Self, DecodeError> {
+        let subcommand = reader.u16()?;
+        if subcommand != Self::SUBCOMMAND {
+            return Err(DecodeError::UnknownValue {
+                field: "0xBF subcommand for a customisation bracket",
+                value: u32::from(subcommand),
+            });
+        }
+        let serial = RawSerial(reader.u32()?);
+        let kind = reader.u8()?;
+        let Some(bracket) = CustomisationBracket::of_byte(kind) else {
+            return Err(DecodeError::UnknownValue {
+                field: "0xBF 0x20 customisation type",
+                value: u32::from(kind),
+            });
+        };
+        Ok(Self { serial, bracket })
     }
 }
 

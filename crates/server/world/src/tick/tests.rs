@@ -25133,3 +25133,127 @@ fn a_deed_for_a_foundation_builds_a_house_with_a_design() {
         "the deed was not spent"
     );
 }
+
+// -- A design session outlives nothing ---------------------------------------
+
+/// A shard with one foundation on it, its owner standing in it with a design
+/// session open.
+///
+/// The session's *entry* is `openshard-housing`'s and is tested there. What the
+/// three tests below are for is the enders, which live here because the events
+/// that fire them do — a disconnect and a death are the tick's, not the crate's.
+fn a_house_being_designed(now: Instant) -> (World, ConnectionId, EntityId, EntityId) {
+    use openshard_uofiles::multi::Component;
+
+    const FOUNDATION: u16 = 0x13EC;
+    const WALL: u16 = 0x0006;
+
+    let mut world = world();
+    world.state.set_tiles(tiles_with(&[(WALL, WALL_FLAGS, 20)]));
+    // Three tiles across: the stair strip runs `1..width`, so a one-tile
+    // platform derives no design at all.
+    world.state.multis = multis_with(
+        FOUNDATION,
+        (-1..=1)
+            .map(|dx| {
+                Component {
+                    graphic: Graphic(WALL),
+                    dx,
+                    dy: 0,
+                    dz: 0,
+                    flags: 1,
+                }
+            })
+            .collect(),
+    );
+    let connection = enter(&mut world, now);
+    let player = world.state.players[&connection];
+    let owner = world.state.registry.serial_of(player).unwrap();
+    let at = world.state.registry.get::<Position>(player).unwrap().0;
+    let facet = world.state.facet_of(player);
+    let house = openshard_housing::place(
+        &mut world.state,
+        player,
+        Point::new(at.x + 6, at.y + 6, at.z),
+        facet,
+        openshard_protocol::wire::MultiId(FOUNDATION),
+        owner,
+    )
+    .expect("open ground beside the player");
+    openshard_housing::session::begin(&mut world.state, player, house)
+        .expect("the owner may design their own house");
+    (world, connection, player, house)
+}
+
+/// **A logout ends the session.** The component names its editor by serial and
+/// the disconnect releases that serial a few lines later, so a session left
+/// standing would sit on the house for ever, refusing its own owner with
+/// `AlreadyOpen` at the next login.
+#[test]
+fn logging_out_ends_a_design_session() {
+    let now = Instant::now();
+    let (mut world, connection, _, house) = a_house_being_designed(now);
+    assert!(openshard_housing::session::is_open(&world.state, house));
+
+    world.queue(Command::Disconnect { connection });
+    world.tick(now);
+
+    assert!(
+        !openshard_housing::session::is_open(&world.state, house),
+        "the session outlived the player who was in it"
+    );
+}
+
+/// **Death ends it too**, and for the entry rule's own reason: a ghost is
+/// refused a session, so one left open would be a state `session::begin` says
+/// cannot exist.
+#[test]
+fn dying_ends_a_design_session() {
+    let now = Instant::now();
+    let (mut world, connection, player, house) = a_house_being_designed(now);
+    let serial = world.state.registry.serial_of(player).unwrap();
+    let body = world.state.registry.get::<Body>(player).unwrap().id;
+    let _ = packets_for(&mut world, connection);
+
+    world.state.bus.send(openshard_combat::MobileDied {
+        entity: player,
+        serial,
+        body,
+        killer: None,
+    });
+    world.tick(now);
+
+    assert!(
+        world
+            .state
+            .registry
+            .has::<openshard_state::components::Ghost>(player),
+        "the player did not die"
+    );
+    assert!(
+        !openshard_housing::session::is_open(&world.state, house),
+        "a ghost was left holding a design session"
+    );
+}
+
+/// **And the client's own `0xD7 0x0C` closes it**, which is the only way a
+/// player ends one deliberately. Answered out of the tick like everything else,
+/// so the state it changes is read at one instant.
+#[test]
+fn the_design_close_command_ends_the_session() {
+    let now = Instant::now();
+    let (mut world, connection, _, house) = a_house_being_designed(now);
+
+    world.queue(Command::EndDesignSession { connection });
+    world.tick(now);
+
+    assert!(
+        !openshard_housing::session::is_open(&world.state, house),
+        "the editor closed its window and the shard kept the session"
+    );
+
+    // And a second one, over a session the shard has already closed, is the
+    // ordinary answer to a double click rather than a panic.
+    world.queue(Command::EndDesignSession { connection });
+    world.tick(now);
+}

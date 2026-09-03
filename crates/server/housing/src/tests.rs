@@ -3161,3 +3161,306 @@ fn a_supplied_design_is_installed_at_its_first_revision() {
     assert_eq!(design::revision(&state, house), 1);
     assert_eq!(design::shape_of_house(&state, house), Some(imported));
 }
+
+// -- The design session's brackets -------------------------------------------
+
+/// A mobile with a connection new enough to speak the design packets, which is
+/// what a session's entry asks for and what the plain [`an_actor`] fixture has
+/// no reason to carry.
+fn a_connected_actor(state: &mut WorldState, raw: u64) -> (EntityId, Serial, ConnectionId) {
+    let (actor, serial) = an_actor(state);
+    let connection = ConnectionId::from_raw(raw);
+    state.connections.insert(
+        connection,
+        Connection::new(
+            // 4.0.0a is `Feature::CustomMulti`'s own boundary; 7.0 is what a
+            // shard actually sees.
+            ClientVersion::new(7, 0, 0, 0),
+            AccountName::new("builder"),
+            AccessLevel::Player,
+        ),
+    );
+    state.registry.insert(actor, Client { connection });
+    state.players.insert(connection, actor);
+    (actor, serial, connection)
+}
+
+/// A designed house with its owner standing beside it, connected.
+fn a_foundation(state: &mut WorldState, raw: u64) -> (EntityId, Serial, EntityId) {
+    let (actor, owner, _) = a_connected_actor(state, raw);
+    let house = place(state, actor, Point::new(10, 10, 0), Facet(0), FOUNDATION, owner)
+        .expect("a foundation this shard can read the platform of");
+    (actor, owner, house)
+}
+
+/// Every `0xBF 0x20` this connection has been sent, by the bracket byte the
+/// reference writes at offset 9.
+fn brackets_sent(state: &WorldState, connection: ConnectionId) -> Vec<u8> {
+    state
+        .outbox
+        .iter()
+        .filter(|outbound| outbound.connection == connection)
+        .filter(|outbound| {
+            outbound.packet.first() == Some(&0xBF) && outbound.packet.get(3..5) == Some(&[0x00, 0x20])
+        })
+        .filter_map(|outbound| outbound.packet.get(9).copied())
+        .collect()
+}
+
+/// The whole of step 1: the owner opens a session, and the shard can be asked
+/// about it.
+#[test]
+fn the_owner_opens_a_session_over_their_own_designed_house() {
+    let mut state = world_with(cottage());
+    let (actor, owner, house) = a_foundation(&mut state, 1);
+
+    session::begin(&mut state, actor, house).expect("the owner may design their own house");
+
+    assert!(session::is_open(&state, house));
+    assert_eq!(session::editor_of(&state, house), Some(owner));
+    assert_eq!(session::house_of_editor(&state, owner), Some(house));
+}
+
+/// The working copy starts as the committed design, because an editor opens on
+/// the house as it stands — and it is a *copy*, which is the whole of C7.
+#[test]
+fn a_session_opens_with_the_committed_design_as_its_working_copy() {
+    let mut state = world_with(cottage());
+    let (actor, _, house) = a_foundation(&mut state, 1);
+    let committed = design::shape_of_house(&state, house).expect("a foundation is placed designed");
+
+    session::begin(&mut state, actor, house).expect("the owner may design their own house");
+
+    let working = state
+        .registry
+        .get::<openshard_state::components::DesignSession>(house)
+        .expect("the session")
+        .working
+        .clone();
+    assert_eq!(working, committed);
+    assert_eq!(
+        design::shape_of_house(&state, house),
+        Some(committed),
+        "opening a session changed the committed design"
+    );
+}
+
+/// C7's load-bearing rule, asked of the world rather than of the component: a
+/// session is not a change to anything a stranger outside can see.
+#[test]
+fn an_open_session_leaves_the_walls_and_the_revision_where_they_were() {
+    let mut state = world_with(cottage());
+    let (actor, _, house) = a_foundation(&mut state, 1);
+    let revision = design::revision(&state, house);
+    let blocked = state.facet_state(Facet(0)).obstructions().holds_anything(9, 9);
+    assert!(blocked, "the foundation never had walls to keep");
+
+    session::begin(&mut state, actor, house).expect("the owner may design their own house");
+
+    assert!(
+        state.facet_state(Facet(0)).obstructions().holds_anything(9, 9),
+        "opening a session took the committed walls out of the index"
+    );
+    assert_eq!(
+        design::revision(&state, house),
+        revision,
+        "opening a session bumped the cache key clients hold"
+    );
+}
+
+/// The bracket goes to the editor's own screen, and to nobody else's.
+#[test]
+fn the_brackets_reach_the_editor_and_close_again() {
+    let mut state = world_with(cottage());
+    let (actor, _, house) = a_foundation(&mut state, 1);
+    let (_, _, watcher) = a_connected_actor(&mut state, 2);
+    state.outbox.clear();
+
+    session::begin(&mut state, actor, house).expect("the owner may design their own house");
+    assert_eq!(brackets_sent(&state, ConnectionId::from_raw(1)), vec![0x04]);
+    assert!(
+        brackets_sent(&state, watcher).is_empty(),
+        "a bystander was told about somebody else's editor"
+    );
+
+    assert_eq!(session::end(&mut state, actor), Some(house));
+    assert_eq!(brackets_sent(&state, ConnectionId::from_raw(1)), vec![0x04, 0x05]);
+    assert!(!session::is_open(&state, house));
+}
+
+/// Redesigning is the owner's, and a co-owner is not the owner — the same split
+/// [`design::redesign`] makes, asked at the door instead.
+#[test]
+fn a_co_owner_and_a_stranger_are_both_refused_a_session() {
+    let mut state = world_with(cottage());
+    let (_, owner, house) = a_foundation(&mut state, 1);
+    let (co_owner, co_owner_serial, _) = a_connected_actor(&mut state, 2);
+    let (stranger, _, _) = a_connected_actor(&mut state, 3);
+    let entry = state.registry.get_mut::<House>(house).expect("the house");
+    trust(entry, owner, co_owner_serial, Standing::CoOwner, false).expect("the owner may add one");
+
+    assert_eq!(
+        session::begin(&mut state, co_owner, house),
+        Err(session::SessionRefusal::NotYours)
+    );
+    assert_eq!(
+        session::begin(&mut state, stranger, house),
+        Err(session::SessionRefusal::NotYours)
+    );
+    assert!(!session::is_open(&state, house));
+}
+
+/// A classic house's shape is a multi id in every client's own files. There is
+/// nothing here to edit, and a design invented for it would draw as walls no
+/// client has.
+#[test]
+fn a_classic_house_has_nothing_to_design() {
+    let mut state = world_with(cottage());
+    let (actor, owner, _) = a_connected_actor(&mut state, 1);
+    let house =
+        place(&mut state, actor, Point::new(10, 10, 0), Facet(0), COTTAGE, owner).expect("a legal spot");
+
+    assert_eq!(
+        session::begin(&mut state, actor, house),
+        Err(session::SessionRefusal::NotDesignable)
+    );
+}
+
+/// One editor at a time: two working copies of one house are two commits racing
+/// to be the shape.
+#[test]
+fn a_house_already_open_refuses_a_second_editor() {
+    let mut state = world_with(cottage());
+    let (actor, owner, house) = a_foundation(&mut state, 1);
+    session::begin(&mut state, actor, house).expect("the owner may design their own house");
+
+    assert_eq!(
+        session::begin(&mut state, actor, house),
+        Err(session::SessionRefusal::AlreadyOpen)
+    );
+    assert_eq!(session::editor_of(&state, house), Some(owner));
+}
+
+/// A ghost does not build. The entry rule and death's own ender are the two
+/// halves of one statement.
+#[test]
+fn a_ghost_is_refused_a_session() {
+    let mut state = world_with(cottage());
+    let (actor, _, house) = a_foundation(&mut state, 1);
+    state.registry.insert(
+        actor,
+        openshard_state::components::Ghost {
+            body: openshard_state::components::Body {
+                id:  Graphic(400),
+                hue: openshard_protocol::wire::Hue(0),
+            },
+        },
+    );
+
+    assert_eq!(
+        session::begin(&mut state, actor, house),
+        Err(session::SessionRefusal::Dead)
+    );
+}
+
+/// A client with no design packets has no editor to open — and, worse, no way
+/// to say it closed one. Refused rather than left to a session only a logout
+/// could end.
+#[test]
+fn a_client_too_old_for_the_design_packets_is_refused_a_session() {
+    let mut state = world_with(cottage());
+    let (actor, owner, house) = a_foundation(&mut state, 1);
+    let connection = ConnectionId::from_raw(1);
+    state.connections.insert(
+        connection,
+        Connection::new(
+            // One build below `Feature::CustomMulti`'s 4.0.0a.
+            ClientVersion::new(3, 0, 0, 0),
+            AccountName::new("builder"),
+            AccessLevel::Player,
+        ),
+    );
+
+    assert_eq!(
+        session::begin(&mut state, actor, house),
+        Err(session::SessionRefusal::ClientTooOld)
+    );
+    assert_eq!(session::house_of_editor(&state, owner), None);
+}
+
+/// Closing a window the shard has already closed is the ordinary answer to a
+/// second click, not an error.
+#[test]
+fn ending_a_session_nobody_has_open_is_harmless() {
+    let mut state = world_with(cottage());
+    let (actor, _, _) = a_foundation(&mut state, 1);
+
+    assert_eq!(session::end(&mut state, actor), None);
+}
+
+/// The ender with teeth: a demolished house cannot be left carrying a session,
+/// because the entity it sits on is about to stop existing.
+#[test]
+fn demolishing_a_house_ends_the_session_over_it() {
+    let mut state = world_with(cottage());
+    let (actor, owner, house) = a_foundation(&mut state, 1);
+    session::begin(&mut state, actor, house).expect("the owner may design their own house");
+    state.outbox.clear();
+
+    decay::demolish(&mut state, house).expect("a readable house comes down");
+
+    assert_eq!(
+        session::house_of_editor(&state, owner),
+        None,
+        "the session outlived the house it was over"
+    );
+    assert_eq!(
+        brackets_sent(&state, ConnectionId::from_raw(1)),
+        vec![0x05],
+        "the editor was left with a window over nothing"
+    );
+}
+
+/// And the sign's Customise button is the way in, re-asking the authority the
+/// window was drawn under.
+#[test]
+fn the_signs_customise_button_opens_a_session_for_the_owner_alone() {
+    use openshard_protocol::gump::{
+        GumpResponse,
+        RawButtonId,
+        RawGumpId,
+        RawGumpKey,
+    };
+
+    let mut state = world_with(cottage());
+    let (actor, owner, house) = a_foundation(&mut state, 1);
+    let press = |state: &mut WorldState, who: EntityId| {
+        sign::show(state, who, house);
+        let serial = state.registry.serial_of(who).expect("a mobile");
+        sign::handle(
+            state,
+            state
+                .registry
+                .get::<Client>(who)
+                .expect("a connected mobile")
+                .connection,
+            &GumpResponse {
+                serial:       RawGumpKey(serial.raw()),
+                gump_id:      RawGumpId(sign::HOUSE_GUMP.0),
+                button:       RawButtonId(sign::button::CUSTOMISE.0),
+                switches:     Vec::new(),
+                text_entries: Vec::new(),
+            },
+        )
+    };
+
+    assert!(press(&mut state, actor), "the house window did not answer");
+    assert_eq!(session::editor_of(&state, house), Some(owner));
+
+    // And a stranger pressing the same id — the button they were never drawn —
+    // is refused by the verb rather than by the layout.
+    session::end(&mut state, actor).expect("the owner closes it again");
+    let (stranger, _, _) = a_connected_actor(&mut state, 2);
+    assert!(press(&mut state, stranger), "the house window did not answer");
+    assert!(!session::is_open(&state, house));
+}

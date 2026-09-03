@@ -131,6 +131,15 @@ impl World {
     /// shroud. The player keeps their connection and can walk as a ghost;
     /// resurrection reverses every step of this.
     fn become_ghost(&mut self, entity: EntityId, serial: Serial, killer: Option<String>) {
+        // A ghost does not build. The session ends here rather than at the
+        // resurrection, because the house is standing and editable the whole
+        // time the corpse lies there — and `session::begin` refuses a ghost, so
+        // leaving one open would be a state its own entry rule says cannot
+        // exist.
+        if openshard_housing::session::end_for(&mut self.state, entity, serial).is_some() {
+            self.state
+                .system_message(entity, "Your work on the house is at an end.");
+        }
         // The corpse first, while the gear is still worn — `move_gear_to_corpse`
         // reads the `Equipped` items off the mobile.
         if let Some(&Position(at)) = self.state.registry.get::<Position>(entity) {

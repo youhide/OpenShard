@@ -111,6 +111,9 @@ pub(crate) mod button {
     pub const RELEASE: ButtonId = ButtonId(10);
     /// Pull the house down. The owner's, and nobody else's.
     pub const DEMOLISH: ButtonId = ButtonId(11);
+    /// Open the house in the design editor. The owner's alone, and only for a
+    /// house whose shape this shard owns — see [`crate::session::begin`].
+    pub const CUSTOMISE: ButtonId = ButtonId(12);
 }
 
 /// The first row button, and how many a row draws.
@@ -246,6 +249,19 @@ fn build(state: &WorldState, player: EntityId, house: EntityId) -> (GumpLayout, 
         },
         condition.message(),
     );
+    // The way into the design editor, and the reference's own place for it —
+    // ServUO's `HouseGumpAOS` draws "Customize this house" on the house's own
+    // window and nowhere else. Drawn for the owner of a house whose shape this
+    // shard owns; a classic house has nothing here to edit, and hiding the
+    // button is the courtesy while `session::begin` is the check.
+    if owns
+        && state
+            .registry
+            .has::<openshard_state::components::HouseDesign>(house)
+    {
+        layout.button(260, 44, 4005, 4007, GumpButton::Reply, 0, button::CUSTOMISE);
+        layout.label(292, 44, GUMP_WHITE, "Customise this house");
+    }
 
     // The five verbs, each raising the same cursor the staff commands do. Drawn
     // for a co-owner and above, which is what all five refuse below — see
@@ -420,6 +436,16 @@ pub fn handle(state: &mut WorldState, connection: ConnectionId, response: &GumpR
             match crate::decay::demolish(state, context.house) {
                 Ok(_) => state.system_message(player, "The house comes down. What it held is in the crate."),
                 Err(error) => state.system_message(player, error.message()),
+            }
+        }
+        button::CUSTOMISE => {
+            // The authority is re-asked inside `begin`, like every other branch
+            // here: the window outlives the standing that drew it.
+            match crate::session::begin(state, player, context.house) {
+                Ok(()) => {
+                    state.system_message(player, "You may now design this house.");
+                }
+                Err(refusal) => state.system_message(player, refusal.message()),
             }
         }
         other => {

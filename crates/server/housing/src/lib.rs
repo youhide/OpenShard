@@ -34,6 +34,7 @@
 pub mod decay;
 pub mod design;
 pub mod inventory;
+pub mod session;
 pub mod sign;
 pub mod storage;
 pub mod template;
