@@ -479,3 +479,27 @@ one gameplay area at a time, each new command mapped in `into_world`.
 The balance data comes from the SphereServer scriptpack (`Scripts-X`): `items/`,
 `skills/`, `spells/`, `npcs/`, `crafting/`. Numbers taken, arithmetic audited —
 the same bargain as everywhere else Sphere is read.
+
+## A big multi's other anchored entities may still pop in and out at the view boundary
+
+`WorldState::refresh_around` (`state/src/runtime.rs`) tests every entity's
+visibility against `centre` via the sector grid's own single point for that
+entity — fine for a mobile or a one-tile item, wrong for anything expanded from
+a multi table, whose drawn footprint can sit tiles away from the point on the
+sector grid. Houses got a real fix for this: `houses_near` (was
+`designed_houses_near` until it was widened to cover classic houses too, not
+just `HouseDesign` ones) walks the actual drawn rectangle instead of the
+anchor point, so a house stays on screen — and in the client's live overlay,
+which is what its floor and walls actually *are* to the pathfinder — as long
+as any part of it reaches the player's view square, not just its own anchor
+tile.
+
+Nothing else that is one entity expanded from a multi table got the same
+treatment. `openshard-boats` is the other user of `MultiId` in this
+workspace and goes through the same plain `everything_near(centre,
+VIEW_RANGE)` as a mobile does — a large boat approached broadside, or any
+future multi-shaped entity, can in principle flicker the same way a classic
+house did before this session's fix. Not fixed here: boats move every tick
+they are crewed, which changes the failure's shape (the anchor keeps sliding
+past the boundary rather than sitting near it), and nobody has reported it.
+Worth `design_reaches_view`-style treatment if it ever is.
