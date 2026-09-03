@@ -205,6 +205,11 @@ impl World {
             _ if items::is_cloth_material(graphic) => {
                 items::use_cloth_material(&mut self.state, player, item);
             }
+            // And the cooking chain's own middle: the mill's craft makes a
+            // closed sack of flour and every dough row eats an open one.
+            items::SACK_OF_FLOUR => {
+                items::open_flour(&mut self.state, player, item);
+            }
             // And the chain's own head: the cotton plant standing in a field.
             // Matched on the component rather than the art because the art is
             // one of four and says nothing on its own — a bush drawn `0xC51`
