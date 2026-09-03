@@ -23,19 +23,20 @@ so migrating a domain is also what empties its section below.
 | The protocol | ranked, [`docs/protocol/README.md`](../../docs/protocol/README.md) § what is open |
 | The server | ranked, [`docs/server/README.md`](../../docs/server/README.md) § what is open, with [`plans/server/operations/PLAN.md`](../server/operations/PLAN.md) for what is not built |
 | Items and crafting | ranked, [`docs/items/README.md`](../../docs/items/README.md) § what is open, with [`plans/items/item_identity/PLAN.md`](../items/item_identity/PLAN.md) for what is not built |
-| Combat · housing · npc | the sections below, until each is migrated |
+| Combat, skills and magic | ranked, [`docs/combat/README.md`](../../docs/combat/README.md) § what is open, with [`plans/combat/`](../combat/actions/PLAN.md) for what is not built |
+| Housing · npc | the sections below, until each is migrated |
 
 ## Next
 
-**Migrate the remaining domains.** Three areas still have their documents flat in
-`docs/` and their phase records under `docs/roadmap/`: `combat`, `housing`,
-`npc`. Each is one batch — decisions into `design_*`, phase records and
+**Migrate the remaining domains.** Two areas still have their documents flat in
+`docs/` and their phase records under `docs/roadmap/`: `housing` and `npc`. Each
+is one batch — decisions into `design_*`, phase records and
 "amendments forced by" into `evidence/`, what is open into a domain README — and
-none of them blocks another. The batch that claims a domain also takes its phase
+neither blocks the other. The batch that claims a domain also takes its phase
 file out of `docs/roadmap/` and its section out of this page.
 
-The order to take them in is cheapest-first: `combat`, then `housing`, `npc`.
-All three are served by one file,
+`combat` went on 2026-09-03 and took Combat, Skills and Magic with it. Both
+remaining domains are served by one file,
 [`docs/roadmap/06-gameplay/`](../../docs/roadmap/06-gameplay/README.md), and the
 `items` batch answered what happens to it the way `server` did: take the two
 subject files that belong to you, leave the other ten and the shared
@@ -46,10 +47,13 @@ belong to four domains at once; each batch lifts its own rows into its README's
 
 ## Gameplay
 
-- [ ] Complete classic-client per-weapon and per-body animations.
-- [ ] Finish the remaining usable skills and exact skill/spell presentation.
-- [ ] Add summons, the deferred spell subsystems, and adjacent-tile quarry
-      pathing.
+Combat, skills and magic left this section on 2026-09-03: the animation,
+skill-presentation and deferred-spell rows are ranked in
+[`docs/combat/README.md`](../../docs/combat/README.md) now, and the ordered work
+is [`plans/combat/actions/PLAN.md`](../combat/actions/PLAN.md) and
+[`plans/combat/spells/PLAN.md`](../combat/spells/PLAN.md).
+
+- [ ] Adjacent-tile quarry pathing (`npc`).
 - [ ] Complete boats B3–B4.
 - [ ] Complete house customisation C3–C4.
 - [ ] Resolve the data-table and Felucca-converter findings in

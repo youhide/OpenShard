@@ -1,6 +1,10 @@
-# Skills
+# The skills phase
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of the skill table, the check, the gain curve, and
+every skill built on top of them — the four subsystems (stealth, bard, taming,
+harvest) included. A record, not a status: what is built and what is open today
+is [`README.md`](../README.md), and the model is
+[`design_skills.md`](../design_skills.md).*
 
 - [x] `skills` — the table, the check, the gain
   - [x] **The fifty-eight skills are data now** (`state::skill`, ported whole from

@@ -1,6 +1,10 @@
-# Magic
+# The magic phase
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of Magery: mana, the cast sequence, the 64-spell table
+and every family that came out of `Unimplemented` — poison, the buffs, the
+fields, paralysis, resistance, the summons, travel and the dispels. A record, not
+a status: what is built and what is open today is [`README.md`](../README.md),
+and the model is [`design_magic.md`](../design_magic.md).*
 
 - [x] `magic` — spells, reagents, casting
   - [x] **Mana, casting, and the effect seam.** A mobile carries `Mana` (spent by

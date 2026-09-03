@@ -22,17 +22,25 @@ benchmark is [`05-scripting.md`](../../server/evidence/2026-08-24-the-scripting-
 
 ## Contents
 
-Two subjects have left: **Items** and **Crafting** are records in the migrated
-`items` domain now —
+Five subjects have left this directory, into two migrated domains.
+
+**Items** and **Crafting** are records in `items` —
 [`items/evidence/2026-08-24-the-items-phase.md`](../../items/evidence/2026-08-24-the-items-phase.md)
 and
 [`items/evidence/2026-08-24-the-crafting-phase.md`](../../items/evidence/2026-08-24-the-crafting-phase.md)
 — and what is open about them is ranked in
 [`items/README.md`](../../items/README.md).
 
-- [Combat](combat.md)
-- [Skills](skills.md)
-- [Magic](magic.md)
+**Combat**, **Skills** and **Magic** are records in `combat` —
+[`combat/evidence/2026-08-24-the-combat-phase.md`](../../combat/evidence/2026-08-24-the-combat-phase.md),
+[`combat/evidence/2026-08-24-the-skills-phase.md`](../../combat/evidence/2026-08-24-the-skills-phase.md)
+and
+[`combat/evidence/2026-08-24-the-magic-phase.md`](../../combat/evidence/2026-08-24-the-magic-phase.md)
+— and what is open about them is ranked in
+[`combat/README.md`](../../combat/README.md).
+
+What is still here:
+
 - [AI](ai.md)
 - [Chat and world administration](chat.md)
 - [Regions, guards, and the world clock](regions.md)

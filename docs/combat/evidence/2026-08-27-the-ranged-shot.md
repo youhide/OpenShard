@@ -1,7 +1,12 @@
 # Archery — arrows, ranged combat, and the flight itself
 
+*A record, not a status. It names the documents by the names they had when it was
+written: `docs/combat.md` is now [`design_fight_loop.md`](../design_fight_loop.md)
+and `docs/combat_actions.md` is [`design_actions.md`](../design_actions.md). What
+is open about ranged combat is ranked in [`README.md`](../README.md).*
+
 > **`volleys()` no longer exists.** This document is the record of how the ranged
-> path was built and why; [`combat_actions.md`](combat_actions.md)'s Ф2 retired
+> path was built and why; [`combat_actions.md`](../design_actions.md)'s Ф2 retired
 > that function into the three passes every action now runs through, so a shot is
 > committed, sustained and resolved exactly like a blow. Everything below about
 > *what* a shot does — reach off the weapon row, ammunition, the `0x70` flight —

@@ -30,13 +30,13 @@ in [`docs/README.md`](../README.md).
 
 | Phase | Record | Domain waiting to claim it |
 |---|---|---|
-| 6. Gameplay | [`06-gameplay/`](06-gameplay/README.md) | `combat/`, `housing/`, `npc/` |
+| 6. Gameplay | [`06-gameplay/`](06-gameplay/README.md) | `housing/`, `npc/` |
 
 One file for what was four domains, which is the thing that makes this the last
 and awkward batch. `items/` went first on 2026-09-03 and answered it the way
-`server/` had: take the two subject files that are yours — Items and Crafting —
-and leave the other ten where they are. The last domain out takes the directory
-with it.
+`server/` had: take the subject files that are yours and leave the others where
+they are; `combat/` took three the same day. The last domain out takes the
+directory with it.
 
 Beside it, two backlog records that are still the only home their subject has,
 and one policy:
@@ -55,4 +55,5 @@ of here on 2026-09-03; they are records in
 [`docs/server/evidence/`](../server/README.md) now, and what is open about that
 domain is ranked in [`docs/server/README.md`](../server/README.md). The `items`
 batch took the Items and Crafting subjects of phase 6 the same day, into
-[`docs/items/evidence/`](../items/README.md).
+[`docs/items/evidence/`](../items/README.md), and the `combat` batch took Combat,
+Skills and Magic into [`docs/combat/evidence/`](../combat/README.md).

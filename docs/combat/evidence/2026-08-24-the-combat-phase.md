@@ -1,6 +1,11 @@
-# Combat
+# The combat phase
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of how the fight was built — swing timers, damage,
+resistances, notoriety, corpses, ghosts and the numbers behind each. A record,
+not a status: what is built and what is open today is
+[`README.md`](../README.md), and the model is
+[`design_fight_loop.md`](../design_fight_loop.md) and
+[`design_actions.md`](../design_actions.md).*
 
 - [x] `combat` — swing timers, damage, resistances, notoriety
   - [x] **Hit points, damage and death.** Mobiles carry `Hitpoints`; scripts
