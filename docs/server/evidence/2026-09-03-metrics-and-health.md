@@ -22,7 +22,7 @@ nothing turns it on by default.
 
 ## What is published
 
-Thirteen families, and every one of them is a number the shard already had.
+Fourteen families, and every one of them is a number the shard already had.
 
 | | |
 |---|---|

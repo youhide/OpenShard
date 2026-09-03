@@ -3,7 +3,7 @@
 //! # Why this is written out by hand
 //!
 //! The format is a line per sample with two comment lines above each family, and
-//! this shard publishes thirteen of them. A client library would bring a
+//! this shard publishes fourteen of them. A client library would bring a
 //! registry keyed by strings, a macro layer, and a dependency tree, to render
 //! text that is shorter than the code configuring it — and it would move the set
 //! of metrics out of the type system, where a family that stopped being
