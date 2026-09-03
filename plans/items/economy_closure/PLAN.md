@@ -1,12 +1,13 @@
 # Closing the production graph
 
 `openshard_world::economy` asks one question — can every resource some step wants
-be produced by some other step, starting from the sources — and as of 2026-09-03
-the answer is **no**: 56 resources are unreachable, 1,213 recipe rows can never
-run, and 9 raw materials are paid out that no trade spends.
+be produced by some other step, starting from the sources — and when this page
+was written the answer was **no**: 56 resources unreachable, 1,213 recipe rows
+that could never run, and 9 raw materials paid out that no trade spends.
 
-The audit and its ratchet are built; what is open is the content behind them.
-This page is the order to close it in. The report is the measurement:
+Two commits later it is 26, 127 and 1. The audit and its ratchet are built; what
+is open is the content behind them. This page is the order to take the rest in.
+The report is the measurement:
 
 ```sh
 cargo run -p openshard-world --bin economy
@@ -25,107 +26,108 @@ a crop field counts. Closing a row therefore never means "the content is good",
 only "the chain is not cut". Where a step below chooses a cheap source over the
 upstream one, it says so and says why.
 
-## The order
+## Done
 
-The first two steps share one missing mechanism, which is why they are first and
-why they are one step apart rather than one step: **a bridge that is code rather
-than a recipe row**. The engine has three of them (smelting and the two cuts of
-the scissors, declared in `economy::CONVERSIONS`) and needs three more.
+- [x] **1. An axe on a log makes boards.** `crafting::chop`, reached through the
+      lumberjack's own harvest cursor, gated on Carpentry *or* Lumberjacking at
+      `harvest::WOODS`' own `req_skill`. **1,213 stalled rows** — the largest
+      thing on this page by a wide margin. Commit `c2ae15e0`.
 
-- [ ] **1. An axe on a log makes boards.** Seven grades of log come off a tree
-      (`state/src/harvest.rs`, `WOODS`) and seven grades of board are spent by
-      every carpentry, fletching and tinkering row, and nothing turns one into
-      the other. **1,213 of the report's stalled rows are this one gap** — by a
-      wide margin the largest thing on this page.
+- [x] **2. A sack of flour opens** (`items::flour`), **3. a field grows wheat**
+      (nine `FarmableWheat` regions from `Regions.xml`, and `CropKind::Wheat`),
+      **4. a blade cuts up a fish** (`ICarvable`, four steaks), **5. the carving
+      table** gains the dragon family's horned and barbed hides and a wool column
+      that pays *tainted* wool off a woolly corpse, **6. undead carry a bone** as
+      loot rather than butchery. Commit `63f22a7a`.
 
-      Upstream is *not* `BaseLog.OnDoubleClick`, which is what
-      `docs/roadmap/backlog/gameplay.md` claimed and this plan corrects: the
-      conversion is `IAxe.Axe`, reached through the lumberjack's own harvest
-      cursor (`Services/Harvest/Core/HarvestTarget.cs`) — double-click an axe,
-      click a log in your pack, get one board per log, sound `0x13E`. The gate is
-      `Carpentry >= n || Lumberjacking >= n` with `n` per wood: regular 0, oak
-      65, ash 80, yew 95, heartwood, bloodwood and frostwood 100 (`Log.cs`), and
-      refusal is 1072652 "You cannot work this strange and unusual wood."
+      That commit also carries two things its message does not name, and they are
+      recorded here instead: the **harvest bonus tables**
+      (`harvest::BonusResource`, ServUO's `BonusHarvestResource`) — a bark
+      fragment and a brilliant amber off a tree, six gems out of a rock face, a
+      white pearl out of the sea, all Mondain's Legacy and all absolute-chance
+      rows with the "nothing" slack left out — and the **vendor lines the
+      converter dropped**: the barkeeper's ten beverages, which is where a
+      pitcher of water comes from and therefore where dough does, and the mage's
+      five necromancer reagents, which sat behind an `if (Core.AOS)`.
 
-      Lands beside `crafting::smelt`, which is the same shape of bridge (a
-      harvested pile a trade cannot spend until code converts it), and is
-      declared in `CONVERSIONS` from the new module's own public constants.
+## What is left, and it is four tracks rather than six rows
 
-      Closes: `board (36)` in all six special grades, and the plain one stops
-      depending on a vendor stocking twenty.
+The 26 rows that remain are not 26 problems. They are four, and only the first
+is an implementation.
 
-- [ ] **2. A sack of flour opens.** The mill row makes `SackFlour` (`0x1039`) and
-      every dough row eats `SackFlourOpen` (`0x103A`); upstream's bridge between
-      them is `SackFlour.OnDoubleClick` (`Items/Consumables/Cooking.cs`), which
-      drops **one** open sack where the stack was and spends one from it.
+- [ ] **A. Glassblowing.** `harvest::SAND` shipped ahead of the trade that spends
+      it, and sand is still the one raw material nothing consumes. Upstream is
+      `DefGlassblowing`: thirteen rows in the Mondain's Legacy era, main skill
+      **Alchemy**, a forge to work at, and a **blowpipe** (`0xE8A`) to work with.
 
-      The same class of gap as step 1, found by the same report, and the reason
-      the cooking chain has two holes rather than one.
+      Two things make it more than a table:
 
-- [ ] **3. A field grows wheat.** `crops.json` grows cotton and only cotton, so
-      no sheaf of wheat (`0x1EBD`) exists and the mill row above has nothing to
-      grind. `CropKind` gains a variant with its standing arts, its picked art
-      and its yield, and the world data gains fields.
+      - **The tool cannot be told apart from a mortar and pestle by skill**, and
+        `craft::tool_system` matches a tool to a trade *by skill*. Glassblowing
+        and alchemy share Alchemy, so the mapping has to become trade-keyed:
+        `CraftSystemDef` gains the `trade` name its JSON row already carries, and
+        `CraftToolData` names a trade instead of a skill.
+      - **Both halves are gated on a learned flag upstream** —
+        `PlayerMobile.Glassblowing` and `PlayerMobile.SandMining`, taught by two
+        books sold in Ter Mur, which is a facet this shard does not have. So the
+        shipped gate is the other half of upstream's condition, the skill at 100,
+        and the flag is a documented divergence rather than an invented seller.
+        The same is already true of sand: this shard lets any miner at 100 dig
+        it, and upstream does not.
 
-      With steps 2 and 3 the whole cooking chain becomes reachable: wheat →
-      flour → open flour → dough → everything `DefCooking` builds on it.
+- [ ] **B. The vendor shelves the converter dropped.** Not a row of the report —
+      a class of them. Measured 2026-09-03: **35 alchemists, 22 innkeepers, 22
+      tavernkeepers**, 7 scribes, 5 tinkers, 11 animal trainers, 9 shipwrights
+      and every guildmaster are placed with an outfit and **no shelf at all**,
+      though upstream gives each an `SB*.cs`. Two of the report's rows are this
+      and nothing else: a banana (`0x171F`), which only the innkeeper sells, and
+      the blowpipe track A needs, which only the alchemist does.
 
-- [ ] **4. A blade on a fish makes steaks.** `harvest::FISHES` pays `0x09CC` and
-      nothing spends it, while the cooking rows for raw and cooked fish steaks
-      (`0x097A`, `0x097B`) already exist and are unreachable. Upstream, `Fish` is
-      `ICarvable` and cuts into four raw steaks; the branch belongs in
-      `items::carve` beside the living-mobile-is-shorn branch, which is the same
-      dispatch upstream splits the same way.
+      The beverage and reagent lines already found are the same bug one level
+      down — a row the converter skipped because it was not a `GenericBuyInfo` —
+      so this track is worth doing as a sweep rather than a row at a time.
 
-- [ ] **5. The carving table gains what a body is worth.** Two rows, both of
-      which `items::carve`'s own doc comment already describes as missing:
+- [ ] **C. Content this shard does not have.** Fourteen rows, and no honest fix
+      that is not a decision:
 
-      - **Horned and barbed hides.** Tailoring spends both grades and no carvable
-        body wears them; dragons (body 12) and drakes (60) are already spawned in
-        `spawns.json`, so this is `carved_yield` and `hide_grade_of` rows, not
-        content.
-      - **Tainted wool** (`0x101F`), which the spinning wheel already knows how
-        to take. Upstream pays it for *carving a woolly corpse*
-        (`BaseCreature.OnCarve`) — shearing a live sheep gives ordinary wool —
-        so `CarvedYield` gains a wool column rather than the shard gaining a
-        lich's flock.
-
-- [ ] **6. Undead carry a bone.** The tailor's bone armour rows spend `0x0F7E`
-      and nothing on the shard makes one. Upstream it is loot, not butchery
-      (`BaseCreature.PackItem(new Bone())` on the undead), so it is a `loot.json`
-      row on bodies that are already spawned.
-
-- [ ] **7. Glassblowing.** `harvest::SAND` shipped ahead of the trade that spends
-      it, so a miner can fill a pack with something no recipe wants. The trade
-      itself is missing: a system, its rows, its tool and its heat source. The
-      only step on this page that is a build rather than a table.
-
-- [ ] **8. The twenty-two Mondain's Legacy ingredients.** `0x3183`–`0x3199` is one
-      contiguous run of ML special ingredients (`1032…` name clilocs), and
-      upstream pays every one of them out of Heartwood quest turn-ins and
-      champion drops — this shard has neither. The largest single group in the
-      report after the boards, and the one that is a decision per row before it
-      is an implementation: a loot line on bodies that already spawn, a vendor
-      shelf, or the rows deleted as unshippable.
-
-- [ ] **9. The remainder, row by row.** What is left of the report once the steps
-      above land, each of which wants its own verdict rather than a shared one:
-
-      | Art | What it is | Upstream source |
+      | Rows | What they are | Where they come from upstream |
       |---|---|---|
-      | `0x0EF0` | silver (1044572), 250–500 a row | faction currency; 45 steps want it |
-      | `0x1879` | copper wire (1026265) | the Mad Scientist quest, and faction tinkering |
-      | `0x14F8`, `0x1374` | rope (1020934), and a hitching row's own | quest statics and vendors |
-      | `0x315A` | pristine dread horn (1032634) | a peerless boss |
-      | `0x0F8A`, `0x0F8F` | two alchemy reagents | reagent vendors and spawns |
-      | `0x0F7C`, `0x15F8`, `0x171F`, `0x1042`, `0x1044`, `0x1083`, `0x103F` | cooking oddments behind the chain in steps 2–3 | re-measure after step 3: some of these close on their own |
-      | `0x1E25`, `0x2F57`, `0x2F5C`, `0x4005`, `0x573B` | carpentry and alchemy leaves | vendor or deletion |
+      | `0x3183`–`0x318E` (12) | blight, corruption, scourge, putrefaction, taint, muculent, the lard of Paroxysmus, a dread horn's mane, diseased bark, grizzled bones, the eye of the Travesty, a captured essence | peerless bosses |
+      | `0x315A`, `0x4005` | a pristine dread horn, a toxic venom sac | the same bosses under other names |
+      | `0x0EF0`, `0x1879` | silver, copper wire | faction stores and the Mad Scientist quest |
+      | `0x14F8`, `0x1374` | a rope, a bridle | quest statics |
+      | `0x2F57`, `0x2F5C` | a runed prism, an enchanted switch | Heartwood turn-ins |
+      | `0x1E25` | academic books | an artifact |
 
-      Step 3 is what makes this list honest: several of its cooking rows are
-      unreachable only because the chain above them is cut, and re-running the
-      report is cheaper than reasoning about which.
+      Three ways to close them, and the choice is the shard's rather than the
+      audit's: a **loot line** on bodies that already spawn, which is the closest
+      honest analogue of a champion drop; a **vendor shelf**, which is cheap and
+      economically wrong for a reward item; or **deleting the rows that want
+      them**, which shrinks the catalogue and closes the report honestly.
+
+- [ ] **D. The catalogue is not era-clean.** `alchemy.json` ships a Nexus Core,
+      which is `if (Core.SA)` upstream; its crushed glass is an SA blacksmithy
+      row that was *not* imported, so the consumer is here and the producer is
+      not. Cocoa pulp and cocoa butter (`0x0F7C`, `0x1044`) are Time of Legends.
+      This shard is Mondain's Legacy — `harvest` already keeps a pre-ML and an ML
+      table — and the recipe tables have no era column at all.
+
+      An era column on a recipe would settle five of the remaining rows by
+      deleting nothing: they would simply not be in this shard's catalogue.
+
+## Two rows nobody can close
+
+Worth stating so they are not re-investigated: `0x15F8`, an empty wooden bowl,
+appears in exactly two places in the whole of ServUO — its own class and the
+recipe that eats it. Nothing sells, crafts or drops one, so `DefCooking`'s fruit
+bowl is unbuildable on OSI's own shards, and the banana in track B only gets
+that row half-way. Selling one is a divergence, and a defensible one; inventing a
+crafted source is not.
 
 ## Definition of done
 
 The report prints `verdict: the economy closes`, `known_gaps()` is empty, and the
-ratchet test that compares both ways is what keeps it that way.
+ratchet that compares both ways is what keeps it that way. **Tracks C and D are
+where that stops being reachable by implementation alone** — the rows there close
+by a decision about what this shard ships, and until one is taken the ratchet
+carries them.
