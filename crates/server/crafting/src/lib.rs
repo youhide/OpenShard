@@ -21,6 +21,7 @@
 //! [`openshard_magic`]: https://docs.rs/openshard-magic
 
 pub mod chance;
+pub mod chop;
 pub mod consume;
 pub mod craft;
 pub mod defs;
@@ -35,6 +36,7 @@ pub use chance::{
     Roll,
     chance,
 };
+pub use chop::chop;
 pub use consume::{
     Materials,
     Refusal,

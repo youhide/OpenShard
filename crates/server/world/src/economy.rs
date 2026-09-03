@@ -80,6 +80,7 @@ use openshard_state::item_definition::{
     LEATHER,
     MATERIAL_DEFINITIONS,
     METAL,
+    WOOD,
 };
 
 /// One thing the economy can hold.
@@ -262,21 +263,27 @@ pub struct Conversion {
 
 /// The hand-written bridges, and the whole of them.
 ///
-/// **The absence of a wood row here is the finding this module was written to
-/// state.** ServUO bridges lumberjacking to carpentry through `IAxe` rather than
-/// a double click: an axe swung at a `BaseLog` calls `TryCreateBoards`, which
-/// gates on Lumberjacking — 0 for plain wood, 65 oak, 80 ash, 95 yew, 100 for
-/// heartwood, bloodwood and frostwood (`Scripts/Items/Resource/Log.cs`) — and
-/// pays boards of the log's own resource. This engine has no counterpart, so
-/// seven grades of log are paid out with nothing that eats them and seven grades
-/// of board are spent by recipes with nothing that makes them. See
-/// `docs/roadmap/backlog/gameplay.md`.
+/// **The absence of a wood row here was the finding this module was written to
+/// state**, and it is closed: ServUO bridges lumberjacking to carpentry through
+/// `IAxe` rather than a double click — an axe clicked on a `BaseLog` through the
+/// lumberjack's own harvest cursor calls `TryCreateBoards`, which gates on
+/// Carpentry or Lumberjacking (0 for plain wood, 65 oak, 80 ash, 95 yew, 100 for
+/// heartwood, bloodwood and frostwood, `Scripts/Items/Resource/Log.cs`) and pays
+/// boards of the log's own resource. [`openshard_crafting::chop`] is that step,
+/// and the row below is what makes the seven grades meet.
 pub const CONVERSIONS: &[Conversion] = &[
     // A miner is paid in ore and every smithing row eats ingots.
     Conversion {
         name: "smelting (openshard_crafting::smelt)",
         from: Side::Graded(openshard_crafting::smelt::ORE_KIND, METAL),
         to:   Side::Graded(openshard_crafting::smelt::INGOT_KIND, METAL),
+    },
+    // A lumberjack is paid in logs and every carpentry, fletching and tinkering
+    // row that works wood eats boards.
+    Conversion {
+        name: "an axe on a log (openshard_crafting::chop)",
+        from: Side::Graded(openshard_crafting::chop::LOG_KIND, WOOD),
+        to:   Side::Graded(openshard_crafting::chop::BOARD_KIND, WOOD),
     },
     // A carved corpse pays hides and every tailoring row eats leather.
     Conversion {
@@ -826,30 +833,35 @@ mod tests {
     /// only grew would rot into the stale queue entry `gameplay.md` already has a
     /// lesson about.
     ///
-    /// Every row is a resource some step wants and nothing can produce. Three
+    /// Every row is a resource some step wants and nothing can produce. Two
     /// groups:
     ///
-    /// - **Boards**, six grades, spent by every carpentry, fletching and tinkering
-    ///   row that works wood and made by nothing — see [`CONVERSIONS`]. The plain
-    ///   grade is *not* here: a vendor stocks twenty of it, which is why this gap
-    ///   has been survivable and therefore invisible.
     /// - **Horned and barbed hides, and the leather they cut into.** The grades
     ///   exist and tailoring spends them, but no carvable body wears them — every
     ///   ServUO creature that does is a dragon, drake, wyrm or serpent, and none of
     ///   those bodies is carvable here. `openshard_items::carved_yield`'s own doc
     ///   says as much; this is that sentence turned into a check.
     /// - [`UNSOURCED_ART`], the unmigrated rows.
-    fn known_gaps() -> Vec<Resource> {
-        // Every board grade but the plain one, which a vendor stocks twenty of.
-        // The same list in both eras, and that is the point: the carpenter's axis
-        // offers seven grades whether or not a tree can give seven logs, so
-        // before Mondain's Legacy the six special boards are unreachable for one
-        // more reason rather than for one fewer.
-        let mut gaps: Vec<Resource> = grades(openshard_state::item_definition::WOOD)
-            .into_iter()
-            .skip(1)
-            .map(|material| Resource::graded(ItemKindId(36), material))
-            .collect();
+    ///
+    /// **The six special boards were the third group, and they are gone**: an axe
+    /// on a log makes boards of its grade ([`openshard_crafting::chop`], and its
+    /// row in [`CONVERSIONS`]), so the carpenter's axis is reachable in all seven
+    /// grades — in Mondain's Legacy. Before it, a tree gives one wood and the
+    /// other six logs do not exist, so the axe has nothing to cut and the six
+    /// boards stay out of reach: that is the era having one wood, not the shard
+    /// having a hole, and it is why this list takes `ml`.
+    fn known_gaps(ml: bool) -> Vec<Resource> {
+        let mut gaps: Vec<Resource> = Vec::new();
+        if !ml {
+            // The pre-ML pair, and both halves of it: the special logs are wanted
+            // by the axe and paid by no tree, and the boards they would become are
+            // wanted by the carpenter's axis, which offers seven grades in every
+            // era whether or not a tree can give seven.
+            for material in grades(WOOD).into_iter().skip(1) {
+                gaps.push(Resource::graded(openshard_crafting::chop::LOG_KIND, material));
+                gaps.push(Resource::graded(openshard_crafting::chop::BOARD_KIND, material));
+            }
+        }
         // Horned and barbed, at both ends of the scissors: the hide has no body to
         // come off, so the leather it would cut into is out of reach as well.
         for grade in [MaterialId(42), MaterialId(43)] {
@@ -872,7 +884,7 @@ mod tests {
             let found: Vec<Resource> = report.unreachable.keys().copied().collect();
             assert_eq!(
                 found,
-                known_gaps(),
+                known_gaps(ml),
                 "ml={ml}: the reachability holes moved.\n{report}"
             );
         }
@@ -881,28 +893,22 @@ mod tests {
     #[test]
     fn the_only_raw_materials_with_no_sink_are_the_ones_we_know_about() {
         // The other direction, and the one that catches a trade paying in an item
-        // with no use. Three findings, and each is a different missing system:
+        // with no use. Two findings left, each a different missing system:
         //
-        // - **Logs**, every grade the era offers. The board bridge — see
-        //   [`CONVERSIONS`].
         // - **Fish** (`0x09CC`). Fishing lands them and no cooking row eats one:
         //   `DefCooking`'s fish steaks are cut off a fish with a knife upstream,
         //   which is an item action this engine does not have.
         // - **Sand** (`0x423A`). Glassblowing, which is not implemented at all —
         //   the harvest definition shipped ahead of the trade that spends it.
+        //
+        // **Logs were the third and are gone**: the axe eats every grade of them
+        // in both eras, so a lumberjack is no longer paid in something with no
+        // use. See [`CONVERSIONS`].
         let sand = Resource::Art(Graphic(0x423A), Hue(0));
         let fish = Resource::Art(Graphic(0x09CC), Hue(0));
         for ml in [true, false] {
             let report = Economy::of(ml).report();
-            let mut expected: Vec<Resource> = grades(openshard_state::item_definition::WOOD)
-                .into_iter()
-                // Pre-ML a tree gives one log, so six of the seven grades are not
-                // paid out at all and cannot be dead ends.
-                .take(if ml { usize::MAX } else { 1 })
-                .map(|material| Resource::graded(ItemKindId(3), material))
-                .collect();
-            expected.push(fish);
-            expected.push(sand);
+            let mut expected: Vec<Resource> = vec![fish, sand];
             expected.sort_unstable();
             let found: Vec<Resource> = report.dead_ends.keys().copied().collect();
             assert_eq!(found, expected, "ml={ml}: the dead ends moved.\n{report}");
@@ -910,30 +916,30 @@ mod tests {
     }
 
     #[test]
-    fn a_logs_only_sink_would_be_the_bridge_that_is_missing() {
-        // The other half of the board gap, and the half that is invisible from
-        // the recipe tables alone: lumberjacking pays seven grades of log, and
-        // nothing at all eats one. If a row ever appears in `CONVERSIONS` for
-        // wood, this is the assertion that has to change with it.
+    fn wood_closes_the_loop_it_used_to_break() {
+        // The finding this module was written to state, now asserted the other
+        // way round: seven grades of log are paid out, the axe cuts each into a
+        // board of its own grade, and the carpenter can spend every one. The
+        // assertion here used to be that no log had a sink at all — that is what
+        // closing a hole looks like in a ratchet.
         let economy = Economy::of(true);
         let consumed = economy.consumed();
-        for material in grades(openshard_state::item_definition::WOOD) {
-            let log = Resource::graded(ItemKindId(3), material);
+        for material in grades(WOOD) {
+            let log = Resource::graded(openshard_crafting::chop::LOG_KIND, material);
+            let board = Resource::graded(openshard_crafting::chop::BOARD_KIND, material);
             assert!(economy.reachable.contains(&log), "{log} is not even paid out");
-            assert!(
-                !consumed.contains(&log),
-                "{log} has a sink now — update CONVERSIONS"
-            );
+            assert!(consumed.contains(&log), "{log} has no sink");
+            assert!(economy.reachable.contains(&board), "{board} cannot be made");
         }
     }
 
     #[test]
-    fn ore_closes_the_loop_that_wood_does_not() {
-        // The control for the test above: the same shape of chain, with its
-        // bridge present. Nine ores are paid out, nine ingots are reachable, and
-        // a smith can spend every one of them. Without this, a graph that had
-        // simply lost all its conversion edges would look exactly like the wood
-        // finding.
+    fn ore_closes_its_loop_the_same_way() {
+        // The control for the test above, and the older of the two chains: nine
+        // ores are paid out, nine ingots are reachable, and a smith can spend
+        // every one of them. Without this, a graph that had simply lost all its
+        // conversion edges would look exactly like a shard where both bridges
+        // work.
         let economy = Economy::of(true);
         let consumed = economy.consumed();
         for material in grades(METAL) {

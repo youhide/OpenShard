@@ -2010,6 +2010,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "Physical",
     },
     Message {
+        id:       ClilocId(1062334),
+        fallback: "This item must be in your backpack to be used.",
+    },
+    Message {
         id:       ClilocId(1062379),
         fallback: "Est. time remaining:",
     },
@@ -2092,6 +2096,10 @@ pub const SERVER_MESSAGES: &[Message] = &[
     Message {
         id:       ClilocId(1072546),
         fallback: "You chop some frostwood logs and put them into your backpack.",
+    },
+    Message {
+        id:       ClilocId(1072652),
+        fallback: "You cannot work this strange and unusual wood.",
     },
     Message {
         id:       ClilocId(1112698),

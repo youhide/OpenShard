@@ -240,6 +240,9 @@ pub(crate) fn open_container(
 ///
 /// Not named for containers any more, because it stopped being about them some
 /// time ago — a spellbook, a door's key target and an item trigger all ask it.
+///
+/// See [`containing`] for the other half of the same question: not "can I touch
+/// it" but "what is it sitting in".
 pub fn in_reach(state: &WorldState, container: EntityId, player: EntityId) -> bool {
     let Some(&Position(player_pos)) = state.registry.get::<Position>(player) else {
         return false;
@@ -274,6 +277,21 @@ pub fn in_reach(state: &WorldState, container: EntityId, player: EntityId) -> bo
         return false;
     };
     facet == state.facet_of(player) && in_range(at, player_pos, ITEM_REACH)
+}
+
+/// The container an item is sitting in, or `None` when it is not in one — worn,
+/// lying on the ground, or held on the cursor.
+///
+/// The question every conversion asks about the pile it just spent: ServUO's
+/// `ScissorHelper` gives what it makes the old item's **parent**
+/// (`Item.ScissorHelper`'s `TryDropItem(from, newItem, false)`), so leather cut
+/// or boards chopped inside a bag have no business jumping out of it. Read by
+/// [`cut`](crate::cut) and by `crafting::chop`.
+pub fn containing(state: &WorldState, item: EntityId) -> Option<Serial> {
+    match item_location(state, item)? {
+        ItemLocation::Settled(SettledItemLocation::Contained(held)) => Some(held.container),
+        _ => None,
+    }
 }
 
 /// Send the acting client a mobile's paperdoll — the reply to double-clicking a

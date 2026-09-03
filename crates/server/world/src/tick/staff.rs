@@ -104,6 +104,19 @@ impl World {
                 }
             }
             openshard_state::TargetPurpose::Harvest { tool } => {
+                // ServUO's harvest cursor answers two clicks, not one: a tile to
+                // swing at, and — for a lumberjack with an axe — a pile of logs
+                // in the pack to cut into boards
+                // (`Services/Harvest/Core/HarvestTarget.cs`). The object is tried
+                // first and falls through when it is not a log, so clicking a
+                // tree that happens to carry a serial still chops the tree.
+                if response
+                    .object
+                    .and_then(|serial| self.state.registry.entity_of(serial))
+                    .is_some_and(|log| crafting::chop(&mut self.state, actor, tool, log))
+                {
+                    return;
+                }
                 // The one purpose that wants the *ground* rather than an object,
                 // so it reads the reply's point and tile graphic and ignores the
                 // serial. What the tile actually is, the map decides — see

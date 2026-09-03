@@ -232,14 +232,6 @@ fn hide_grade(state: &WorldState, item: EntityId) -> Option<MaterialId> {
     }
 }
 
-/// The container an item is sitting in, or `None` if it is not in one.
-fn containing(state: &WorldState, item: EntityId) -> Option<Serial> {
-    match item_location(state, item)? {
-        ItemLocation::Settled(SettledItemLocation::Contained(held)) => Some(held.container),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use openshard_state::presentation_of;
