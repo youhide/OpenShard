@@ -23,4 +23,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 openshard-tiles.workspace = true
+# `Multis::of([])`: a test world names its empty multi catalogue rather than
+# conjuring one out of `Default`.
+openshard-uofiles.workspace = true
 proptest.workspace = true

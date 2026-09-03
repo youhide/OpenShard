@@ -2825,6 +2825,7 @@ dependencies = [
  "openshard-protocol",
  "openshard-state",
  "openshard-tiles",
+ "openshard-uofiles",
  "proptest",
  "tracing",
 ]

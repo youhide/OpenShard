@@ -20,6 +20,13 @@
 //! guards every `CheckUsesRemaining` on the scissors), so an ordinary pair never
 //! wears out and this does not pretend otherwise.
 //!
+//! **The same scissors also turn cloth into bandages**, one for one — ServUO's
+//! `Cloth.Scissor` and `UncutCloth.Scissor` are both
+//! `ScissorHelper(from, new Bandage(), 1)`. Bandages already reach a player
+//! from a vendor or a corpse; this is the missing *route*, not a missing item.
+//! It is also the weaver's own uncut cloth's first use of any kind: nothing
+//! else in this engine reads that graphic at all.
+//!
 //! [`smelt`]: https://docs.rs/openshard-crafting
 
 use openshard_protocol::item_kind::{
@@ -45,6 +52,9 @@ pub const fn is_scissors(graphic: Graphic) -> bool {
 pub const HIDES_KIND: ItemKindId = ItemKindId(114);
 /// Semantic kind of a pile of leather — what a tailor spends.
 pub const LEATHER_KIND: ItemKindId = ItemKindId(37);
+/// Semantic kind of a pile of cut cloth — what the scissors themselves make
+/// from a bolt, and now what they spend on a bandage.
+const CLOTH_KIND: ItemKindId = ItemKindId(38);
 
 /// The art cut cloth takes — what fifty-six tailoring rows, and a dozen
 /// carpentry and smithing ones, actually spend.
@@ -60,6 +70,22 @@ const CLOTH_PER_BOLT: u32 = 50;
 /// [`MAX_STACK`](crate::MAX_STACK) that is the 60,000.
 const MAX_BOLTS_PER_CUT: u16 = (MAX_STACK as u32 / CLOTH_PER_BOLT) as u16;
 
+/// The art ServUO's `UncutCloth` takes — vendor stock the weaver and the
+/// tailor both sell (`townsfolk.json`'s "uncut cloth" shelf lines), and this
+/// engine's own crafting never makes it. A second class from `Cloth`'s own,
+/// `[FlipableAttribute(0x1765, 0x1767)]`; this is the canonical facing, the
+/// one the shelf shows after the vendor display-art sweep corrected it from
+/// four borrowed pictures of folded cloth
+/// (`evidence/2026-09-03-the-vendor-display-art-sweep.md`).
+///
+/// `UncutCloth.Scissor` is its own `ScissorHelper(from, new Bandage(), 1)` —
+/// the same yield as [`CLOTH_GRAPHIC`] under these scissors, which is why
+/// [`is_cloth_pile`] answers yes to both. Nothing else in this engine reads
+/// this art at all, so this is also the route that gives the shelf a use.
+const UNCUT_CLOTH_GRAPHIC: Graphic = Graphic(0x1767);
+/// The other facing of the above.
+const UNCUT_CLOTH_FLIPPED: Graphic = Graphic(0x1765);
+
 /// The art a pile of hides takes. ServUO builds `BaseHides` on `0x1079` and
 /// flips to `0x1078`; this engine has always drawn the flipped one, so that is
 /// the registry's canonical graphic and `0x1079` its alias.
@@ -67,6 +93,15 @@ const HIDES_GRAPHIC: Graphic = Graphic(0x1078);
 /// The other facing, which an item made before the registry knew about hides may
 /// still be wearing.
 const HIDES_FLIPPED: Graphic = Graphic(0x1079);
+
+/// The art a clean bandage takes. ServUO's `Bandage`, item `0x0E21`.
+///
+/// Redeclared rather than imported: `openshard_skills::handlers::bandage`
+/// names the same graphic for the healer's own double-click, but `items`
+/// depends on neither `crafting` nor `skills`, so the two ends of "what a
+/// bandage is drawn as" stay two literals of the one art rather than an edge
+/// across that boundary.
+const BANDAGE_GRAPHIC: Graphic = Graphic(0x0E21);
 
 /// "What should I use these scissors on?"
 const CUT_WHAT: ClilocId = ClilocId(502_434);
@@ -172,6 +207,15 @@ pub fn cut(state: &mut WorldState, cutter: EntityId, tool: EntityId, target: Opt
             let made = give(state, container, CLOTH_GRAPHIC, drawn.hue, wanted);
             (wanted, made, "cloth")
         }
+        // One-for-one like hides, and for the same reason: ServUO's own
+        // `ScissorHelper(from, new Bandage(), 1)` caps at 60,000 cut, which is
+        // `MAX_STACK` itself, so the whole pile always goes in one go.
+        Cuttable::Cloth => {
+            consume(state, serial, held);
+            let wanted = u32::from(held);
+            let made = give(state, container, BANDAGE_GRAPHIC, drawn.hue, wanted);
+            (wanted, made, "bandages")
+        }
     };
     state.play_sound(cutter, SNIP);
     if !made.is_complete() {
@@ -184,28 +228,63 @@ pub fn cut(state: &mut WorldState, cutter: EntityId, tool: EntityId, target: Opt
 
 /// What the scissors found under the cursor, and therefore what comes off it.
 ///
-/// Two entries and two identity models, which is the point of naming the answer
-/// rather than returning a material: hides are a *typed* kind carrying a leather
-/// grade, and a bolt of cloth is legacy art carrying a dye. ServUO writes both as
-/// `IScissorable` implementations, and they are not interchangeable — a bolt has
-/// no grade and a hide has no fifty-to-one yield.
+/// Three entries and not three identity models, which is the point of naming
+/// the answer rather than returning a material: hides are a *typed* kind
+/// carrying a leather grade; a bolt is legacy art carrying only a dye and
+/// nothing else answers for it; cut cloth sits between the two — a typed kind
+/// like hides, but materialless like a bolt, so a dyed pile of it falls back
+/// to legacy art the same way a bolt always reads. ServUO writes all three as
+/// `IScissorable` implementations (`BoltOfCloth`, `Cloth`/`UncutCloth`), and
+/// they are not interchangeable — a bolt has no grade, cloth has no
+/// fifty-to-one yield of its own, and only hides carry a grade to lose.
 enum Cuttable {
     /// A pile of hides: one leather per hide, keeping the grade.
     Hides(MaterialId),
     /// A bolt of woven cloth: fifty cloth per bolt, keeping the hue.
     Bolt,
+    /// A pile of cut cloth, or ServUO's `UncutCloth` beside it: one bandage
+    /// per cloth either way, keeping the hue. ServUO's `Cloth.Scissor` and
+    /// `UncutCloth.Scissor`, both `ScissorHelper(from, new Bandage(), 1)`.
+    Cloth,
 }
 
-/// Which of the two the scissors were pointed at, or `None` for anything else.
+/// Which of the three the scissors were pointed at, or `None` for anything
+/// else.
 fn cuttable(state: &WorldState, item: EntityId) -> Option<Cuttable> {
     if let Some(material) = hide_grade(state, item) {
         return Some(Cuttable::Hides(material));
+    }
+    if is_cloth_pile(state, item) {
+        return Some(Cuttable::Cloth);
     }
     // Every facing of ServUO's `[Flipable(0xF95 … 0xF9C)]` bolt, and only for an
     // item the registry does not already call something else.
     let drawn = state.registry.get::<Drawn>(item).copied()?;
     let untyped = !state.registry.has::<ItemKind>(item);
     (untyped && (0x0F95..=0x0F9C).contains(&drawn.id.0)).then_some(Cuttable::Bolt)
+}
+
+/// Whether a pile is cloth under these scissors — what fifty-six tailoring
+/// rows already spend, what the loom's own bolt becomes, and ServUO's
+/// `UncutCloth` beside it, which no other system here reads at all.
+///
+/// Cloth carries no material grade, so unlike [`hide_grade`] there is only
+/// one axis to read rather than two: a typed pile names [`CLOTH_KIND`]
+/// outright, and an untyped one — vendor stock predating the registry, cut
+/// cloth dyed off `Hue::NONE`, or `UncutCloth`'s own two facings, which this
+/// registry has never named at all — is read back from its bare graphic,
+/// because there is no material family to look a hue up within the way hides
+/// look leather grades up.
+fn is_cloth_pile(state: &WorldState, item: EntityId) -> bool {
+    let Some(drawn) = state.registry.get::<Drawn>(item).copied() else {
+        return false;
+    };
+    match state.registry.get::<ItemKind>(item) {
+        Some(ItemKind(kind)) => *kind == CLOTH_KIND,
+        None => {
+            drawn.id == CLOTH_GRAPHIC || drawn.id == UNCUT_CLOTH_GRAPHIC || drawn.id == UNCUT_CLOTH_FLIPPED
+        }
+    }
 }
 
 /// Which leather grade a pile of hides would cut into, or `None` when the item is
@@ -234,9 +313,238 @@ fn hide_grade(state: &WorldState, item: EntityId) -> Option<MaterialId> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use openshard_state::presentation_of;
 
     use super::*;
+
+    fn world() -> WorldState {
+        let tiles = openshard_tiles::TileData::empty();
+        let mut facets = BTreeMap::new();
+        facets.insert(
+            Facet(0),
+            openshard_state::FacetState::new(
+                None,
+                None,
+                64,
+                64,
+                openshard_state::facet_rules::FacetRules::classic(Facet(0)),
+                None,
+                &tiles,
+            ),
+        );
+        WorldState::new(
+            facets,
+            Facet(0),
+            tiles,
+            // Named rather than `Default::default()`: nothing in these tests
+            // places a multi, and an empty catalogue should say so out loud.
+            openshard_uofiles::multi::Multis::of([]),
+            openshard_map::grid::Tile::new(0, 0),
+            1,
+        )
+    }
+
+    /// A cutter wearing an empty backpack. Everything nested inside a mobile's
+    /// own worn pack is unconditionally `in_reach` of that mobile
+    /// ([`in_reach`]'s "one's own worn pack is always in reach" branch), which
+    /// is what lets these tests skip building out a real position or facet.
+    fn cutter_with_backpack(state: &mut WorldState) -> (EntityId, Serial) {
+        let (cutter, cutter_serial) = state
+            .registry
+            .spawn_with_serial(SerialKind::Mobile)
+            .expect("a mobile serial");
+        state.registry.insert(
+            cutter,
+            Body {
+                id:  Graphic(0x0190),
+                hue: Hue(0),
+            },
+        );
+        // `in_reach` dereferences the cutter's own `Position` before it looks at
+        // where the tool is at all, even along the shortcut above.
+        state.registry.insert(cutter, Position(Point::new(0, 0, 0)));
+
+        let (backpack, backpack_serial) = state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .expect("a backpack serial");
+        state.registry.insert(
+            backpack,
+            Drawn {
+                id:  BACKPACK_GRAPHIC,
+                hue: Hue::NONE,
+            },
+        );
+        state.registry.insert(backpack, Container { gump: BACKPACK_GUMP });
+        establish_item_location(
+            state,
+            backpack,
+            ItemLocation::equipped(Equipped {
+                mobile: cutter_serial,
+                layer:  BACKPACK_LAYER,
+            }),
+        )
+        .expect("the backpack is worn");
+
+        (cutter, backpack_serial)
+    }
+
+    /// Drop a fresh item straight into `backpack`, at `grid` so two calls in the
+    /// same test do not collide.
+    fn place_in_pack(state: &mut WorldState, backpack: Serial, drawn: Drawn, grid: u8) -> (EntityId, Serial) {
+        let (item, serial) = state
+            .registry
+            .spawn_with_serial(SerialKind::Item)
+            .expect("an item serial");
+        state.registry.insert(item, drawn);
+        establish_item_location(
+            state,
+            item,
+            ItemLocation::contained(Contained {
+                container: backpack,
+                position:  GumpPoint::new(60, 60),
+                grid:      GridSlot(grid),
+            }),
+        )
+        .expect("the item sits in the pack");
+        (item, serial)
+    }
+
+    #[test]
+    fn cutting_typed_cloth_yields_one_bandage_per_cloth() {
+        let mut state = world();
+        let (cutter, backpack) = cutter_with_backpack(&mut state);
+        let (scissors, _) = place_in_pack(
+            &mut state,
+            backpack,
+            Drawn {
+                id:  Graphic(0x0F9F),
+                hue: Hue::NONE,
+            },
+            0,
+        );
+        let (cloth, cloth_serial) = place_in_pack(
+            &mut state,
+            backpack,
+            Drawn {
+                id:  CLOTH_GRAPHIC,
+                hue: Hue::NONE,
+            },
+            1,
+        );
+        // The registry's own shape for cloth cut from a bolt: a typed kind,
+        // undyed.
+        state.registry.insert(cloth, ItemKind(CLOTH_KIND));
+        state.registry.insert(cloth, Stackable);
+        initialize_stack_amount(&mut state, cloth, 7);
+
+        cut(&mut state, cutter, scissors, Some(cloth_serial));
+
+        assert!(
+            state.registry.entity_of(cloth_serial).is_none(),
+            "the whole cloth pile is spent, not merely emptied"
+        );
+        assert_eq!(
+            count_in_container(&state, backpack, BANDAGE_GRAPHIC),
+            7,
+            "seven cloth make exactly seven bandages, one for one"
+        );
+    }
+
+    #[test]
+    fn cutting_untyped_cloth_yields_bandages_too() {
+        // A pile with no `ItemKind` — cut cloth dyed off `Hue::NONE` — falls
+        // back to the same legacy-art read a bolt always gets. It has to cut
+        // exactly like the typed pile above, hue and all.
+        let mut state = world();
+        let (cutter, backpack) = cutter_with_backpack(&mut state);
+        let (scissors, _) = place_in_pack(
+            &mut state,
+            backpack,
+            Drawn {
+                id:  Graphic(0x0F9F),
+                hue: Hue::NONE,
+            },
+            0,
+        );
+        let dye = Hue(0x0489);
+        let (cloth, cloth_serial) = place_in_pack(
+            &mut state,
+            backpack,
+            Drawn {
+                id:  CLOTH_GRAPHIC,
+                hue: dye,
+            },
+            1,
+        );
+        state.registry.insert(cloth, Stackable);
+        initialize_stack_amount(&mut state, cloth, 3);
+
+        cut(&mut state, cutter, scissors, Some(cloth_serial));
+
+        assert!(state.registry.entity_of(cloth_serial).is_none());
+        assert_eq!(count_in_container(&state, backpack, BANDAGE_GRAPHIC), 3);
+
+        let bandages = contained_items(&state, backpack)
+            .map(|(entity, _)| entity)
+            .find(|&entity| {
+                state
+                    .registry
+                    .get::<Drawn>(entity)
+                    .is_some_and(|drawn| drawn.id == BANDAGE_GRAPHIC)
+            })
+            .expect("the bandages landed in the pack");
+        assert_eq!(
+            state.registry.get::<Drawn>(bandages).map(|drawn| drawn.hue),
+            Some(dye),
+            "ServUO's ScissorHelper carries the hue by default"
+        );
+    }
+
+    #[test]
+    fn cutting_the_weavers_uncut_cloth_yields_bandages() {
+        // `0x1767` is ServUO's real `UncutCloth` — the weaver and tailor's own
+        // vendor stock, and nothing else in this engine reads that graphic at
+        // all until this route exists. It has to cut exactly like the pile
+        // cut from a bolt, because `UncutCloth.Scissor` is ServUO's own
+        // `ScissorHelper(from, new Bandage(), 1)`, identical to `Cloth`'s.
+        let mut state = world();
+        let (cutter, backpack) = cutter_with_backpack(&mut state);
+        let (scissors, _) = place_in_pack(
+            &mut state,
+            backpack,
+            Drawn {
+                id:  Graphic(0x0F9F),
+                hue: Hue::NONE,
+            },
+            0,
+        );
+        let (cloth, cloth_serial) = place_in_pack(
+            &mut state,
+            backpack,
+            Drawn {
+                id:  UNCUT_CLOTH_GRAPHIC,
+                hue: Hue::NONE,
+            },
+            1,
+        );
+        state.registry.insert(cloth, Stackable);
+        initialize_stack_amount(&mut state, cloth, 20);
+
+        cut(&mut state, cutter, scissors, Some(cloth_serial));
+
+        assert!(
+            state.registry.entity_of(cloth_serial).is_none(),
+            "the whole pile of uncut cloth is spent"
+        );
+        assert_eq!(
+            count_in_container(&state, backpack, BANDAGE_GRAPHIC),
+            20,
+            "twenty uncut cloth make exactly twenty bandages, one for one"
+        );
+    }
 
     #[test]
     fn both_facings_of_the_scissors_are_scissors() {

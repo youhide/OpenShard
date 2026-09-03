@@ -48,8 +48,8 @@ fail runs after the point of no return.
 | Secure trade, doors and keys, mounts, chairs, ground decay | ✅ shipping | — | the crate's own module docs |
 | The item-trigger seam: the engine keeps no default behaviour for a bare item | ✅ shipping | — | [`evidence/2026-08-24-the-items-phase.md`](evidence/2026-08-24-the-items-phase.md) |
 | Semantic identity: an opaque `ItemKindId`/`MaterialId`, a generated registry, typed construction that writes `Drawn` from the projection | ✅ shipping | the four role tables are closed; the rest of the catalogue is a pilot — row 1 | [`design_item_kind.md`](design_item_kind.md) |
-| Semantic identity across a save: records and both SQL stores carry it, restore falls back to the audited legacy mapping only for a pre-`ItemKind` row | ✅ shipping | only SQLite is asserted — row 11 | the same, and [`evidence/2026-08-30-the-item-kind-migration.md`](evidence/2026-08-30-the-item-kind-migration.md) |
-| Crafting: the trades of `crafting/data/craft_systems.json`, ServUO's odds, its gump encoding, a workshop scan that reads statics as well as items | ✅ shipping | the `Def*` tables not ported — row 8 | [`design_crafting.md`](design_crafting.md) |
+| Semantic identity across a save: records and both SQL stores carry it, restore falls back to the audited legacy mapping only for a pre-`ItemKind` row | ✅ shipping | only SQLite is asserted — row 9 | the same, and [`evidence/2026-08-30-the-item-kind-migration.md`](evidence/2026-08-30-the-item-kind-migration.md) |
+| Crafting: the trades of `crafting/data/craft_systems.json`, ServUO's odds, its gump encoding, a workshop scan that reads statics as well as items | ✅ shipping | the `Def*` tables not ported — row 7 | [`design_crafting.md`](design_crafting.md) |
 | Every gate checked twice, band failure distinguished from roll failure, the RNG staged so a refusal consumes no randomness | ✅ shipping | — | the same, § 3 |
 | Atomic crafting: a withdrawal plan that reserves each pile once, output prepared before ingredients are spent | ✅ shipping | — | [`design_transactions.md`](design_transactions.md) § Withdrawal plan |
 | Catalogue availability derived on the client from a generated artifact and a compact context; the server checks only the recipe that was chosen | ✅ shipping | — | the same, and the record's A7 |
@@ -59,7 +59,7 @@ fail runs after the point of no return.
 | The material chains, end to end: ore → ingots, hides → leather, fibre → thread → bolt → cloth | ✅ shipping | — | [`evidence/2026-09-02-the-cloth-chain.md`](evidence/2026-09-02-the-cloth-chain.md) |
 | The head of those chains: a cotton field to pick, a sheep to shear | ✅ shipping | flax has no field, upstream included | [`evidence/2026-09-03-the-chains-head.md`](evidence/2026-09-03-the-chains-head.md) |
 | Inscription: sixty-four scrolls on mana and a spellbook you own, and the runebook that had no source at all | ✅ shipping | necromancy and mysticism scrolls wait on their schools; Inscription's own use button copies books, which this engine has not got | [`evidence/2026-09-03-the-inscription-trade.md`](evidence/2026-09-03-the-inscription-trade.md) |
-| Repair, Enhance, AlterItem, Resmelt, recipe scrolls, make-number/make-max, the last-ten list | ⬜ not built | each is its own system hanging off crafting — row 8 | [`evidence/2026-08-24-the-crafting-phase.md`](evidence/2026-08-24-the-crafting-phase.md) |
+| Repair, Enhance, AlterItem, Resmelt, recipe scrolls, make-number/make-max, the last-ten list | ⬜ not built | each is its own system hanging off crafting — row 7 | [`evidence/2026-08-24-the-crafting-phase.md`](evidence/2026-08-24-the-crafting-phase.md) |
 
 ## What is enforced, and by what
 
@@ -167,28 +167,21 @@ Only rows that carry an addon are gated today, because "outputs `0x14F0` implies
 typed" would be an assertion about content this engine has not reached rather
 than about a defect.
 
-**4. The same animal pays wool alive and nothing dead.** `carve`'s `Yield` has no
-wool axis at all, so a butchered sheep gives ribs and hides while a shorn one
-gives wool. ServUO's `BaseCreature.Wool` is 3 on a sheep in fleece and its corpse
-carve hands it over. One field on `Yield` and one row in `yield_of` — and unlike
-the hide grades, the body splits cleanly, because the sheep shares `0xCF` with
-nothing.
-
-**5. Flax's second facing would not spin.** `Fibre::from_graphic` knows flax as
+**4. Flax's second facing would not spin.** `Fibre::from_graphic` knows flax as
 `0x1A9C` alone, and ServUO's `FarmableFlax.GetCropObject` draws the picked pile
 at random between `0x1A9C` and `0x1A9D`. Harmless while nothing plants flax —
 which is upstream's own state — and a pile a player cannot spin the day
-something does. The fix is the alias the hides already carry, and it belongs in
-the same commit as the field, not before it.
+something does. The fix is the alias the hides already carry; it used to wait on
+the wool field beside it, and that field has landed, so it now stands on its own.
 
-**6. The house item catalogue emits rows that cannot be built.** For metal, wood
+**5. The house item catalogue emits rows that cannot be built.** For metal, wood
 and leather it emits a material-less semantic identity beside every concrete
 material; that identity is not constructible and F1 filters it out. Search should
 model "any material" as a selector distinct from an exact identity, or stop
 emitting the invalid exact row — the current answer is a filter at one consumer,
 which is the shape that goes wrong when a second consumer arrives.
 
-**7. A restart in the middle of a craft ends it silently.** The in-flight
+**6. A restart in the middle of a craft ends it silently.** The in-flight
 `Crafting` component and the per-player gump context are deliberately not saved,
 and the loss is benign — nothing is consumed before `complete`. What is not
 benign is that nobody is told: the player watches a craft that will never
@@ -197,7 +190,7 @@ rule rather than an accident — a timer whose cost is already paid is saved
 (`LoomPhase`), a timer whose cost is not is dropped and its art stamped back on
 restore.
 
-**8. The trades ServUO has and this shard has not.** Repair, Enhance, AlterItem,
+**7. The trades ServUO has and this shard has not.** Repair, Enhance, AlterItem,
 Resmelt (item back to ingots; *ore* smelting is in), recipe scrolls,
 make-number/make-max and the last-ten list — the last of which wants a decision
 about saving UI state, because ServUO serializes it per player. The `Def*` tables
@@ -205,13 +198,7 @@ still unported are data the generator can emit when they are wanted. Read
 `crafting/data/` for which trades exist rather than a sentence that names them,
 because that list moves and a sentence does not.
 
-**9. Cloth does not become bandages.** ServUO's `Cloth.Scissor` and
-`UncutCloth.Scissor` are both one bandage per cloth, and `items/src/cut.rs` is
-already that seam. Bandages reach a player from a vendor or a corpse today, so
-this is a missing *route* rather than an unreachable item — which is why it was
-left out of the cloth chain rather than folded into it.
-
-**10. Two hand-kept tool tables must agree, and nothing but a test says so.**
+**8. Two hand-kept tool tables must agree, and nothing but a test says so.**
 `craft_tool` by graphic and `craft_tool_for_kind` by kind, in
 `state/src/craft.rs`, and the same pairing in `harvest.rs`, `weapon.rs` and
 `armor.rs`. What says so is now a sweep per table rather than a spot check —
@@ -221,13 +208,13 @@ they checked, because their loop body is conditional. Each pair disappears with
 row 1, so this is a note for whoever adds the next trade rather than a defect to
 fix on its own.
 
-**11. Only SQLite is asserted across a save.** Both directions of the semantic
+**9. Only SQLite is asserted across a save.** Both directions of the semantic
 identity round trip have fixtures; PostgreSQL and the snapshot path go through
 the same audited projection with none of it asserted. It is the same
 missing-CI-server shape as [`server/`](../server/README.md) row 5 and is worth
 doing in that session.
 
-**12. The display-art sweep is done once, by hand, and cannot be redone by the
+**10. The display-art sweep is done once, by hand, and cannot be redone by the
 tree.** All 1,082 `GenericBuyInfo` rows were compared against their type's
 constructor, its `[FlipableAttribute]` and `tiledata`'s own name for the tile:
 fourteen shelf lines carried the shop window's picture instead of the item, and
@@ -244,7 +231,7 @@ also checked the other way — that a shipped art is one our tables can read —
 food, containers and tools have had no such pass, and that one wants row 1's
 catalogue rather than another sweep.
 
-**13. Smaller, and each is written where it lives.** `environment::is_mill`
+**11. Smaller, and each is written where it lives.** `environment::is_mill`
 lists `0x1295` and `0x129F`, which are almost certainly ServUO's own misprints
 for `0x1925`/`0x192F` — left verbatim on purpose, with a comment warning against
 a silent "fix" that would be parity drift, because upstream parity is the point
