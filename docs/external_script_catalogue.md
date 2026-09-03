@@ -47,7 +47,7 @@ then express and test it in OpenShard's data and Rust model.
 |---|---|---|
 | [SphereServer Scripts-X](https://github.com/Sphereserver/Scripts-X) | [World decoration](https://github.com/Sphereserver/Scripts-X/tree/main/functions/worldgen/decoration), map-specific spawns, the region-creator dialog, and `static → multi`/centred-multi export tools.  Strong sources for making map content editable and reproducible. | Apache-2.0; still treat it as an observed content pipeline, not an architecture template. |
 | [SphereServer Scripts](https://github.com/Sphereserver/Scripts) | The older official pack: `systems/`, `add-on/`, maps, NPCs, speech, stones and web/admin material.  Good for historical feature discovery and comparing behaviour against Scripts-X. | No repository licence declared; research only. |
-| [POL ModernDistro](https://github.com/polserver/ModernDistro) | Packages for boats, deeds, decorations, spawns, commands and gumps.  Its boat package is especially useful as an independent implementation to compare with `docs/boats.md`. | No repository licence declared; research only. |
+| [POL ModernDistro](https://github.com/polserver/ModernDistro) | Packages for boats, deeds, decorations, spawns, commands and gumps.  Its boat package is especially useful as an independent implementation to compare with `docs/housing/design_boats.md`. | No repository licence declared; research only. |
 | [RunUO custom scripts](https://github.com/felladrin/runuo-custom-scripts) | Small, separated gameplay additions with installation notes: a good source of feature boundaries and admin/player UX. | GPL-2.0: observations only. |
 
 ## Verified custom gump leads

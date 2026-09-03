@@ -200,7 +200,7 @@ answers *does something block this step*, *does a body fit here*, *is sight
 blocked* — plus **surfaces**, which is the one thing a mask cannot express:
 [`LiveTerrain::aboard`](../../../crates/server/state/src/obstruct.rs#L183)
 resolves a step onto a moored ship's deck over water the map calls unstandable.
-`docs/boats.md`'s B3 already argued it — the hull stays out of `Obstructions`
+`docs/housing/design_boats.md`'s B3 already argued it — the hull stays out of `Obstructions`
 *because an index that only subtracts cannot say "there is somewhere to stand
 here"*.
 
