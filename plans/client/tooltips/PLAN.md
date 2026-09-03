@@ -1,8 +1,17 @@
 # The tooltip becomes a property card
 
-What the client draws today is what the first paragraph below calls the thing to
-replace: an unframed stack of text at the cursor, from an `App::hover_tooltip`
-that returns `Vec<String>`. The protocol half is built and is not in scope here —
+> **Built on 2026-09-03.** Everything below is what shipped, except where
+> [`docs/client/evidence/2026-09-03-the-property-card.md`](../../../docs/client/evidence/2026-09-03-the-property-card.md)
+> says otherwise — it holds the four things this page asks for that the client
+> deliberately does not do, the largest being that the fill is opaque because
+> the gump pass does not blend. The page is kept as written rather than rewritten
+> into the past tense: it is the argument the code was built from, and the
+> evidence file is the difference.
+
+What the client drew before this landed is what the first paragraph below calls
+the thing to replace: an unframed stack of text at the cursor, from an
+`App::hover_tooltip` that returns `Vec<String>`. The protocol half is built and
+is not in scope here —
 `0xDC` announces a revision, `0xD6` supplies the list, `Tooltips` deduplicates by
 `(Serial, revision)` and `WorldView::tooltips` is the cache. What is not built is
 everything between that cache and the screen.

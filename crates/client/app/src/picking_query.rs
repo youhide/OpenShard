@@ -20,6 +20,7 @@ use openshard_client_net::action::{
     GumpReply,
     Outgoing,
 };
+use openshard_client_net::view::ItemPosition;
 use openshard_client_render::bench::{
     self,
     Metrics,
@@ -47,6 +48,10 @@ use openshard_movement::{
     Footing,
     PLAYER_HEIGHT,
     arrival_z,
+};
+use openshard_protocol::items::{
+    ItemAmount,
+    WorldItemPayload,
 };
 use openshard_protocol::mobile::Notoriety;
 use openshard_protocol::serial::Serial;
@@ -1333,7 +1338,20 @@ impl App {
     /// window, and in the world a creature beats an item. The map's own
     /// furniture is deliberately absent — a static is not the shard's object,
     /// has no serial, and there is nothing to ask about.
+    ///
+    /// **A pointer that has left the window is asking about nothing at all**,
+    /// window layer included. A bag's pane picks its icons out of
+    /// [`input::Input::pointer_gump`](crate::input::Input::pointer_gump), which
+    /// keeps its last value when the pointer goes — so without this the card for
+    /// whichever icon the pointer left over would stand until it came back.
+    /// [`App::world_owns_pointer`] says the same thing for the world half and
+    /// one thing more, which is why the window half asks the narrower question
+    /// here rather than borrowing that one: an egui panel over a bag does not
+    /// stop the bag being hovered.
     fn tooltip_subject(&self) -> Option<Serial> {
+        if !self.input.pointer_inside {
+            return None;
+        }
         if let Some(item) = self.hovered_container_item() {
             return Some(item);
         }
@@ -1350,8 +1368,8 @@ impl App {
         self.picking.hover.item.map(|item| item.serial)
     }
 
-    /// The tooltip to draw at the cursor this frame, and the request that fills
-    /// it in if this client does not hold one yet.
+    /// The property card to draw at the cursor this frame, and the request that
+    /// fills it in if this client does not hold one yet.
     ///
     /// Asking here rather than when the `0xDC` arrived is the whole shape of it:
     /// the shard announces a revision for every object it draws, and turning
@@ -1360,26 +1378,92 @@ impl App {
     /// and [`tooltips::Tooltips`] is what stops it asking sixty times a second
     /// while the answer is in flight.
     ///
-    /// Empty rather than a placeholder when nothing is held yet: the first hover
-    /// over a fresh object draws no box for one round trip, which is what every
-    /// reference client does too.
-    pub(crate) fn hover_tooltip(&mut self) -> Vec<String> {
-        let Some(serial) = self.tooltip_subject() else {
-            return Vec::new();
+    /// **The one place that knows both the pick order and the wire**, which is
+    /// why it is here and not in the pass that draws: deciding what the pointer
+    /// is asking about needs the view, and answering it may put a `0xD6` on the
+    /// wire. What comes back is a
+    /// [`tooltips::Presentation`] — measured and placed by
+    /// [`openshard_client_render::tooltip`], drawn by `render_passes`, neither
+    /// of which reads the world.
+    ///
+    /// `None` is no object under the pointer; a `Some` with no lines is an
+    /// object that says nothing, which is what a fresh hover looks like for the
+    /// one round trip before its list lands and what a client with no cliloc
+    /// table looks like forever. Neither draws a card — an empty frame at the
+    /// cursor would read as "this has no name" — and the two are kept apart
+    /// because only one of them is waiting for anything.
+    pub(crate) fn hover_tooltip(&mut self) -> Option<tooltips::Presentation> {
+        // Something on the cursor closes the card outright: the dragged icon is
+        // drawn at the pointer, and a card under the player's own hand describes
+        // whatever the hand happens to be passing over.
+        let subject = match self.windows.hand.is_some() {
+            true => None,
+            false => self.tooltip_subject(),
         };
-        let held = self
+        let held = subject.and_then(|serial| {
+            self.world
+                .authoritative
+                .view
+                .as_ref()
+                .and_then(|view| view.tooltips.get(&serial))
+        });
+        if let Some(serial) = subject {
+            if self.tooltips.should_ask(serial, held) {
+                if let Some(link) = self.world.shard.link() {
+                    link.query_properties(vec![serial]);
+                }
+            }
+        }
+        let lines = held
+            .map(|held| tooltips::lines(&held.entries, self.resources.cliloc.as_ref()))
+            .unwrap_or_default();
+        let shown = self.tooltips.track(
+            subject,
+            !lines.is_empty(),
+            self.input.pointer_gump,
+            Instant::now(),
+        )?;
+        let serial = subject.expect("a shown card has the subject it was tracked for");
+        Some(tooltips::Presentation {
+            serial,
+            graphic: self.tooltip_icon(serial),
+            lines,
+            phase: shown.phase,
+            cursor: shown.cursor,
+        })
+    }
+
+    /// The art to draw beside a card's title, or `None` for something with no
+    /// picture of its own.
+    ///
+    /// A mobile has none — its body is an animation frame rather than a static,
+    /// and a paperdoll is not an icon — and neither has an item this client has
+    /// been told a serial for but never a graphic. The pile's *displayed*
+    /// graphic and not its own, so a card for a heap of gold shows the heap the
+    /// bag shows and not a single coin.
+    fn tooltip_icon(&self, serial: Serial) -> Option<Graphic> {
+        let entity = self
             .world
             .authoritative
             .view
-            .as_ref()
-            .and_then(|view| view.tooltips.get(&serial));
-        if self.tooltips.should_ask(serial, held) {
-            if let Some(link) = self.world.shard.link() {
-                link.query_properties(vec![serial]);
-            }
-        }
-        held.map(|held| tooltips::lines(&held.entries, self.resources.cliloc.as_ref()))
-            .unwrap_or_default()
+            .as_ref()?
+            .item_catalogue
+            .get(serial)?;
+        let amount = match entity.position {
+            ItemPosition::Ground {
+                payload: WorldItemPayload::Stack(amount),
+                ..
+            } => amount,
+            ItemPosition::Contained { amount, .. } => amount,
+            // A corpse and a worn item are each one thing; the pile art below
+            // only ever differs for a stack, so this is the count and not a
+            // stand-in for one.
+            ItemPosition::Ground { .. } | ItemPosition::Equipped { .. } => ItemAmount(1),
+        };
+        Some(openshard_client_render::items::displayed_graphic(
+            entity.graphic,
+            amount,
+        ))
     }
 
     /// `pick` is what [`items::pick`], [`mobiles::pick`] and

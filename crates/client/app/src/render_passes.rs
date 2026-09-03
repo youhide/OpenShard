@@ -164,11 +164,12 @@ fn draw_radar_view(
 /// `&mut self`. Does nothing when there is no gump file or no pass to draw
 /// through — an offline run with neither.
 ///
-/// `hover` is the shard's tooltip for whatever the pointer is on, first line
-/// first, or empty. Handed in already resolved rather than worked out here:
-/// deciding *what* the pointer is asking about needs the pick order and the
-/// view, and answering it may put a `0xD6` on the wire — see
-/// `App::hover_tooltip`, and this function is the part that only draws.
+/// `hover` is the shard's property card for whatever the pointer is on, or
+/// `None` for a pointer on nothing. Handed in already resolved, placed and
+/// timed rather than worked out here: deciding *what* the pointer is asking
+/// about needs the pick order and the view, and answering it may put a `0xD6`
+/// on the wire — see `App::hover_tooltip`, and this function is the part that
+/// only draws. See [`draw_property_card`] for the pass itself.
 ///
 /// `scale` is how big every window here is drawn, from the desk — see
 /// [`crate::desk::WindowScale`]. It reaches the surface through
@@ -186,7 +187,7 @@ pub(crate) fn draw_gump_windows(
     radar_cache: &RadarCache,
     radar_views: &[(WindowSubject, RadarView, RadarLod)],
     cursor: gump_art::GumpPixel,
-    hover: &[String],
+    hover: Option<&crate::tooltips::Presentation>,
     scale: crate::desk::WindowScale,
     status_form: openshard_client_render::status::Form,
     fonts: crate::desk::FontSizes,
@@ -428,6 +429,27 @@ pub(crate) fn draw_gump_windows(
                 )
                 .hued(drag.item.hue),
             );
+        }
+        // And the icon on the property card, packed here with the dragged
+        // item's above rather than where the card is drawn: the atlas's new
+        // rows are uploaded on the next line, so a picture grown after that is
+        // a picture whose texels do not reach the GPU until the frame after —
+        // an icon that flashes empty the first time each object is hovered.
+        if let Some((serial, graphic)) = hover.and_then(|hover| Some((hover.serial, hover.graphic?))) {
+            let art_files = gump_art::ArtFiles {
+                gumps: files,
+                items: &resources.art,
+            };
+            if let Err(error) = resources
+                .gump_atlas
+                .add(art_files, [gump_art::GumpArt::Item(graphic)])
+            {
+                // Named by the object rather than only by the failure, the same
+                // as the window sweep above: an icon that will not pack is a
+                // fact about one thing in the world, and the serial is what
+                // finds it again.
+                eprintln!("packing property card icon for {serial:?}: {error}");
+            }
         }
         // What the pointer is tested against from here on, and the atlas it
         // is tested in is the one just grown for it: the hit test and the
@@ -739,58 +761,20 @@ pub(crate) fn draw_gump_windows(
                 );
             }
         }
-        // The shard's tooltip for whatever the pointer is on, last of all so it
-        // stands over every window and over the dragged item both. Its own
-        // layer and not one of the windows': the object it describes may be in
-        // the world behind them, and a tooltip filed under a window would be
+        // The shard's property card for whatever the pointer is on, last of all
+        // so it stands over every window and over the dragged item both. Its
+        // own layer and not one of the windows': the object it describes may be
+        // in the world behind them, and a card filed under a window would be
         // cut off with that window's frame.
-        //
-        // Under the cursor and offset down-right by the same step the container
-        // hover uses, so a pointer never sits on top of the first line it is
-        // asking about.
-        if !hover.is_empty() {
-            let step = tooltip_line_step(
-                &resources.font_atlas,
-                ttf_active.then_some(fonts.tooltip),
-                bitmap_font_override.unwrap_or(TOOLTIP_FONT),
-                fonts.bitmap_tooltip_scale(),
-            );
-            let labels: Vec<_> = hover
-                .iter()
-                .enumerate()
-                .map(|(row, line)| {
-                    (
-                        openshard_client_render::text::GumpLabel {
-                            at:   cursor.offset(gump_art::GumpPixel::new(
-                                TOOLTIP_OFFSET.x,
-                                TOOLTIP_OFFSET.y + step * row as i32,
-                            )),
-                            text: line.as_str(),
-                            font: TOOLTIP_FONT,
-                            hue:  openshard_protocol::wire::Hue::LABEL,
-                            clip: None,
-                        },
-                        None,
-                    )
-                })
-                .collect();
-            // At the cursor and **not magnified**: a tooltip is not part of any
-            // window, so `desk::WindowScale` has nothing to say about it — the
-            // lines are already laid out in gump pixels around the pointer, and
-            // the display's density is the only thing left to apply.
-            window_text(
-                WindowText {
-                    labels: &labels,
-                    at: gump_art::GumpPixel::new(0, 0),
-                    magnify: 1.0,
-                    density: frame.scale,
-                    size: fonts.tooltip,
-                    bitmap_scale: fonts.bitmap_tooltip_scale(),
-                    font_magnify: 1.0,
-                    bitmap_font_override,
-                },
-                ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
-                &resources.font_atlas,
+        if let Some(hover) = hover {
+            draw_property_card(
+                resources,
+                hover,
+                fonts,
+                ttf_active,
+                bitmap_font_override,
+                shell,
+                frame,
                 window,
                 encoder,
                 view,
@@ -990,41 +974,133 @@ fn window_text(
         );
 }
 
-/// The face a tooltip is drawn in — `fonts.mul`'s face 1, the same one every
-/// other label in this client uses.
-const TOOLTIP_FONT: openshard_protocol::speech::Font = openshard_protocol::speech::Font(1);
-
-/// Where the first line sits relative to the pointer, in gump pixels. The same
-/// step [`container_hover_text`]'s label uses, so the two hovers read as one
-/// behaviour rather than two that happen to both be near the cursor.
-const TOOLTIP_OFFSET: gump_art::GumpPixel = gump_art::GumpPixel { x: 14, y: 18 };
-
-/// The vertical step between two tooltip lines, in gump pixels.
+/// Measure, place and draw one object's property card.
 ///
-/// Read off the face rather than written down: `fonts.mul` holds ten faces of
-/// different heights, and a number fixed here would be wrong the moment a
-/// tooltip was drawn in another one. A capital `M`'s actual *ink* height is
-/// the measure — transparent padding in a glyph cell does not count — plus two
-/// pixels so consecutive lines do not touch. The fallback is only reachable
-/// with a font atlas that packed no `M`, which is a broken `fonts.mul` rather
-/// than a case to be right about.
-fn tooltip_line_step(
-    fonts: &openshard_client_render::atlas::FontAtlas,
-    truetype: Option<openshard_client_render::atlas::TextSize>,
-    bitmap_font: openshard_protocol::speech::Font,
-    bitmap_scale: f32,
-) -> i32 {
-    // A TrueType face has a requested size, and the step is that size plus the
-    // same two pixels of air. Bitmap faces have no continuous size, so their
-    // real `M` ink below is the only honest measure.
-    if let Some(size) = truetype {
-        return size.pixels().round() as i32 + 2;
-    }
-    (fonts
-        .glyph_ink_height(bitmap_font, b'M')
-        .map_or(16, |height| i32::from(height) + 2) as f32
-        * bitmap_scale)
-        .round() as i32
+/// **Only the drawing half.** Which object the card is about, whether it is
+/// open, and where the pointer was when it opened are all
+/// `App::hover_tooltip`'s, and how big the card is and where it goes are
+/// [`openshard_client_render::tooltip`]'s. What is left here is the three
+/// passes the answer travels through, in painter's order: the frame and the
+/// fill, the item's icon, and the text on top.
+///
+/// A free function for [`draw_gump_windows`]' own reason — the two things it
+/// really touches, the atlas and the surface, are named in the signature
+/// instead of reached through `&mut self`.
+///
+/// Nothing is magnified. A card belongs to no window, so `desk::WindowScale`
+/// has nothing to say about it: the layout is already in gump pixels around the
+/// pointer, and the display's own density is the only thing left for the pass
+/// to apply.
+#[allow(clippy::too_many_arguments)]
+fn draw_property_card(
+    resources: &resources::Resources,
+    hover: &crate::tooltips::Presentation,
+    fonts: crate::desk::FontSizes,
+    ttf_active: bool,
+    bitmap_font_override: Option<openshard_protocol::speech::Font>,
+    shell: Option<&shell::Shell>,
+    frame: gump_art::Frame<'_>,
+    window: &mut Screen,
+    encoder: &mut wgpu::CommandEncoder,
+    view: &wgpu::TextureView,
+) {
+    // The face's two roles, with the F1 classic-face override applied once
+    // here: the card measures in whatever face it will be drawn in, and a
+    // measurement taken in the other one would wrap the text to the wrong
+    // width.
+    let faces = match bitmap_font_override {
+        Some(font) => {
+            openshard_client_render::tooltip::Faces {
+                title: font,
+                body:  font,
+            }
+        }
+        None => openshard_client_render::tooltip::Faces::client(),
+    };
+    // The world's own edges rather than the window's: a docked panel takes its
+    // space before the world is drawn, and a card anchored to the surface would
+    // be placed underneath one.
+    let (origin, canvas) = crate::chat::chat_canvas(shell, window, frame.scale);
+    let surface = openshard_client_render::tooltip::Surface {
+        at:     origin,
+        width:  canvas.x,
+        height: canvas.y,
+    };
+    let content = openshard_client_render::tooltip::Content {
+        lines:   &hover.lines,
+        graphic: hover.graphic,
+        phase:   hover.phase,
+    };
+    // A TrueType card's glyphs have to be in the atlas *before* it is measured:
+    // an unpacked glyph measures zero, so a card sized first would be laid out
+    // as if its text were blank. Packed at exactly the size `window_text` will
+    // ask for below — `Measure::packed` is that number, so the two cannot
+    // disagree.
+    let measure = match (
+        ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
+        window.ttf_atlas.as_mut(),
+    ) {
+        (Some(font), Some(atlas)) => {
+            let size = openshard_client_render::tooltip::Measure::packed(fonts.tooltip, frame.scale);
+            if let Err(error) =
+                atlas.add_or_reset(font, size, hover.lines.iter().flat_map(|line| line.chars()))
+            {
+                // `eprintln!` and a card drawn anyway, the same corner every
+                // other atlas failure in this file cuts.
+                eprintln!("packing ttf glyphs: {error}");
+            }
+            openshard_client_render::tooltip::Measure::TrueType {
+                atlas,
+                size: fonts.tooltip,
+                density: frame.scale,
+            }
+        }
+        _ => {
+            openshard_client_render::tooltip::Measure::Bitmap {
+                atlas:   &resources.font_atlas,
+                magnify: fonts.bitmap_tooltip_scale(),
+            }
+        }
+    };
+    let card = openshard_client_render::tooltip::card(
+        content,
+        faces,
+        &measure,
+        &resources.gump_atlas,
+        hover.cursor,
+        surface,
+    );
+    let Some(card) = card else {
+        return;
+    };
+    // The frame, the fill and the icon in one pass and one list: this pass has
+    // no depth, so the order they are listed in is the order they cover each
+    // other in.
+    let mut art = card.plates();
+    art.extend(gump_art::collect(card.icon.as_slice(), &resources.gump_atlas));
+    window
+        .gump_pass
+        .as_mut()
+        .expect("gump assets have their matching render pass")
+        .render_layer(&window.device, &window.queue, encoder, frame, &art);
+    let labels: Vec<_> = card.labels().into_iter().map(|label| (label, None)).collect();
+    window_text(
+        WindowText {
+            labels: &labels,
+            at: gump_art::GumpPixel::new(0, 0),
+            magnify: 1.0,
+            density: frame.scale,
+            size: fonts.tooltip,
+            bitmap_scale: fonts.bitmap_tooltip_scale(),
+            font_magnify: 1.0,
+            bitmap_font_override,
+        },
+        ttf_active.then_some(resources.ttf_font.as_ref()).flatten(),
+        &resources.font_atlas,
+        window,
+        encoder,
+        view,
+    );
 }
 
 /// Records every world-space pass into `encoder`, from the ground up to the

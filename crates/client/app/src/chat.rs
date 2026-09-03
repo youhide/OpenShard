@@ -235,7 +235,17 @@ pub(crate) fn canvas_height(surface_height: u32, scale: f32) -> i32 {
 /// would put it underneath a left-docked tool panel even though the terrain has
 /// already been pushed aside.  Keep its origin and usable size together so the
 /// rendering and hit-test paths cannot make different choices about that edge.
-fn chat_canvas(shell: Option<&shell::Shell>, window: &Screen, scale: f32) -> (GumpPixel, GumpPixel) {
+///
+/// The chat is no longer its only reader: a property card is placed against the
+/// same edges for the same reason, and the two ask this rather than each
+/// working out where the world ends — see
+/// [`openshard_client_render::tooltip::Surface`]. The name stays the chat's
+/// because the rule is: it is the box the HUD's own furniture lives in.
+pub(crate) fn chat_canvas(
+    shell: Option<&shell::Shell>,
+    window: &Screen,
+    scale: f32,
+) -> (GumpPixel, GumpPixel) {
     let Some(shell) = shell else {
         return (
             GumpPixel::new(0, 0),

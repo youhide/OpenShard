@@ -68,6 +68,7 @@ network service on port 2593 — under the stock client, or ClassicUO.
 | Gump art, `0xB0` dialogs, containers, the paperdoll and its buttons, the skill sheet, the status frame | ✅ shipping | `{ checkertrans }`, `{ html }`, four buttons with no packet, a party roster that can only say a serial, and no window remembers where it was — rows 9, 14, 15, 21 | [`design_windows.md`](design_windows.md) |
 | The shop | 🟡 a shelf, not a shop | no price column, no quantity, no Buy button, and `Link::buy`/`sell` have no caller — row 4 | [`evidence/2026-08-25-protocol-and-newtype-findings.md`](evidence/2026-08-25-protocol-and-newtype-findings.md) |
 | Picking: ground items against the picture, the double click, the highlight | ✅ shipping | the double click asks its own picks and can use what the frame drew a wall in front of — row 11 | [`design_picking.md`](design_picking.md) |
+| The hover's property card: one framed, wrapped, anchored card for an item, a bag's icon, a doll's or a mobile's `0xD6` | ✅ shipping | the fill is opaque because the gump pass does not blend; a list taller than 60% of the surface is drawn too tall rather than cut, and wants the pinned inspect pane | [`evidence/2026-09-03-the-property-card.md`](evidence/2026-09-03-the-property-card.md) |
 | Picking a mobile | ⬜ | four of its five decisions are already taken by `items::pick` | [`plans/client/mobile_picking/PLAN.md`](../../plans/client/mobile_picking/PLAN.md) |
 | Sound and music out of the player's own archive, two remembered gains | ✅ shipping | rows 16 and 17 | [`design_audio.md`](design_audio.md) |
 | The two effect packets | ⬜ | `0x70` and `0xC0` have no decode arm — row 6 | the same |
@@ -354,12 +355,14 @@ most likely to want:
 - [`evidence/2026-08-14-client-jank.md`](evidence/2026-08-14-client-jank.md) —
   what release actually costs, and the twenty-frame debug build that was a
   `Cargo.toml` profile rather than an algorithm.
-- [`evidence/2026-08-15-tooltips.md`](evidence/2026-08-15-tooltips.md),
-  [`evidence/2026-08-15-the-channel-selector.md`](evidence/2026-08-15-the-channel-selector.md),
+- [`evidence/2026-08-15-tooltips.md`](evidence/2026-08-15-tooltips.md) and its
+  sequel [`evidence/2026-09-03-the-property-card.md`](evidence/2026-09-03-the-property-card.md)
+  — the wire half, then the card that was drawn on top of it.
+- [`evidence/2026-08-15-the-channel-selector.md`](evidence/2026-08-15-the-channel-selector.md),
   [`evidence/2026-08-17-the-amount-picker.md`](evidence/2026-08-17-the-amount-picker.md),
   [`evidence/2026-08-17-a-wheel-notch-out-of-the-shop-list.md`](evidence/2026-08-17-a-wheel-notch-out-of-the-shop-list.md),
   [`evidence/2026-09-01-a-click-that-cannot-be-routed.md`](evidence/2026-09-01-a-click-that-cannot-be-routed.md)
-  — five features, each with what is still not right about it.
+  — four features, each with what is still not right about it.
 - [`evidence/2026-08-15-one-owner-for-a-window.md`](evidence/2026-08-15-one-owner-for-a-window.md),
   [`evidence/2026-08-14-lod1-rollout.md`](evidence/2026-08-14-lod1-rollout.md),
   [`evidence/2026-08-12-client-architecture.md`](evidence/2026-08-12-client-architecture.md)
@@ -386,10 +389,11 @@ most likely to want:
 [`plans/client/sessions`](../../plans/client/sessions/PLAN.md),
 [`mobile_picking`](../../plans/client/mobile_picking/PLAN.md),
 [`camera`](../../plans/client/camera/PLAN.md),
-[`lod`](../../plans/client/lod/PLAN.md),
-[`tooltips`](../../plans/client/tooltips/PLAN.md) — the hover becoming one
-framed property card instead of a stack of strings at the cursor; it arrived
-here with the `items` migration, which is where it had been filed.
+[`lod`](../../plans/client/lod/PLAN.md).
+[`tooltips`](../../plans/client/tooltips/PLAN.md) is **built** as of 2026-09-03 —
+the hover is one framed property card instead of a stack of strings at the
+cursor; what it deliberately left undone is
+[`evidence/2026-09-03-the-property-card.md`](evidence/2026-09-03-the-property-card.md).
 
 **Neighbours.** [`render/README.md`](../render/README.md) is what draws a lit
 frame; [`world/README.md`](../world/README.md) owns the map, the search over it,

@@ -1344,7 +1344,7 @@ pub fn run<D: Dial + Send + 'static>(
             stack_pass:     None,
             keyboard:       None,
         },
-        tooltips: tooltips::Tooltips::default(),
+        tooltips: tooltips::Tooltips::new(),
         chat: Chat::default(),
         scope: Scope::new(f1.map_or(SCOPE_SPAN, desk::F1Settings::scope_span)),
         frames: frames::Frames::new(FRAMES_SPAN),

@@ -90,4 +90,5 @@ pub mod statics;
 pub mod status;
 pub mod text;
 pub mod tonemap;
+pub mod tooltip;
 pub mod vendor;

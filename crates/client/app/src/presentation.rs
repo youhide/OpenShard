@@ -2900,7 +2900,7 @@ impl App {
             &self.radar_cache,
             &radar_views,
             self.input.pointer_gump,
-            &hover,
+            hover.as_ref(),
             window_scale,
             status_form,
             fonts,
