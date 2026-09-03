@@ -54,7 +54,7 @@ answer: where the code lives. A topic is a subsystem with a canon of its own.
 | [`world/`](world/README.md) | `server/world`, `common/movement` (search), `common/map`, `common/basemap`, `common/tiles`, `common/uofiles` | **migrated** — the consolidation it replaces is in [`archive/world/`](archive/world/README.md) |
 | [`items/`](items/README.md) | `server/items`, `server/crafting` | **migrated** — two living plans and a reader's map split into three design documents and eight records; nothing archived, because none of it was superseded |
 | [`combat/`](combat/README.md) | `server/combat`, `skills`, `magic` | **migrated** — three living plans and three roadmap phases split into five design documents and seven records; nothing archived, because none of it was superseded |
-| `housing/` | `server/housing`, boats | not migrated |
+| [`housing/`](housing/README.md) | `server/housing`, `server/boats` | **migrated** — three living plans and two roadmap phases split into three design documents and five records, with three plans outside `docs/`; nothing archived, because none of it was superseded |
 | `npc/` | `server/npc`, `ai`, `quests`, `guilds`, chat | not migrated |
 | [`client/`](client/README.md) | `client/net`, `client/model`, `client/app` | **migrated** — the split of a 4,506-line document into roles; nothing of it is archived, because none of it was superseded |
 | [`render/`](render/README.md) | `client/render`, `client/artscan`, `client/pathtrace` | **migrated** — twelve superseded documents in [`archive/render/`](archive/render/README.md) |

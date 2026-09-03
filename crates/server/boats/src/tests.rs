@@ -113,9 +113,9 @@ fn sea() -> Scene {
     // that, the hull refusing again — is unchanged by the height.
     //
     // What a real sloop's deck stands at over real water is a separate question
-    // and an open one, filed in `docs/boats.md`: a UO player boards over the
-    // plank, whose `OnMoveOver` teleports them aboard, and this shard has no
-    // plank yet.
+    // and an open one, ranked in `docs/housing/README.md`: a UO player boards
+    // over the plank, whose `OnMoveOver` teleports them aboard, and this shard
+    // has no plank yet.
     scene.art(HULL, TileFlags::WALL | TileFlags::BLOCK, 10);
     scene.art(DECK, TileFlags::PLATFORM, 2);
     scene

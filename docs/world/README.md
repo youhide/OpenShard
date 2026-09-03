@@ -339,6 +339,5 @@ consolidation this page replaces.
 [`design_occluders.md`](../render/design_occluders.md) and
 [`design_footprints.md`](../render/design_footprints.md) are static geometry for
 the lighting rebuild and belong to that document set even though they read the
-same statics. [`housing.md`](../housing.md),
-[`customisation.md`](../customisation.md) and [`boats.md`](../boats.md) are what
-gets laid *over* the map.
+same statics. [`housing/`](../housing/README.md) — houses, designed houses and
+boats — is what gets laid *over* the map.

@@ -571,7 +571,7 @@ terrain at all: [`FacetState`](../../../crates/server/state/src/runtime.rs#L386)
 The field used to be a `Box<dyn Terrain + Send + Sync>` whose doc said the crate
 *"sits below the client-file parsers"* — untrue since `openshard-state` gained
 its `openshard-uofiles` dependency for
-[`customisation.md`](../../customisation.md)'s C1. What the box was really buying is
+[`customisation.md`](../../housing/design_customisation.md)'s C1. What the box was really buying is
 in [the `Arc` section](#one-arc-is-gone-and-one-is-not-and-the-difference-is-the-box):
 a type with no lifetime, at the price of an `AsRef` bound, an `Arc`, and a
 trait object in the middle of every step.

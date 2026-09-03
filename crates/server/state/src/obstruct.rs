@@ -533,7 +533,7 @@ mod tests {
     /// *walking* aboard from the shore at z 0. The fixture used to put the
     /// surface at 5 and pass, because `walk::aboard` applied no climb limit at
     /// all; it applies the same one `climbed` does now. See `walk.rs`'s
-    /// `boarding_from_open_water_obeys_the_climb_limit`, and `docs/boats.md`
+    /// `boarding_from_open_water_obeys_the_climb_limit`, and `docs/housing/design_boats.md`
     /// for how a UO player really boards — over the plank, which teleports
     /// rather than steps.
     fn a_ship_at(scene: &Scene, boat: EntityId, x: u16, y: u16) -> Boats {
@@ -618,7 +618,7 @@ mod tests {
     /// **B3's owed measurement, not an assurance.**
     ///
     /// The boat consultation runs on every step by every mobile, and the
-    /// diagonal rule re-enters it twice more. `docs/boats.md` asked the phase
+    /// diagonal rule re-enters it twice more. `docs/housing/design_boats.md` asked the phase
     /// that landed it to measure rather than promise, so this walks the same
     /// hundred thousand steps over an empty harbour and over one with a ship in
     /// it and prints both.

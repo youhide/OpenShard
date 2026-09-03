@@ -4,7 +4,7 @@
 //! taken by somebody who played for a week two years ago, and no way for anyone
 //! else to build. That is what this is for, and it is also the one part of
 //! housing that can destroy a player's property — which is why the crate is not
-//! a later refinement but the *deletion rule* itself. See `docs/housing.md`'s D8.
+//! a later refinement but the *deletion rule* itself. See `docs/housing/design_house.md`'s D8.
 //!
 //! # Ticks, not a clock
 //!

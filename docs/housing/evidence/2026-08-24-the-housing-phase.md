@@ -1,11 +1,11 @@
 # Housing
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+[Gameplay index](../../roadmap/06-gameplay/README.md) · [Roadmap](../../roadmap/README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - [x] `housing` — **built, H1–H5.** A multi placed from a deed, walls
   that stop you, a door and secures that know you, a sign that says who owns it
   and how it is wearing, and a house nobody visits collapsing into a crate that
-  keeps what was inside. **See [`housing.md`](../../housing.md)**, which takes the
+  keeps what was inside. **See [`housing.md`](../design_house.md)**, which takes the
   eight decisions, records what each phase came out differently on, and names
   what stays deferred (customisation, boats).
   - [x] **The multis are read.** `openshard_uofiles::multi`, both formats. The

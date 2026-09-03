@@ -34,7 +34,7 @@ tiles are dry land, not water) confirming the fall before touching it.
 
 **Re-evaluated 2026-08-16 and kept**, so the next reader knows it was looked at
 rather than merely untouched. Two things changed around it and neither moves the
-decision. [`boats.md`](../../boats.md)'s B5 found that the repro **does not need client
+decision. [`boats.md`](../../housing/design_boats.md)'s B5 found that the repro **does not need client
 files** after all — a synthetic multi carrying a climbable platform component at
 a known z over land of known height reproduces the shore-end case, and
 `Multi::new` is public. And it found a second consequence: turning
@@ -128,7 +128,8 @@ rope and rudder in the multi table became a floor, some of it two under the deck
 beside it. Eighty such floors across the shipped fleet. That is now
 `Cover::of_static` like every other placement, which is ServUO's own test
 (`Movement.cs:211`, `(flags & ImpassableSurface) == TileFlag.Surface`). See
-[`boats.md`](../../boats.md)'s correction to B3.
+[`boats.md`](../../housing/evidence/2026-08-25-the-boat-phases.md)'s correction to
+the plank's own reading.
 
 **Three times over a facet, two units deep, is a defect worth the fix and is not
 this report.** A player who falls underground on a pier is not two units low.

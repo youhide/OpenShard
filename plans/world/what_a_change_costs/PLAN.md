@@ -296,7 +296,7 @@ replace:
   work as B: our own file, an importer from the install, and the shard resolving
   it beside the base set.
 - **The multis** — a house's component list, which
-  [`customisation.md`](../../../docs/customisation.md) is already unhappy with for its
+  [`housing/design_customisation.md`](../../../docs/housing/design_customisation.md) is already unhappy with for its
   own reasons. It comes after tiledata and inherits its file.
 - **The art** — and this one is not ours to schedule. `mechanics.md` says art
   travels separately, addressed by content, with a missing asset drawing an

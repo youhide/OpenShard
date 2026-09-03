@@ -10,8 +10,11 @@
 //! does not carry — where a wall is for the purpose of *stopping* somebody, and
 //! whether this patch of Britannia was somewhere a house may go at all.
 //!
-//! See [`docs/housing.md`](../../../../docs/housing.md) for the five phases and
-//! the decisions; this is H1.
+//! The decisions are
+//! [`docs/housing/design_house.md`](../../../../docs/housing/design_house.md) and
+//! the six phases that built them are
+//! [`docs/housing/evidence/2026-08-31-the-house-phases.md`](../../../../docs/housing/evidence/2026-08-31-the-house-phases.md);
+//! this is H1.
 //!
 //! # Where the components come from
 //!
@@ -90,7 +93,7 @@ use openshard_uofiles::multi::{
 /// because a foundation's own component list has none — the stairs are part of
 /// the *design*, which is a system this engine does not have. A foundation placed
 /// without them is a house nobody can get into, so the range is refused by name
-/// rather than placed and wondered about. See `docs/housing.md`'s D7.
+/// rather than placed and wondered about. See `docs/housing/design_house.md`'s D7.
 pub const FOUNDATION_IDS: std::ops::Range<u16> = 0x13EC..0x1D00;
 
 /// Find the smallest custom-house foundation whose client-side design grid is
@@ -213,7 +216,7 @@ fn drawn_tiles(components: &[Component], at: Point) -> Vec<Tile> {
 /// **One chooser, not three.** [`sign_spot`], [`tiles_of`] and [`footprint_of`]
 /// each read a house's components, and the choice they now have to make is the
 /// same choice — so it is written once rather than copied into each and left to
-/// drift apart. See `docs/customisation.md`'s C2.
+/// drift apart. See `docs/housing/design_customisation.md`'s C2.
 ///
 /// `None` is the shard's fixed multi table: every classic house, still a borrow,
 /// so the common path allocates nothing. `Some` is this house's own design.
@@ -1089,7 +1092,7 @@ fn block_footprint(facet_state: &mut FacetState, entity: EntityId, footprint: &[
 /// The narrow half of ServUO's five rules: this is "no impassable object may come
 /// in direct contact with any part of the house", asked of the *dynamic* index
 /// only. The map's own statics, the yard clearance, the flat foundation and the
-/// road are the rest of D3 and are not here yet — see `docs/housing.md`, which
+/// road are the rest of D3 and are not here yet — see `docs/housing/design_house.md`, which
 /// says so rather than letting a reader assume the check is complete.
 fn occupied_tile(state: &WorldState, facet: Facet, footprint: &[Footprint]) -> Option<Tile> {
     let obstructions = &state.facet_state(facet).obstructions();

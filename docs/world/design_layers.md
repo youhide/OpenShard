@@ -41,8 +41,8 @@ planned an hour ago is allowed to be wrong about it.
 | a static an operator placed or removed | **statics** | `PatchOp::AddStatic` / `RemoveStatic`, same path | the same chunk | the rebake |
 | a door, a crate, a corpse, any item on the ground | **live** | an entity with a serial → `Obstructions` → [`obstruct::project`](../../crates/server/state/src/obstruct.rs) | the client, from the packet about the item | nothing |
 | a ship's deck and planks | **live** | `Boats` → the same `project` | the client, from the multi | nothing |
-| a house of a shipped shape | **live** | `HouseRecord` (serial, multi id, position, facet, owner); components are resolved at placement — see [`housing.md`](../housing.md) D2 | **the client, by itself**, resolving the multi id against its own `multi.mul` | nothing |
-| a house of a customised shape | **live**, and on the entity | `HouseDesign { components, revision }` in `openshard-state`, sent as `0xD8` — see [`customisation.md`](../customisation.md) | the client, from the list we send it: **this is the one row where the picture stops being free** | nothing |
+| a house of a shipped shape | **live** | `HouseRecord` (serial, multi id, position, facet, owner); components are resolved at placement — see [`housing/design_house.md`](../housing/design_house.md) D2 | **the client, by itself**, resolving the multi id against its own `multi.mul` | nothing |
+| a house of a customised shape | **live**, and on the entity | `HouseDesign { components, revision }` in `openshard-state`, sent as `0xD8` — see [`housing/design_customisation.md`](../housing/design_customisation.md) | the client, from the list we send it: **this is the one row where the picture stops being free** | nothing |
 
 The last two rows are why a castle — 3,667 components over 31×32 tiles — costs a
 bake nothing. That density is also the evidence [R3](../archive/world/map_rebuild.md#r3--a-house-is-a-layer-and-it-has-floors)

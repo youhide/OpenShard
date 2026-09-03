@@ -22,7 +22,7 @@ benchmark is [`05-scripting.md`](../../server/evidence/2026-08-24-the-scripting-
 
 ## Contents
 
-Five subjects have left this directory, into two migrated domains.
+Seven subjects have left this directory, into three migrated domains.
 
 **Items** and **Crafting** are records in `items` —
 [`items/evidence/2026-08-24-the-items-phase.md`](../../items/evidence/2026-08-24-the-items-phase.md)
@@ -39,12 +39,17 @@ and
 — and what is open about them is ranked in
 [`combat/README.md`](../../combat/README.md).
 
+**Housing** and **Boats and house customisation** are records in `housing` —
+[`housing/evidence/2026-08-24-the-housing-phase.md`](../../housing/evidence/2026-08-24-the-housing-phase.md)
+and
+[`housing/evidence/2026-08-24-the-boats-and-customisation-phase.md`](../../housing/evidence/2026-08-24-the-boats-and-customisation-phase.md)
+— and what is open about them is ranked in
+[`housing/README.md`](../../housing/README.md).
+
 What is still here:
 
 - [AI](ai.md)
 - [Chat and world administration](chat.md)
 - [Regions, guards, and the world clock](regions.md)
-- [Housing](housing.md)
-- [Boats and house customisation](boats-and-customisation.md)
 - [Guilds](guilds.md)
 - [Parties and quests](parties-and-quests.md)

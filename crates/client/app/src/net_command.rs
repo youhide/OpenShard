@@ -1914,7 +1914,7 @@ impl App {
 /// It is live today for any multi the client's table lacks: an install whose
 /// `multi.mul` is older than the shard's, and **every foundation id**, which is
 /// what made a designed house the case that found it. See
-/// `docs/customisation.md`'s C8.
+/// `docs/housing/design_customisation.md`'s C8.
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) enum MultiDraw {
     /// Not a multi. The caller draws the item the ordinary way.

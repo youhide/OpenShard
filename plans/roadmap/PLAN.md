@@ -24,26 +24,24 @@ so migrating a domain is also what empties its section below.
 | The server | ranked, [`docs/server/README.md`](../../docs/server/README.md) § what is open, with [`plans/server/operations/PLAN.md`](../server/operations/PLAN.md) for what is not built |
 | Items and crafting | ranked, [`docs/items/README.md`](../../docs/items/README.md) § what is open, with [`plans/items/item_identity/PLAN.md`](../items/item_identity/PLAN.md) for what is not built |
 | Combat, skills and magic | ranked, [`docs/combat/README.md`](../../docs/combat/README.md) § what is open, with [`plans/combat/`](../combat/actions/PLAN.md) for what is not built |
-| Housing · npc | the sections below, until each is migrated |
+| Housing and boats | ranked, [`docs/housing/README.md`](../../docs/housing/README.md) § what is open, with [`plans/housing/`](../housing/customisation/PLAN.md) for what is not built |
+| npc | the section below, until it is migrated |
 
 ## Next
 
-**Migrate the remaining domains.** Two areas still have their documents flat in
-`docs/` and their phase records under `docs/roadmap/`: `housing` and `npc`. Each
-is one batch — decisions into `design_*`, phase records and
-"amendments forced by" into `evidence/`, what is open into a domain README — and
-neither blocks the other. The batch that claims a domain also takes its phase
-file out of `docs/roadmap/` and its section out of this page.
+**Migrate the last domain.** One area still has its phase records under
+`docs/roadmap/`: `npc`. It is one batch — decisions into `design_*`, phase
+records and "amendments forced by" into `evidence/`, what is open into a domain
+README — and it is the batch that takes
+[`docs/roadmap/06-gameplay/`](../../docs/roadmap/06-gameplay/README.md) with it,
+because the five files left there are all its own: AI, chat, regions, guilds,
+and parties-and-quests.
 
-`combat` went on 2026-09-03 and took Combat, Skills and Magic with it. Both
-remaining domains are served by one file,
-[`docs/roadmap/06-gameplay/`](../../docs/roadmap/06-gameplay/README.md), and the
-`items` batch answered what happens to it the way `server` did: take the two
-subject files that belong to you, leave the other ten and the shared
-`backlog/gameplay.md` where they are, and let the last domain out take the
-directory with it. `backlog/gameplay.md` in particular is one record whose rows
-belong to four domains at once; each batch lifts its own rows into its README's
-"what is open" without cutting the record itself.
+`combat` went on 2026-09-03 and took Combat, Skills and Magic; `housing` went the
+same day and took Housing and Boats-and-customisation. What stays behind either
+way is `backlog/gameplay.md`, one record whose rows belong to four domains at
+once: each batch lifts its own rows into its README's "what is open" without
+cutting the record itself.
 
 ## Gameplay
 
@@ -53,9 +51,13 @@ skill-presentation and deferred-spell rows are ranked in
 is [`plans/combat/actions/PLAN.md`](../combat/actions/PLAN.md) and
 [`plans/combat/spells/PLAN.md`](../combat/spells/PLAN.md).
 
+Housing and boats left it the same day. Boats B3–B4 are
+[`plans/housing/boats/PLAN.md`](../housing/boats/PLAN.md), house customisation
+C3–C4 is [`plans/housing/customisation/PLAN.md`](../housing/customisation/PLAN.md),
+and the house-as-a-region decision that blocked five phases ago is
+[`plans/housing/house_region/PLAN.md`](../housing/house_region/PLAN.md).
+
 - [ ] Adjacent-tile quarry pathing (`npc`).
-- [ ] Complete boats B3–B4.
-- [ ] Complete house customisation C3–C4.
 - [ ] Resolve the data-table and Felucca-converter findings in
       [`backlog/gameplay.md`](../../docs/roadmap/backlog/gameplay.md).
 

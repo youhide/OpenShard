@@ -1,47 +1,20 @@
-# A house, and the ground it stands on
+# A house, phase by phase
 
-Placement, the walls that stop you, the door that knows you, the decay that
-takes it away — **one plan, because they are one object**. A house is not a
-feature made of parts that could ship separately: a house you can place and walk
-through is not a house, and a house with a lock and no decay is a shard that
-fills up and never empties.
+The implementation record of the six phases that built housing: a house on the
+ground, the deed and its cursor, who may come in, lockdowns and secures, decay
+and the crate, and the region a house stands in. It was written as a plan and
+kept as the plan was worked, so each phase reads forwards — what it was going to
+do, and then what came out differently once the code was in front of it.
 
-**H1–H5 are built.** A house goes down from a deed, its walls stop you, its door
-and its secures know you, its sign says who owns it and how it is wearing, and a
-house nobody visits collapses into a crate that keeps what was inside. Each
-phase's section below records what came out differently from the plan, which is
-the half worth reading.
+The decisions these phases were built against are
+[`design_house.md`](../design_house.md); what is built and what is open today is
+[`README.md`](../README.md). Several comments in the tree cite the phase numbers
+`H1`–`H6` and the decision numbers `D1`–`D11` from this work.
 
-**H6 is a sixth phase of a five-phase plan**, for a reason worth reading before
-the rest: three things this document published as *decided* were never built, and
-they are one thing — housing and regions never met. Two of its three sub-phases
-are now in; the third turned out to need a decision rather than a session, and
-the note under D11 says which.
+## What was missing when these phases were written
 
-> Read [`architecture.md`](architecture.md) for where a system crate sits and
-> what it may depend on, and [`style.md`](style.md) before writing any of it.
-> This document does not restate either.
-
-## What a multi is, and what is already read
-
-A **multi** is one item that draws as many. The wire carries a house as an
-ordinary world item whose graphic is `0x4000 + id`; the client looks that id up
-in its own `multi.mul` or `MultiCollection.uop` and draws the hundred and
-forty-eight statics a villa is made of. **The shard sends none of them.**
-
-That is the whole reason this is tractable. The picture is free — every client
-already owns every house. What the shard owes is everything the picture does not
-say: where the walls are for the purpose of stopping somebody, who may open the
-door, what happens when nobody pays the upkeep.
-
-[`openshard_uofiles::multi`](../crates/common/uofiles/src/multi.rs) reads the
-components and is **built**. Three things about that format are written down in
-[`findings.md`](findings.md) and are not worth re-deriving: the High Seas widening
-and the arithmetic that detects it, the drawn/skip flag that runs *opposite ways*
-in the two files, and the fact that the two files disagree about how many multis
-exist (326 against 862 on one install, so the UOP wins).
-
-## What is missing, in one table
+The table the plan opened with, kept as the picture it was. Every row but the
+last is built now; where each of them stands today is the README's.
 
 | piece | server | client (ours) | classic client |
 |---|---|---|---|
@@ -56,106 +29,17 @@ exist (326 against 862 on one install, so the UOP wins).
 | where a house may not go (`no_housing`) | **built** — H6 gave the flag its reader, and closed 21 dungeons | n/a | n/a |
 | customisation (`0xD7` house design) | — | — | speaks it |
 
-`0x99` is the one packet that has to be written from nothing on both ends. It is
+`0x99` is the one packet that had to be written from nothing on both ends. It is
 ServUO's `MultiTargetReq`: 26 bytes classic, 30 post-High-Seas — a target
 request with the multi id and an offset appended, so the client draws the house
 under the cursor while the player picks a spot. The reply is an ordinary `0x6C`,
-which this engine already reads and our client already sends.
-
-## Decisions, taken here
-
-**D1 — a house is an entity with a `Multi` component, not a new kind of thing.**
-It has a `Position`, a `Drawn` whose graphic is `0x4000 | id`, and a serial from
-the item pool. Everything that already walks items — the sector index, the save,
-the `0x1A` that draws it — works on it unchanged. What makes it a house is
-a `House` component beside those, not a separate table.
-
-**D2 — the footprint is an obstruction, computed at placement and stored.**
-`FacetState::obstructions` is the index a step already asks. A house adds its
-drawn components to it, each at its own `dz` with its tiledata height, exactly as
-a static would be. Not computed per step from `multi.mul`: a step is ten a second
-and a house does not move.
-
-The consequence to accept up front: **a house is not in the map file**, so the
-obstruction index is no longer purely a function of the client's files. It is the
-files plus what the shard has placed. That is already true of doors and dropped
-items; a house is the first thing that adds a *hundred* entries at once.
-
-**D2a — `openshard-state` never holds the multi table.** It does not depend on
-`openshard-uofiles` and must not start: the components are resolved **at
-placement**, by a caller that has the table, and what is stored is the
-obstruction entries and the `House` component. At boot the saved houses are
-restored by the boot code, which already reads the client's files. This is D2's
-"computed at placement and stored" spelled as a dependency rule, and it is what
-keeps a *client file* out of the crate every gameplay system builds on.
-
-**D2b — one entity blocks one tile at several heights.** `Obstructions::block`
-keyed an obstacle by its entity, because the case it was written for was a door:
-one thing, one height, re-registered to refine it. A house is one entity whose
-walls stand on top of each other, so the key is the entity **and the z** — done,
-with a test, before anything above it was written. Keyed by the entity alone the
-second registration overwrote the first, which does not read as a missing wall
-but as the wrong floor being sealed, since which one survived depended on the
-order the components came out of the file in.
-
-**D3 — the placement rules are ServUO's five, and the fifth is the one to get
-right.** From `HousePlacement.Check`: nothing impassable around the outside, no
-impassable tile touching the house, five tiles clear front and back, the
-foundation rests flat, and **no foundation tile over a road**. The road rule is
-the one a player notices the absence of, because without it houses appear across
-Britain's streets.
-
-Staff place anywhere, which is ServUO's own first branch and is what makes the
-rules testable before the deed exists.
-
-> **Not built until H6, and the sentence above went on claiming it.** `place`
-> takes `owner: Serial` and never an actor `EntityId`, so it has nobody to ask
-> `is_staff` about and every refusal applies to a game master exactly as it does
-> to a player. Left standing here rather than rewritten, because what a decision
-> *said* is worth keeping beside what the code did: this is the one D that was
-> read as built for five phases.
-
-**D4 — a region, and it comes free.** `Regions` already exists and already
-carries flags. A house is a region with its own flags (no teleport in, no
-recall out), placed and removed with the house. Nothing new is needed for this,
-which is why it is a decision rather than a phase.
-
-> **"Nothing new is needed" was true and "it comes free" was not.** Nothing *was*
-> needed — `Regions` is per-facet on `FacetState` and `Regions::at` is a bucketed
-> lookup that has worked the whole time. But a decision with no phase under it is
-> a decision nobody is assigned, and five phases went by without one line of
-> `openshard-housing` mentioning a region. **H6 is that phase.** The lesson is
-> cheap and worth writing down: a "this comes free" decision needs a phase to be
-> free *in*, or it is not a decision, it is a hope.
-
-**D5 — the door is the door this engine already has.** `.key` and `KeyValue` and
-the lock rules landed with the traps work, on the argument that Britannia locks
-exactly one container and the rules would otherwise be unreachable. A house door
-is that mechanism with the house's own key, and the reason it is D5 rather than
-a phase is that there is nothing to build — only to connect.
-
-**D6 — decay is a tick count, not a wall clock.** Everything in this engine that
-measures duration counts ticks, because a tick count replays and a clock does
-not. ServUO's five days becomes a tick count in `Gameplay`, an operator setting
-like every other duration. A house refreshed by its owner walking in resets it.
-
-**D7 — customisation is out of scope, by name.** ServUO's `HouseFoundation` and
-the `0xD7` design packets are a second system the size of this one: a design
-buffer, a preview state, a commit, and a whole editor on the client. A *classic*
-house — placed from a deed, fixed shape — is the whole of this plan. The
-foundation ids (`0x13EC`–`0x1D00`) are named here only so that the placement code
-refuses them loudly rather than placing a house with no stairs.
-
-**D8 — the moving crate is not deferred, it is the deletion rule.** When a house
-goes, what was inside it has to go somewhere, and "somewhere" being the ground is
-how a shard loses a player's belongings. ServUO's moving crate is a container the
-contents land in. It is small and it belongs to the phase that can destroy a
-house, not to a later one.
+which this engine already read and our client already sent.
 
 ## The phases
 
-Five, in the order they are worth having. Each leaves the shard strictly better
-and none depends on a later one's shape.
+Five, in the order they were worth having. Each left the shard strictly better
+and none depended on a later one's shape. H6 is the sixth phase of a five-phase
+plan, and half of it is a correction.
 
 ---
 
@@ -559,9 +443,9 @@ identity, and the epoch. Both halves are built: the server's bounded
 selector/page API, and the OpenShard client's Ctrl+I window, which resolves text
 and category filters against its own static item catalogue and keeps pagination
 presentation-only. The stage that built it is A6a in
-[`items/evidence/2026-08-31-the-transaction-stages.md`](items/evidence/2026-08-31-the-transaction-stages.md);
+[`items/evidence/2026-08-31-the-transaction-stages.md`](../../items/evidence/2026-08-31-the-transaction-stages.md);
 the model is
-[`items/design_transactions.md`](items/design_transactions.md) § `HouseInventoryIndex`.
+[`items/design_transactions.md`](../../items/design_transactions.md) § `HouseInventoryIndex`.
 
 ---
 
@@ -679,136 +563,9 @@ and would commit the engine to a PvP rule whose other half does not exist.
 reason recorded is a different thing from a dead flag nobody mentioned, and the
 whole reason this phase exists is that the second kind is invisible.
 
-#### Decisions
-
-**D9 — the rule is stated over the whole footprint, not over the origin.** A
-house is many tiles and a region is a set of rectangles with a height band, so a
-villa can straddle a dungeon mouth. Testing the origin alone would let a player
-build a house whose back half is inside Shame by standing one tile outside it —
-and the failure is invisible until somebody notices the walls. `check_ground`
-already walks every footprint tile for the road and `can_fit` rules; the region
-check walks the same list, and one tile inside a `no_housing` region refuses the
-house.
-
-There is a third reason and it is the one that would have bitten first: **the
-origin is not reliably part of the house at all.** `place`'s own doc says so —
-`at` is the multi's origin and "is not the corner of its box". A multi whose
-components all sit at positive `dx`/`dy` has an origin outside its own drawn
-area, so an origin test can test a tile no wall ever stands on.
-
-The set walked is **`tiles_of` and not the footprint**. A floor is inside a
-dungeon as surely as a wall is, and `footprint_of` deliberately drops everything
-that does not block. This costs nothing: `place` already calls `tiles_of` (at
-`lib.rs:177`, to size the lockdown allowance), so hoisting that one call above
-the checks gives both readers the same list.
-
-The cost to name: `Regions::at` is a bucket lookup plus a linear rectangle test
-per candidate, run once per covered tile rather than once. A hundred lookups when
-somebody clicks is the bargain `check_yard` already takes.
-
-**D9a — the height tested is the house's own `z`, once, and never the
-component's.** `RegionRect` carries a `z_min`/`z_max` band (`region.rs:52-54`)
-and 247 of the shipped rects use one — that is what keeps the open sky above a
-dungeon open. A villa's roof stands twenty units above its foundation, so
-testing each tile at its component's z would put the roof *outside* a banded
-dungeon region and answer "not in Covetous" for the top half of a house that is
-unambiguously in Covetous. A house is sited at one height.
-
-**None of the 21 `no_housing` regions is banded today**, so this decision changes
-no answer on the shipped data. It is written down because the failure it prevents
-is a player building a tower in a banded dungeon, and that is discovered by the
-player rather than by a reader.
-
-**D9b — the region refusal comes before the ground refusal.** The order of the
-checks is the *message*, not an implementation detail. `BadGround` means "try a
-tile over"; inside Deceit that sentence is a lie, and a player who believes it
-spends ten minutes proving it. So `check_region` sits between `footprint_of` and
-`check_ground`: it needs the covered tiles, so it cannot come earlier, and it is
-the only one of the refusals that is a statement about the *place* rather than
-about this attempt.
-
-**D10 — `place` takes the actor, not just the owner.** It cannot ask `is_staff`
-about a `Serial`, which is why D3's exemption has never existed. The signature
-gains an actor `EntityId` and the exemption is the shape every other one in this
-engine has — `if state.is_staff(actor) { … }` as a first branch, as
-`WorldState::may_teleport` (`runtime.rs:2089`) and `magic::travel::may_travel`
-(`travel.rs:82`) both do.
-
-**Which rules the exemption covers is its own decision, and it is not "all of
-them".** ServUO's is a single early return — `if (from.AccessLevel >=
-AccessLevel.GameMaster) return Valid;` — and copying that shape literally would
-be wrong here, because this engine's `Refusal` mixes two kinds of answer:
-
-| refusal | what it is | staff-exempt |
-|---|---|---|
-| `Occupied`, `OnARoad`, `BadGround`, `TooCloseToAHouse`, `NoHousingHere` | a judgement about the plot | **yes** |
-| `NoSuchMulti`, `DrawsNothing`, `NeedsCustomisation`, `OffTheMap`, `NoSerials` | there is nothing to place, or the shard is broken | **no** |
-
-Exempting the second row spawns an invisible house out of a treasure-site marker,
-or a foundation with no stairs — which is the exact failure `NeedsCustomisation`
-exists to prevent. **A staff bypass that reopens a hole another decision closed
-is not an exemption; it is a regression with a permission check on it.**
-
-The `staff: bool` is computed once at the top of `place` and threaded, which is
-this crate's own idiom: `trust`, `distrust`, `ban`, `unban` and `standing_of` all
-take it that way rather than each asking `is_staff` again.
-
-Both callers change: `gm::place_house` (`world/src/gm.rs:488`) already has the
-actor in hand, and `houses::place_house_from_deed` (`tick/houses.rs:138`) has it
-as the mobile whose deed is being spent.
-
-> **D11 is not implementable as written, and the check that found it is the one
-> this phase exists to institutionalise.** `Regions`' whole public surface is
-> `new`, `set`, `clear`, `at`, `get`, `iter`, `len`, `is_empty` — **there is no
-> runtime insertion or removal**, and `set` is replace-all by design: its own doc
-> argues for that, because "a registration carries the whole set, so registering
-> twice cannot leave a stale half behind". D11 contradicts a stated property
-> rather than filling a gap.
->
-> Four blockers, and the third is decisive on its own:
->
-> 1. **`RegionId` is a `Vec` index and `at()` indexes it unchecked.** A removal
->    that shifts the vector renumbers everything above it, silently invalidating
->    every live `InRegion` and every saved `RegionRecord::id`. Removal has to be a
->    tombstone, which changes the type rather than adding a method.
-> 2. **The save sweep would write the house's region.** `region_records` maps
->    `regions.iter()` straight out, so a derived region is saved, restored, *and*
->    re-derived — two regions over one house, and the saved one outlives the
->    demolition for ever as a no-recall zone in an empty field. That is the exact
->    failure D11's own test list names.
-> 3. **The boot order destroys it.** `restore_houses` rides inside
->    `restore_guilds` at `boot.rs:263`; `restore_regions` runs at `:270` and ends
->    in `Regions::set`, which replaces everything. Any house region registered at
->    restore is wiped seven lines later, on every boot, silently.
-> 4. `reindex()` is a full rebuild, so an insert either pays it per placement or
->    re-implements the grid fill.
->
-> **So D11 stays deferred, and what it needs first is a decision rather than
-> code**: how a derived region gets an id that `InRegion`'s crossing diff and
-> `RegionRecord` can both live with. The shape that keeps every property D11
-> states is a second, house-keyed layer inside `Regions` — consulted by `at()`,
-> invisible to `iter()`, with ids from a range that is not a `regions` index. That
-> belongs in this document before it is in the tree, which is the whole lesson of
-> the note under D4.
-
-**D11 — a house's own region is derived from its footprint, not stored beside
-it.** D4 said a house *is* a region and left the shape open. The shape follows
-from H1's own rule: what is saved is where a house stands and which multi it is,
-and the footprint is recomputed at boot from the same table placement read it
-from. A stored rectangle would be a second copy of that, free to disagree with
-the walls after an install update — the exact failure H1 refused for the
-components.
-
-So the region is registered from `tiles_of` at placement and at restore, on the
-same call that blocks the walls, and removed by `decay::demolish` on the same
-call that unblocks them. `Regions` is per-facet on `FacetState` (`runtime.rs:399`),
-which is where the house's own `Obstructions` entries already live, so the two
-halves cannot end up on different facets.
-
-**What flags a house's region carries** is the smaller half and D4 already named
-it: `no_teleport` and `no_recall`. Not `no_housing` — a house is not a place
-another house may not go, that is what D3's yard is for, and setting both would
-make the yard rule unreachable.
+The decisions this phase took — D9, D9a, D9b and D10, and the deferred D11 — are
+in [`design_house.md`](../design_house.md); what D11 still needs before anybody
+writes it is [`plans/housing/house_region/PLAN.md`](../../../plans/housing/house_region/PLAN.md).
 
 #### Phases within the phase
 
@@ -894,24 +651,6 @@ than waiting for a phase of its own:
   deliberately-unknown packet id in a decoder test
   (`client_packet.rs:283`).
 
----
-
-## What this plan does not cover
-
-- **Customisation** — D7, by name. **Reverted**: see
-  [`customisation.md`](customisation.md), which covers the whole `0xD7` design
-  system rather than a first cut.
-- **Boats.** They are multis too and this reader already reads them, and a boat
-  is a house that *moves*, which is a different problem: every component's
-  position changes together and the obstruction index has to follow. **Planned
-  separately**: see [`boats.md`](boats.md).
-- ~~**Ilshenar, T2A and Eodon's no-housing rules.**~~ Folded in as **H6** above.
-  The reason given here — "they are region flags (D4) and this engine has one
-  facet loaded" — was half right and the wrong half was load-bearing. They *are*
-  region flags. But the flag had no reader on the one facet that *is* loaded, so
-  "one facet" was never what stood in the way, and deferring on it left
-  twenty-one shipped dungeons open to building for five phases.
-
 ## Backlog, found while planning this
 
 - **`Obstructions` has never had a hundred entries added at once.** It is filled
@@ -920,7 +659,7 @@ than waiting for a phase of its own:
   same hundred entries coming back out — has not been asked.
 - ~~🚩 **A house has no floors, for movement — the step check has nothing to pick
   between.**~~ **Repaired 2026-08-23**, by
-  [`realtime_map.md`](world/evidence/2026-08-23-era-r-the-map-you-hold.md#r3--a-house-has-floors)'s R3.
+  [`realtime_map.md`](../../world/evidence/2026-08-23-era-r-the-map-you-hold.md#r3--a-house-has-floors)'s R3.
   `Cover::of_static` reads a platform now and lays two covers for one — the
   surface a body on top stands on and the body a mobile beside it walks into —
   and `walk::climbed` takes the highest of those *in reach and above what the
@@ -944,13 +683,12 @@ than waiting for a phase of its own:
   stand on one either.
   `CoverKind::Stands` is already the right type for the repair: a house floor is
   the general case of what `aboard` does for one ship. Found while writing
-  [`docs/world/design_spans.md`](world/design_spans.md), which names it
+  [`docs/world/design_spans.md`](../../world/design_spans.md), which names it
   because a span grid baked from client files will contain no player house
   either, and the gap would otherwise read as a pathfinding regression the day
-  that lands. **Wants an in-game confirmation before the repair is scoped** —
-  walk a character upstairs in a placed villa and see.
+  that lands.
   **The repair is owned**, since 2026-08-23, by
-  [`map_rebuild.md`](archive/world/map_rebuild.md#r3--a-house-is-a-layer-and-it-has-floors)'s
+  [`map_rebuild.md`](../../archive/world/map_rebuild.md#r3--a-house-is-a-layer-and-it-has-floors)'s
   R3: a house is the live layer over the map rather than a patch to it — which is
   what closed `mechanics.md`'s open row — and `Cover::of_static` grows the arm
   that makes a platform component a surface. This entry stays here because the

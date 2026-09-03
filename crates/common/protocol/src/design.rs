@@ -5,7 +5,7 @@
 //! `multi.mul`. A **designed** house has no id in that file — its shape was made
 //! on this shard five minutes ago — so for exactly one kind of house the shard
 //! owes the picture as well as the walls, and owes it as a packet. See
-//! `docs/customisation.md`.
+//! `docs/housing/design_customisation.md`.
 //!
 //! Two packets, and the small one is the load-bearing one:
 //!

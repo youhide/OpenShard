@@ -19,7 +19,7 @@
 //!
 //! **Its tiles go in [`Boats`] and not in `Obstructions`.** That index only
 //! subtracts, and a deck is somewhere to stand over water that is otherwise not
-//! ground at all — `docs/boats.md`'s B3, argued in `openshard_state::boat`.
+//! ground at all — `docs/housing/design_boats.md`'s B3, argued in `openshard_state::boat`.
 //!
 //! # And it sails
 //!
@@ -232,7 +232,7 @@ fn check_berth(state: &WorldState, facet: Facet, berth: &[((u16, u16), Plank)]) 
 /// # The manifest is derived, never stored
 ///
 /// Who moves with the ship is worked out here, per move, from the tiles it
-/// covers and the sector grid — `docs/boats.md`'s B1a. An `OnDeck` component
+/// covers and the sector grid — `docs/housing/design_boats.md`'s B1a. An `OnDeck` component
 /// would be a second copy of a fact [`Position`] already holds, and the two
 /// would disagree the first time anything moved a body without going through
 /// this function.
@@ -245,11 +245,12 @@ fn check_berth(state: &WorldState, facet: Facet, berth: &[((u16, u16), Plank)]) 
 /// one through [`WorldState::move_to`], which is the **fourth** caller of the
 /// `disrupt` → position → `refresh_around` → `broadcast_move` sequence after
 /// `npc::live`, `quests::advance_escorts` and the tick's own `step`, and the
-/// point `docs/boats.md:384` names as when that tail wants a name of its own.
+/// point `docs/housing/evidence/2026-08-25-the-boat-phases.md`'s backlog names as
+/// when that tail wants a name of its own.
 ///
 /// # And the hull is redrawn by forget-then-reveal
 ///
-/// See [`redraw`]. **The number of packets a move costs**, which `docs/boats.md`
+/// See [`redraw`]. **The number of packets a move costs**, which `docs/housing/design_boats.md`
 /// asks for by name: two per client that can see the ship — a `0x1D` and the
 /// `0x1A`/`0xF3` that draws it again — plus, per occupant, one `0x20` to its own
 /// client and one `0x77` to each client watching it. A sloop under way with one
@@ -315,7 +316,7 @@ pub fn step(
 /// **A multi cannot be told it moved.** `0x77` moves a *mobile*; an item's
 /// position arrives with the item, in the `0x1A`/`0xF3` that draws it, and there
 /// is no packet in the classic protocol that relocates one that is already
-/// drawn. So the ship is removed and drawn again — `docs/boats.md`'s B2, and the
+/// drawn. So the ship is removed and drawn again — `docs/housing/design_boats.md`'s B2, and the
 /// reason `Feature::SmoothShip`'s `0xF6` exists at all for the clients that have
 /// it.
 ///

@@ -7,7 +7,7 @@
 //! entity first and the table second.
 //!
 //! [`shape_of_house`] is that question, asked once and answered for every
-//! reader. `docs/customisation.md`'s C2 calls it the chooser; this is where the
+//! reader. `docs/housing/design_customisation.md`'s C2 calls it the chooser; this is where the
 //! callers that hold a house rather than a multi id reach it.
 //!
 //! # The commit tail

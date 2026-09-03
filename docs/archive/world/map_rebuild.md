@@ -236,7 +236,7 @@ in favour of **the live layer**, on the evidence already measured: a castle is
 immutable base, and *"the flat layout refuses to let a house be anything but an
 overlay"* ([`client_today.md`](../../world/evidence/2026-08-25-the-clients-map-today.md)). It also
 closes the way housing already built it: components are resolved at placement and
-stored, which is [`housing.md`](../../housing.md)'s D2.
+stored, which is [`housing.md`](../../housing/design_house.md)'s D2.
 
 What that leaves is the half nobody built. `grep -rn "CoverKind::Stands" crates`
 has **one** producer in the workspace — `Plank::cover`, a ship's deck. Every
@@ -575,7 +575,7 @@ waits for a measurement that says the statics are still on a hot path.
 | [`navigation_graph*.md`](../../world/design_navigation_graph.md) | **live** — the graph, its artifact, and its efficiency phases 1/2/4 built; 3 was gated on N4 and is now gated only on its own measurement |
 | [`coarse_pathfinding.md`](../../world/research/coarse_pathfinding.md) | **superseded**, by its own first line |
 | [`interiors.md`](../../world/design_interiors.md) · [`cutaway.md`](../../world/research/cutaway.md) · [`radar.md`](../../world/design_radar.md) · [`minimap_lod_*.md`](../../world/design_minimap_lod.md) | **live**, and not in the eras: readers, repaired when they break |
-| [`housing.md`](../../housing.md) · [`customisation.md`](../../customisation.md) · [`boats.md`](../../boats.md) | **live**, and the third layer's content: what gets laid over the map |
+| [`housing.md`](../../housing/design_house.md) · [`customisation.md`](../../housing/design_customisation.md) · [`boats.md`](../../housing/design_boats.md) | **live**, and the third layer's content: what gets laid over the map |
 
 ## Open, with what would close it
 

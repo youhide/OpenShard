@@ -2,7 +2,7 @@
 //!
 //! # Why this is not `Obstructions`
 //!
-//! `docs/boats.md`'s B3, and the short version is that **the obstruction index
+//! `docs/housing/design_boats.md`'s B3, and the short version is that **the obstruction index
 //! only ever subtracts**. A house's entry says *this tile is closed*, and that
 //! is the whole vocabulary. A boat has to say two things at once: the hull is
 //! closed, **and the deck is somewhere to stand — at a height, over water that

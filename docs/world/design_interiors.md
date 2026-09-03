@@ -74,7 +74,7 @@ and picking, and gives the later building-frame input a single cache key.
 - **The client draws no multis.** Nothing in `client/render` expands
   `0x4000 | id` into components. A "house" in this client's picture is **map
   statics** — Britain's own buildings, and every dungeon — and a player house
-  placed by [`housing.md`](../housing.md) is an item the client does not draw at
+  placed by [`housing/design_house.md`](../housing/design_house.md) is an item the client does not draw at
   all. Every rule below is written over map statics and server items, and the day
   multis are drawn they arrive as more of the first kind.
 - **The static geometry cache has one `StaticGeometryCacheKey`**, including the
@@ -437,7 +437,7 @@ the room behind them visible over the top.
   gate on interest management does not, and nothing here writes it.
 - **Multis.** The client draws none, so a player's own house is outside all three
   rules until it is drawn at all.
-- **Regions as the notion of "inside".** [`housing.md`](../housing.md)'s H6 is where
+- **Regions as the notion of "inside".** [`housing/evidence/2026-08-31-the-house-phases.md`](../housing/evidence/2026-08-31-the-house-phases.md)'s H6 is where
   house-as-region lives, and it is a server fact. R2 deliberately answers "which
   room is this" from the picture's own substrate, because the client must answer
   it for Britain's buildings and every dungeon, which are no region and no house.

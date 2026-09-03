@@ -1,11 +1,11 @@
 # Boats and house customisation
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+[Gameplay index](../../roadmap/06-gameplay/README.md) · [Roadmap](../../roadmap/README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
 
 - `boats` — a multi that moves: a hull that blocks, a deck you can stand on,
   and everyone aboard arriving with it. **B1 and B2 built; B3–B4 and the tiller
   planned — see
-  [`boats.md`](../../boats.md)**, which refuses a parent transform on the engine's own
+  [`boats.md`](../design_boats.md)**, which refuses a parent transform on the engine's own
   evidence (mounting *deletes* the mount rather than carrying it), keeps the hull
   out of `Obstructions` because that index only ever subtracts and a deck has to
   *add* a surface, and finds that `Feature::SmoothShip` already names `0xF6` and
@@ -34,7 +34,7 @@
   - **B4 — the boat as property**: the hold, the plank, the deed, decay.
     Housing's H2–H5 with a different noun.
 - `customisation` — the `0xD7` house design system. **C1 and C2 built; C3–C4
-  planned — see [`customisation.md`](../../customisation.md)**, which reverts housing's
+  planned — see [`customisation.md`](../design_customisation.md)**, which reverts housing's
   D7 in full. The decision it turned on was where a per-house component list
   lives: `Terrain::multi_components` cannot hold one — its only key is a `u16`,
   it returns a borrow out of `&self`, its store is fixed at boot, it is

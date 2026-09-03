@@ -1375,7 +1375,7 @@ fn demolish_house(state: &mut WorldState, actor: EntityId, args: &[&str]) {
 /// one this is the only way a ship reaches the water at all. Staff-exempt on the
 /// judgements about the berth — a game master may moor in a fountain — but not
 /// on the arithmetic, so a hull that would land off the edge of the world is
-/// still refused. `docs/boats.md`'s B1.
+/// still refused. `docs/housing/design_boats.md`'s B1.
 fn launch_boat(state: &mut WorldState, actor: EntityId, args: &[&str]) {
     let Some(raw_multi) = args.first().and_then(parse_u16) else {
         notify(state, actor, "Usage: .boat <multi id>, e.g. .boat 0x0C");
@@ -1464,7 +1464,8 @@ fn compass(word: &str) -> Option<Direction> {
 /// design *seam* — the storage, the restore, the walls, the sign, the allowance
 /// and `0xD8` — with components that came out of a client file, so a bug in any
 /// of those is a bug in that thing rather than a bug in an editor nobody has
-/// written. `docs/customisation.md`'s C1 argues the order.
+/// written. `docs/housing/evidence/2026-08-24-the-design-phases.md`'s C1 argues
+/// the order.
 ///
 /// It is also the only way a shard ships its own architecture today: a pack can
 /// give a house a shape no `multi.mul` entry has, without editing a client file.

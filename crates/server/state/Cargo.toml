@@ -29,7 +29,7 @@ openshard-protocol.workspace = true
 # `LandTile` from this crate — so the edge is named here rather than smuggled
 # through a re-export. **No file reader comes with it**: D2a's rule is that this
 # crate never holds the multi *table*, and a design is world state that happens
-# to be shaped like one. See `docs/customisation.md`'s C1.
+# to be shaped like one. See `docs/housing/design_customisation.md`'s C1.
 openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 serde.workspace = true
