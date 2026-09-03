@@ -169,6 +169,7 @@ and the two are kept in step by hand.
 | `wire::InvalidCharacterSlot::slot` | same |
 | `design::DesignTile::{dx, dy, dz}` | a signed tile displacement from a house's origin — `target::MultiOffset`'s geometry, at `i8` because the wire's stair buffer gives each offset one byte |
 | `design::DesignBounds::{x_min, y_min}` | the corner the grid planes are indexed from, in that same displacement space: subtracted from one and added back to the other |
+| `encoded::DesignEdit::Build::{dx, dy}`, `::Erase::{dx, dy, dz}` | the same displacement one packet earlier — what a `0xD7` editing verb points at — kept at the wire's `i32` rather than a `Component`'s `i16` so that an offset outside the house is refused by the housing rules instead of dropping the connection |
 | `craft::{CraftCatalogueComponent, CraftWorkbenchComponent}::amount`, workbench/component `carried`, `CraftCatalogue::amounts`, `CraftWorkbench::tool_uses` | displayed or indexed item/use quantities; their gameplay caps live above `protocol` |
 | craft catalogue/workbench `button`, `make_button`, `details_button`, `materials_button`, `refresh_button`, `cancel_button` | private presentation-seam gump reply ids, matching the existing `CraftCatalogueRow::button` exception |
 | `craft::CraftSkillRequirement::{skill, minimum}`, catalogue/workbench `skills` | state-owned skill ids plus displayed thresholds in tenths of a percent |

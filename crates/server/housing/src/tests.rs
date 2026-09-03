@@ -22,6 +22,10 @@ use openshard_map::overlay::{
 use openshard_movement::scene::Scene;
 use openshard_protocol::access::AccessLevel;
 use openshard_protocol::direction::Direction;
+use openshard_protocol::encoded::{
+    DesignEdit,
+    RawStorey,
+};
 use openshard_protocol::identity::AccountName;
 use openshard_protocol::serial::{
     Serial,
@@ -111,6 +115,10 @@ const STAIR: u16 = 0x0008;
 /// the floor below it.
 const BANISTER: u16 = 0x08C6;
 
+/// A roof tile: the one thing the design editor's build verb will not lay,
+/// because roofs are their own two subcommands on their own plane.
+const ROOF: u16 = 0x0009;
+
 /// The ground these tests build on, and the table it reads.
 ///
 /// **A real map.** `land` is the id under every tile — `0` is nothing in
@@ -138,6 +146,7 @@ fn ground_scene(land: u16, fits: bool) -> Scene {
     scene.art(FLOOR, TileFlags::FLOOR | TileFlags::PLATFORM, 0);
     scene.art(STAIR, TileFlags::PLATFORM | TileFlags::CLIMBABLE, 5);
     scene.art(BANISTER, TileFlags::BLOCK, 5);
+    scene.art(ROOF, TileFlags::ROOF, 3);
     scene
 }
 
@@ -3463,4 +3472,548 @@ fn the_signs_customise_button_opens_a_session_for_the_owner_alone() {
     let (stranger, _, _) = a_connected_actor(&mut state, 2);
     assert!(press(&mut state, stranger), "the house window did not answer");
     assert!(!session::is_open(&state, house));
+}
+
+// -- The editing verbs -------------------------------------------------------
+//
+// The fixture foundation's platform is `cottage()`, whose box runs -1..=1 on
+// both axes, so the grid these verbs work on is -1..=1 east and -1..=2 south:
+// three tiles wide, four deep, the last row being the stair strip
+// `initial_foundation` lays. Three storeys, since neither side reaches
+// fourteen.
+
+/// The working copy, which is the only thing step 2 is allowed to change.
+fn working(state: &WorldState, house: EntityId) -> Vec<Component> {
+    state
+        .registry
+        .get::<openshard_state::components::DesignSession>(house)
+        .expect("the session")
+        .working
+        .clone()
+}
+
+/// Which storey the editor is on.
+fn storey(state: &WorldState, house: EntityId) -> u8 {
+    state
+        .registry
+        .get::<openshard_state::components::DesignSession>(house)
+        .expect("the session")
+        .floor
+}
+
+/// A foundation with a session already open over it.
+fn an_open_foundation(state: &mut WorldState, raw: u64) -> (EntityId, EntityId) {
+    let (actor, _, house) = a_foundation(state, raw);
+    session::begin(state, actor, house).expect("the owner may design their own house");
+    (actor, house)
+}
+
+/// The grid is the foundation's own box with the stair row on the end, and it
+/// is three storeys tall — the two numbers every verb below is checked against,
+/// asserted once here so a change to the fixture shows up as one failure rather
+/// than as ten.
+#[test]
+fn the_grid_is_the_foundations_box_with_the_stair_row() {
+    let mut state = world_with(cottage());
+    let (_, _, house) = a_foundation(&mut state, 1);
+
+    let grid = editing::buildable_box(&state, house).expect("the fixture knows the platform");
+    assert_eq!(
+        (grid.min_x, grid.min_y, grid.max_x, grid.max_y),
+        (-1, -1, 1, 2),
+        "the platform's box, one row deeper"
+    );
+    assert_eq!(
+        editing::max_storeys(grid),
+        3,
+        "nothing here reaches fourteen tiles"
+    );
+    assert_eq!(editing::storey_z(1), 7, "ServUO's GetLevelZ for level one");
+    assert_eq!(editing::storey_z(3), 47);
+}
+
+/// A piece lands at the height of the storey being edited, and nowhere else on
+/// the shard changes.
+#[test]
+fn a_built_piece_lands_on_the_storey_the_editor_is_on() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let committed = design::shape_of_house(&state, house).expect("a foundation is placed designed");
+    let revision = design::revision(&state, house);
+    state.outbox.clear();
+
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(WALL),
+            dx:      0,
+            dy:      0,
+        },
+    )
+    .expect("the editor may lay a wall inside their own house");
+
+    assert!(
+        working(&state, house).contains(&component(WALL, 0, 0, editing::FIRST_STOREY_Z, true)),
+        "the wall did not land on the first storey"
+    );
+    // C7, asked of everything a stranger could notice.
+    assert_eq!(
+        design::shape_of_house(&state, house),
+        Some(committed),
+        "an edit reached the committed design"
+    );
+    assert_eq!(
+        design::revision(&state, house),
+        revision,
+        "an edit bumped the cache key"
+    );
+    assert!(state.outbox.is_empty(), "an edit put a packet on the wire");
+}
+
+/// And an edit lays nothing in the world — the other half of C7, asked of the
+/// obstruction index.
+///
+/// The tile is the one corner of the grid the initial foundation leaves empty:
+/// `initial_foundation`'s stair strip starts one east of the box, so the west
+/// end of the stair row has nothing on it. A working copy that leaked into the
+/// index would show up there as a tile that is suddenly blocked.
+#[test]
+fn an_edit_lays_nothing_in_the_world() {
+    let mut state = world_with(cottage());
+    let (actor, _) = an_open_foundation(&mut state, 1);
+    let blocked = |state: &WorldState| state.facet_state(Facet(0)).obstructions().holds_anything(9, 12);
+    assert!(!blocked(&state), "the fixture's west stair corner is not empty");
+
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(WALL),
+            dx:      -1,
+            dy:      2,
+        },
+    )
+    .expect("the stair row is inside the grid");
+
+    assert!(!blocked(&state), "an edit reached the obstruction index");
+}
+
+/// The storey the editor is on decides the height — the whole of what
+/// select-floor is for.
+#[test]
+fn the_chosen_storey_decides_what_height_a_piece_is_built_at() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+
+    editing::apply(&mut state, actor, DesignEdit::Floor { storey: RawStorey(2) })
+        .expect("a three-storey house has a second floor");
+    assert_eq!(storey(&state, house), 2);
+
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(WALL),
+            dx:      0,
+            dy:      0,
+        },
+    )
+    .expect("the editor may lay a wall inside their own house");
+
+    assert!(
+        working(&state, house).contains(&component(WALL, 0, 0, editing::storey_z(2), true)),
+        "the wall was laid at the ground floor's height"
+    );
+}
+
+/// The reference's one exception, stated outright in `Designer_Build`: the
+/// far-south row is the stair strip and everything on it sits at zero.
+#[test]
+fn a_piece_on_the_stair_row_is_laid_at_the_ground() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    editing::apply(&mut state, actor, DesignEdit::Floor { storey: RawStorey(3) }).expect("the top storey");
+
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(STAIR),
+            dx:      -1,
+            dy:      2,
+        },
+    )
+    .expect("the stair row is inside the grid");
+
+    assert!(
+        working(&state, house).contains(&component(STAIR, -1, 2, 0, true)),
+        "a piece on the stair row took the storey's height"
+    );
+}
+
+/// Off the grid is refused, and the grid is the *foundation's* — so erasing a
+/// corner does not shrink the house a player is allowed to build in.
+#[test]
+fn building_off_the_foundations_grid_is_refused() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let before = working(&state, house);
+
+    for (dx, dy) in [(2, 0), (-2, 0), (0, 3), (0, -2), (i32::from(i16::MAX) + 1, 0)] {
+        assert_eq!(
+            editing::apply(
+                &mut state,
+                actor,
+                DesignEdit::Build {
+                    graphic: Graphic(WALL),
+                    dx,
+                    dy,
+                },
+            ),
+            Err(editing::EditRefusal::OutsideTheHouse),
+            "({dx}, {dy}) is off the grid"
+        );
+    }
+    assert_eq!(
+        working(&state, house),
+        before,
+        "a refused build changed the design"
+    );
+
+    // The corner of the stair row comes off, and the grid does not follow it.
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Erase {
+            graphic: Graphic(0x0751),
+            dx:      1,
+            dy:      2,
+            dz:      0,
+        },
+    )
+    .expect("the stair strip is the player's to move");
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(STAIR),
+            dx:      1,
+            dy:      2,
+        },
+    )
+    .expect("and the tile it came off is still inside the house");
+}
+
+/// One wall replaces another on the same tile at the same height; a wall and a
+/// floor do not replace each other. ServUO's `MultiComponentList.Add`, and
+/// without it a client's repeated clicks stack a hundred copies on one tile.
+#[test]
+fn a_piece_replaces_only_what_stands_in_the_same_sense() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let build = |state: &mut WorldState, graphic: u16| {
+        editing::apply(
+            state,
+            actor,
+            DesignEdit::Build {
+                graphic: Graphic(graphic),
+                dx:      0,
+                dy:      0,
+            },
+        )
+        .expect("inside the house")
+    };
+    let at_the_spot = |state: &WorldState| {
+        working(state, house)
+            .into_iter()
+            .filter(|piece| piece.dx == 0 && piece.dy == 0 && piece.dz == editing::FIRST_STOREY_Z)
+            .count()
+    };
+
+    build(&mut state, WALL);
+    build(&mut state, WALL);
+    assert_eq!(at_the_spot(&state), 1, "the same wall twice is one wall");
+
+    // A floor has no height and a wall has twenty, so neither is the other's
+    // replacement — they are the two things that stand on one tile.
+    build(&mut state, FLOOR);
+    assert_eq!(at_the_spot(&state), 2, "a floor took a wall's place");
+}
+
+/// A roof tile is the roof verb's, which is not built yet. ServUO's
+/// `ValidPiece(itemID, roof: false)` refuses the same piece here for the same
+/// reason.
+#[test]
+fn the_build_verb_does_not_lay_a_roof() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let before = working(&state, house);
+
+    assert_eq!(
+        editing::apply(
+            &mut state,
+            actor,
+            DesignEdit::Build {
+                graphic: Graphic(ROOF),
+                dx:      0,
+                dy:      0,
+            },
+        ),
+        Err(editing::EditRefusal::RoofPiece)
+    );
+    assert_eq!(working(&state, house), before);
+}
+
+/// Erase takes off the piece it names and leaves its neighbours alone.
+#[test]
+fn erasing_takes_off_the_piece_it_names() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let stair = component(0x0751, 0, 2, 0, true);
+    assert!(
+        working(&state, house).contains(&stair),
+        "the fixture foundation lays a stair strip"
+    );
+
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Erase {
+            graphic: Graphic(0x0751),
+            dx:      0,
+            dy:      2,
+            dz:      0,
+        },
+    )
+    .expect("the stair strip is the player's to move");
+
+    let left = working(&state, house);
+    assert!(!left.contains(&stair), "the stair is still there");
+    assert!(
+        left.contains(&component(0x0751, 1, 2, 0, true)),
+        "erasing one stair took its neighbour with it"
+    );
+}
+
+/// The foundation's own floor is not the player's to remove — a hole in it is a
+/// house standing on nothing. Every tile at height zero inside the box except
+/// the stair row along the south edge.
+#[test]
+fn the_foundations_own_floor_cannot_be_erased() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let before = working(&state, house);
+
+    assert_eq!(
+        editing::apply(
+            &mut state,
+            actor,
+            DesignEdit::Erase {
+                graphic: Graphic(FLOOR),
+                dx:      0,
+                dy:      0,
+                dz:      0,
+            },
+        ),
+        Err(editing::EditRefusal::FixedFloor)
+    );
+    assert_eq!(
+        working(&state, house),
+        before,
+        "a refused erase changed the design"
+    );
+}
+
+/// Taking the last piece off an interior tile lays dirt in its place, so a
+/// design never has a hole the client draws the ground through. ServUO's
+/// `Designer_Delete` does this and it is easy to miss, because the erase looks
+/// finished without it.
+#[test]
+fn erasing_the_last_piece_off_an_interior_tile_leaves_dirt() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(WALL),
+            dx:      0,
+            dy:      0,
+        },
+    )
+    .expect("inside the house");
+
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Erase {
+            graphic: Graphic(WALL),
+            dx:      0,
+            dy:      0,
+            dz:      i32::from(editing::FIRST_STOREY_Z),
+        },
+    )
+    .expect("what was just built comes off again");
+
+    let left = working(&state, house);
+    assert!(
+        !left.contains(&component(WALL, 0, 0, editing::FIRST_STOREY_Z, true)),
+        "the wall is still there"
+    );
+    assert!(
+        left.contains(&component(editing::DIRT, 0, 0, editing::FIRST_STOREY_Z, true)),
+        "the tile was left as a hole"
+    );
+}
+
+/// And nothing is laid where the tile still has a floor, which is the other half
+/// of the same rule.
+#[test]
+fn erasing_off_a_tile_that_still_has_a_floor_lays_nothing() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    for graphic in [WALL, FLOOR] {
+        editing::apply(
+            &mut state,
+            actor,
+            DesignEdit::Build {
+                graphic: Graphic(graphic),
+                dx:      0,
+                dy:      0,
+            },
+        )
+        .expect("inside the house");
+    }
+
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Erase {
+            graphic: Graphic(WALL),
+            dx:      0,
+            dy:      0,
+            dz:      i32::from(editing::FIRST_STOREY_Z),
+        },
+    )
+    .expect("the wall comes off");
+
+    let left = working(&state, house);
+    assert!(
+        left.contains(&component(FLOOR, 0, 0, editing::FIRST_STOREY_Z, true)),
+        "the floor went with the wall"
+    );
+    assert!(
+        !left.iter().any(|piece| piece.graphic == Graphic(editing::DIRT)),
+        "dirt was laid on a tile that still has a floor"
+    );
+}
+
+/// Erasing what is not there is refused rather than silently ignored: the two
+/// are indistinguishable from the client, and only one of them is a test that
+/// can fail.
+#[test]
+fn erasing_nothing_is_refused() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let before = working(&state, house);
+
+    assert_eq!(
+        editing::apply(
+            &mut state,
+            actor,
+            DesignEdit::Erase {
+                graphic: Graphic(WALL),
+                dx:      0,
+                dy:      0,
+                dz:      i32::from(editing::FIRST_STOREY_Z),
+            },
+        ),
+        Err(editing::EditRefusal::NothingThere)
+    );
+    assert_eq!(working(&state, house), before);
+}
+
+/// The storey picker clamps rather than refusing — `Designer_Level`'s own
+/// answer, because a client showing one button more than this house has storeys
+/// is drawing a floor that does not exist rather than asking for a forbidden
+/// one.
+#[test]
+fn the_storey_picker_clamps_to_the_ground_floor() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+
+    for (asked, expected) in [(2, 2), (3, 3), (4, 1), (0, 1), (-1, 1), (i32::MAX, 1)] {
+        editing::apply(
+            &mut state,
+            actor,
+            DesignEdit::Floor {
+                storey: RawStorey(asked),
+            },
+        )
+        .expect("the storey picker never refuses");
+        assert_eq!(storey(&state, house), expected, "asked for storey {asked}");
+    }
+}
+
+/// An edit from somebody with nothing open changes nothing. The ordinary answer
+/// to a packet that crossed a window the shard had already closed.
+#[test]
+fn an_edit_without_a_session_is_refused() {
+    let mut state = world_with(cottage());
+    let (actor, _, house) = a_foundation(&mut state, 1);
+    let committed = design::shape_of_house(&state, house).expect("a foundation is placed designed");
+
+    assert_eq!(
+        editing::apply(
+            &mut state,
+            actor,
+            DesignEdit::Build {
+                graphic: Graphic(WALL),
+                dx:      0,
+                dy:      0,
+            },
+        ),
+        Err(editing::EditRefusal::NoSession)
+    );
+    assert_eq!(design::shape_of_house(&state, house), Some(committed));
+}
+
+/// One editor's verbs reach one editor's house. Two open sessions on one shard
+/// is the ordinary case, and `house_of_editor` is what keeps them apart.
+#[test]
+fn an_edit_reaches_the_house_its_editor_has_open() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    // A second house with its own owner, well out of the first one's yard.
+    let (other_actor, other_owner, _) = a_connected_actor(&mut state, 2);
+    let other_house = place(
+        &mut state,
+        other_actor,
+        Point::new(24, 24, 0),
+        Facet(0),
+        FOUNDATION,
+        other_owner,
+    )
+    .expect("open ground");
+    session::begin(&mut state, other_actor, other_house).expect("its own owner opens it");
+    let untouched = working(&state, other_house);
+
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(WALL),
+            dx:      0,
+            dy:      0,
+        },
+    )
+    .expect("inside the first house");
+
+    assert!(working(&state, house).contains(&component(WALL, 0, 0, editing::FIRST_STOREY_Z, true)));
+    assert_eq!(
+        working(&state, other_house),
+        untouched,
+        "one editor's wall landed in another editor's house"
+    );
 }

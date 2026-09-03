@@ -1174,6 +1174,20 @@ pub enum Command {
         /// Whose.
         connection: ConnectionId,
     },
+    /// A client changed the design it has open (`0xD7`/`0x05`, `0x06`, `0x12`)
+    /// — lay a piece, take one away, or move to another storey.
+    ///
+    /// One command for the three because the wire is one packet with three
+    /// verbs, and because every one of them is answered the same way: the
+    /// working copy changes and nothing else does. Which house it is about is
+    /// not on the wire and is not here — the shard knows what this connection
+    /// has open, and a client asserting it would be asking the wrong end.
+    DesignEdit {
+        /// Whose.
+        connection: ConnectionId,
+        /// Which verb, with what it names.
+        edit:       openshard_protocol::encoded::DesignEdit,
+    },
     /// Close an open gump on a player's client — the dialog a page chain is
     /// replacing.
     CloseGump {
@@ -1403,6 +1417,7 @@ impl Command {
             Self::QuestLogRequest { .. } => "QuestLogRequest",
             Self::GuildWindowRequest { .. } => "GuildWindowRequest",
             Self::EndDesignSession { .. } => "EndDesignSession",
+            Self::DesignEdit { .. } => "DesignEdit",
             Self::CloseGump { .. } => "CloseGump",
             Self::Message { .. } => "Message",
             Self::PlaySound { .. } => "PlaySound",

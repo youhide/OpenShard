@@ -1700,6 +1700,18 @@ impl World {
                     openshard_housing::session::end(&mut self.state, player);
                 }
             }
+            Command::DesignEdit { connection, edit } => {
+                if let Some(&player) = self.state.players.get(&connection) {
+                    // A refused edit changes nothing and tells nobody: the
+                    // reference answers one by resending the design, and the
+                    // verb that does that is the customisation plan's step 5.
+                    // Logged so that a client stuck sending refused edits is
+                    // visible from this end rather than only from its own.
+                    if let Err(refusal) = openshard_housing::editing::apply(&mut self.state, player, edit) {
+                        debug!(?refusal, ?edit, "refused a design edit");
+                    }
+                }
+            }
             Command::CloseGump { serial, gump_id } => self.close_gump(serial, gump_id),
             Command::Message { serial, text } => {
                 if let Some(entity) = self.state.registry.entity_of(serial) {

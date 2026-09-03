@@ -59,10 +59,18 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
             match command.subcommand.interpret() {
                 EncodedSubcommand::QuestGumpRequest => Some(Command::QuestLogRequest { connection: id }),
                 EncodedSubcommand::GuildGumpRequest => Some(Command::GuildWindowRequest { connection: id }),
-                // The design editor closed. The only design subcommand routed
-                // so far: the verbs that *change* a design are the rest of
-                // `plans/housing/customisation/PLAN.md`.
+                // The design editor closed.
                 EncodedSubcommand::EndCustomisation => Some(Command::EndDesignSession { connection: id }),
+                // And the three that change what it has open. The payload was
+                // decoded with the subcommand, so `edit` is present for exactly
+                // these three arms — see `EncodedCommand::edit`.
+                EncodedSubcommand::DesignBuild
+                | EncodedSubcommand::DesignErase
+                | EncodedSubcommand::DesignFloor => {
+                    command
+                        .edit
+                        .map(|edit| Command::DesignEdit { connection: id, edit })
+                }
                 // Named, not routed: combat has no weapon abilities. Naming it
                 // means the byte layout is not re-derived the day it lands.
                 EncodedSubcommand::SetAbility => None,
@@ -461,9 +469,8 @@ mod tests {
         );
     }
 
-    /// The first `0xD7` design subcommand this engine routes, and the neighbour
-    /// it must not be: `0x0C` closes the editor, `0x0D` lays a stair and is
-    /// still nothing here.
+    /// The bracket `0xD7` this engine routes, and the neighbour it must not be:
+    /// `0x0C` closes the editor, `0x0D` lays a stair and is still nothing here.
     #[test]
     fn closing_the_design_window_attaches_only_the_connection() {
         let connection = ConnectionId::from_raw(42);
@@ -471,6 +478,7 @@ mod tests {
             ClientPacket::Encoded(openshard_protocol::encoded::EncodedCommand {
                 serial:     openshard_protocol::encoded::RawEncodedSerial(1),
                 subcommand: openshard_protocol::encoded::RawEncodedSubcommand(subcommand),
+                edit:       None,
             })
         };
         assert_eq!(
@@ -478,6 +486,75 @@ mod tests {
             Some(Command::EndDesignSession { connection })
         );
         assert_eq!(dispatch_world_packet(encoded(0x0D), connection), None);
+    }
+
+    /// The three editing verbs, dispatched from the bytes a client sends rather
+    /// than from a hand-built struct: what is under test is that the payload
+    /// survives the whole way from the wire to the command, and a literal would
+    /// skip the decode that carries it.
+    #[test]
+    fn the_design_verbs_carry_their_payload_into_the_tick() {
+        use openshard_protocol::encoded::{
+            DesignEdit,
+            RawEncodedSerial,
+            RawStorey,
+        };
+        use openshard_protocol::version::ClientVersion;
+        use openshard_protocol::wire::Graphic;
+
+        let connection = ConnectionId::from_raw(42);
+        let heard = |bytes: &[u8]| {
+            dispatch_world_packet(
+                ClientPacket::decode(bytes, ClientVersion::new(7, 0, 0, 0)).expect("it decodes"),
+                connection,
+            )
+        };
+        let who = RawEncodedSerial(1);
+
+        assert_eq!(
+            heard(&openshard_protocol::encoded::design_build_request(
+                who,
+                Graphic(0x0007),
+                -3,
+                4
+            )),
+            Some(Command::DesignEdit {
+                connection,
+                edit: DesignEdit::Build {
+                    graphic: Graphic(0x0007),
+                    dx:      -3,
+                    dy:      4,
+                },
+            })
+        );
+        assert_eq!(
+            heard(&openshard_protocol::encoded::design_erase_request(
+                who,
+                Graphic(0x0006),
+                1,
+                2,
+                7
+            )),
+            Some(Command::DesignEdit {
+                connection,
+                edit: DesignEdit::Erase {
+                    graphic: Graphic(0x0006),
+                    dx:      1,
+                    dy:      2,
+                    dz:      7,
+                },
+            })
+        );
+        assert_eq!(
+            heard(&openshard_protocol::encoded::design_floor_request(
+                who,
+                RawStorey(2)
+            )),
+            Some(Command::DesignEdit {
+                connection,
+                edit: DesignEdit::Floor { storey: RawStorey(2) },
+            })
+        );
     }
 
     #[test]

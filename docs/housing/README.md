@@ -58,7 +58,8 @@ its shape is somewhere different every few seconds.
 | A foundation placed with a derived design, deed included; `.hdesign` copies a shape onto a house | ✅ shipping | — | the same, C2 |
 | Imported house templates: legacy Sphere packs converted to JSON, read at boot, placed as `.house @name` | ✅ shipping | documented only here — row 4 | `housing/src/{template,wsc}.rs` and its two examples |
 | The design session's brackets: the sign's Customise button, `0xD7 0x0C`, and the `0xBF 0x20` the editor's own client sees | ✅ shipping | — | [`design_customisation.md`](design_customisation.md) C7 |
-| The `0xD7` editor — a player reshaping their own house | ⬜ not built | every verb that *changes* a design, and validation — row 2 | [`plans/housing/customisation/PLAN.md`](../../plans/housing/customisation/PLAN.md) |
+| Build, erase and select-storey (`0xD7` `0x06`/`0x05`/`0x12`), against the working copy | ✅ shipping | — | [`plans/housing/customisation/PLAN.md`](../../plans/housing/customisation/PLAN.md) step 2 |
+| The `0xD7` editor — a player reshaping their own house | ⬜ not built | commit and revert, roofs, validation — row 2 | the same plan, steps 3–6 |
 | A ship moored, blocking as a hull and carrying as a deck, saved and restored | ✅ shipping | — | [`design_boats.md`](design_boats.md) B1–B4 |
 | A ship that sails on a cadence, with the crew it is actually carrying | ✅ shipping | no plank, so nothing boards deliberately — row 3 | [`evidence/2026-08-25-the-boat-phases.md`](evidence/2026-08-25-the-boat-phases.md) B2 |
 | `0xF6` smooth movement for High Seas clients | ⬜ not built | two packets per watcher per tile until then — row 6 | [`plans/housing/boats/PLAN.md`](../../plans/housing/boats/PLAN.md) |
@@ -120,7 +121,18 @@ its shape is somewhere different every few seconds.
   owner with `AlreadyOpen` at the next login — and the logout one is an ordering
   as much as a rule: the session names its editor by a serial the disconnect is
   about to release.
-- **101 tests in `housing` and 25 in `boats`**, plus the `moored_boat` survey,
+- **An editing verb reaches the working copy and nothing else.**
+  `a_built_piece_lands_on_the_storey_the_editor_is_on` asks it of the committed
+  design, the revision and the outbox; `an_edit_lays_nothing_in_the_world` asks
+  it of the obstruction index, on the one grid tile the initial foundation
+  leaves empty so that a leak has somewhere to show. C7 is the whole reason the
+  editor is tractable, and it is one forgotten line from being false.
+- **The editing grid is the foundation's, not the working copy's.**
+  `building_off_the_foundations_grid_is_refused` erases a corner and then builds
+  it back. The reference gets this free from a fixed `MultiComponentList` grid;
+  a box recomputed from the components each time would shrink as pieces come
+  off, and a player who erased a corner could never put one there again.
+- **117 tests in `housing` and 25 in `boats`**, plus the `moored_boat` survey,
   which keeps the *retired* reading of a plank written out so the number that
   retired it stays reproducible.
 
@@ -135,16 +147,18 @@ and `restore_regions` runs seven lines after `restore_houses` and wipes whatever
 it registered. What it needs first is a decision about the id space —
 [`plans/housing/house_region/PLAN.md`](../../plans/housing/house_region/PLAN.md).
 
-**2. 🚩 No player can change the shape of their own house.** Every design on this
-shard is either a shipped multi, a staff `.hdesign` copy, or an imported
-template. The seam, both packets, the save, the foundation and now the session's
-own brackets are built and tested — an owner can open the editor over their own
-house and close it again — but **the session has no verbs**: build, erase,
-select-floor, commit and revert are all still missing, and so is the validation
-behind them. A session that can be opened and cannot change anything is exactly
-the half worth having first, because every one of those verbs assumes a session
-that cannot be left dangling.
-[`plans/housing/customisation/PLAN.md`](../../plans/housing/customisation/PLAN.md).
+**2. 🚩 No player can change the shape of their own house *yet*, because nothing
+commits.** Every design standing on this shard is still either a shipped multi, a
+staff `.hdesign` copy, or an imported template. What is built is a whole editing
+session: the seam, both packets, the save, the foundation, the brackets, and now
+the three verbs that reshape the **working copy** — build, erase, select-storey.
+What is missing is the step that makes any of it visible: **commit and revert**,
+and then roofs, backup/restore and the validation behind them. So an owner can
+open the editor, move every wall in the house, and close it again having changed
+nothing anybody can see. That is not an accident of ordering — it is
+`design_customisation.md`'s C7 working exactly as intended, one commit and one
+swap — but until step 3 lands, the working copy is a scratchpad the shard throws
+away. [`plans/housing/customisation/PLAN.md`](../../plans/housing/customisation/PLAN.md).
 
 **3. 🚩 Nothing boards a ship on purpose.** A swimmer used to clamber over the
 gunwale and no longer can, which is UO's own rule — you board over the plank —

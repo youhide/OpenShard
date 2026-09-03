@@ -556,6 +556,27 @@ const ALLOWLIST: &[(&str, &str, &str)] = &[
         "Other.0",
         "EncodedSubcommand: the same leftover arm, a word this engine does not name",
     ),
+    // Class 1b — `design.rs`'s DesignTile geometry, one packet earlier. The
+    // offsets a `0xD7` editing verb names are the same signed displacement from
+    // a house's origin, carried at the wire's own i32 rather than a Component's
+    // i16 on purpose: an offset outside the house is a refusal in the game
+    // rules, and a decode failure would close the connection over a click.
+    (
+        "encoded.rs",
+        "Build.dx",
+        "DesignEdit: a signed tile displacement from a house's origin — design.rs's DesignTile \
+         geometry, at the wire's i32 so that an out-of-house offset is refused by the housing \
+         rules rather than by dropping the connection",
+    ),
+    ("encoded.rs", "Build.dy", "DesignEdit: same"),
+    ("encoded.rs", "Erase.dx", "DesignEdit: same"),
+    ("encoded.rs", "Erase.dy", "DesignEdit: same"),
+    (
+        "encoded.rs",
+        "Erase.dz",
+        "DesignEdit: same, and it is on the erase verb alone — erasing names a tile that exists, \
+         building names one that does not and takes its height from the storey being edited",
+    ),
     (
         "extended.rs",
         "Unknown.0",

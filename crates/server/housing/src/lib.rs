@@ -33,6 +33,7 @@
 
 pub mod decay;
 pub mod design;
+pub mod editing;
 pub mod inventory;
 pub mod session;
 pub mod sign;

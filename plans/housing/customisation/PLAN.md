@@ -2,9 +2,13 @@
 
 A designed house exists on this shard: its shape is a component on the entity,
 both design packets cross the wire, a foundation can be bought and stood in, and
-`.hdesign` copies one multi's components onto a house. **What no player can do is
-change one** — every shape so far is either a shipped multi or a staff copy of
-one.
+`.hdesign` copies one multi's components onto a house. An owner can now open the
+editor over their own foundation and move every wall in it — **and nothing they
+do there is visible to anybody**, because nothing commits. Every shape standing
+on this shard is still either a shipped multi or a staff copy of one.
+
+That gap is C7 working as designed rather than an accident of ordering: the
+working design touches nothing until one commit swaps it in. It closes at step 3.
 
 The model, the packets and the commit rule are
 [`docs/housing/design_customisation.md`](../../../docs/housing/design_customisation.md);
@@ -69,9 +73,49 @@ Three decisions are load-bearing here and none of them is open:
       refusal is the half it does have. And nothing sends a `0xD8` at the
       brackets, because until step 2 the working design is a copy of the
       committed one and there is nothing new to draw.
-- [ ] **2. Build, erase and select-floor**, against the working copy only. The
+- [x] **2. Build, erase and select-floor**, against the working copy only. The
       hex values come out of the reference at implementation time and are cited
       at the constant.
+
+      Built as `housing/src/editing.rs`, behind three more subcommands —
+      `0x06` build, `0x05` erase, `0x12` select-storey, each cited to both
+      `HouseFoundation.cs`'s registration *and* ClassicUO's own sender, because
+      here the two references agree and that is what makes a hex worth citing.
+      The payload was the one thing the plan did not price: a `0xD7` value is
+      **type-tagged** (`EncodedReader.ReadInt32` reads a byte, then four), so
+      `EncodedCommand` grew an `edit` decoded from the subcommand — `Some`
+      exactly for those three, and the two fields therefore cannot disagree.
+
+      **The grid is the foundation's own box, one row deeper, and not the
+      working copy's.** The reference gets that for free: its
+      `MultiComponentList` allocates a fixed grid and `Add` silently drops
+      anything outside it. Recomputing the box from the components — the obvious
+      port — would shrink the buildable area as pieces come off, so a player who
+      erased a corner could never put one back. `buildable_box` derives the same
+      row `initial_foundation` lays the stairs on, asked of one function so the
+      two cannot drift.
+
+      **Three rules ported that look like details and are not.** A piece
+      replaces only what stands at the same height *in the same sense* — one
+      wall for another, a floor and a wall side by side — or a client's repeated
+      clicks stack a hundred copies of one wall, all of them on the wire. A
+      far-south piece is laid at zero, because that row is the stair strip
+      rather than a storey. And erasing the last piece off an interior tile lays
+      **dirt** at the first storey's height, or the design has a hole the client
+      draws the ground through; the erase looks finished without it.
+
+      **What was deliberately left out.** `Designer_Stairs` (`0x0D`), which lays
+      a whole stair multi rather than a tile and is a verb of its own.
+      ServUO's `ComponentVerification` — a shipped table of which art ids are
+      house pieces at all — which this engine has no copy of; the half that is
+      free is the roof flag, and a roof is refused because roofs are step 5.
+      And the teleport `Designer_Level` does, for step 1's own reason: it is
+      about bodies rather than about the session's state.
+
+      **A refused edit says nothing.** The reference answers one by resending
+      the design, and that verb is the synch of step 5; until it exists the
+      honest answer is to change nothing, so `EditRefusal` goes to the log and
+      not to the player.
 - [ ] **3. Commit and revert**, which is the six-step tail plus throwing the
       working copy away. This is the first step a player can see the result of,
       and the first that can leave a house in a state nobody wants — so the two
@@ -88,16 +132,19 @@ Three decisions are load-bearing here and none of them is open:
 
 ## Found along the way
 
-Neither is in this plan's scope; both were noticed while step 1 was built and are
-recorded here rather than left to be re-found.
+None is in this plan's scope; all were noticed while the steps above were built
+and are recorded here rather than left to be re-found.
 
 - **The house window's bottom button row already runs off its own frame.**
   `sign.rs`'s `FRAME` is 520 wide, the five storage buttons step from x=20 by 100
   apiece, and `Demolish` is then drawn at **x=520** — on the frame's right edge,
   outside the background it is supposed to sit on. It has been that way since the
-  storage row landed and no test looks at a coordinate, so nothing says so. Step
-  2 adds a *toolbar's* worth of buttons to this window, which is the moment the
-  row has to be laid out rather than stepped.
+  storage row landed and no test looks at a coordinate, so nothing says so.
+  *Step 1 predicted step 2 would force this and step 2 did not*: the editor's
+  toolbar is drawn by the client, out of its own art, and the shard only ever
+  sees the `0xD7`s it produces. So the bug is still there, still unforced, and
+  now has nothing scheduled to trip over it — which makes it worth fixing on its
+  own rather than waiting for a step that will not come.
 - **`state/src/lib.rs` re-exports most components and not all of them.**
   `DesignSession` was deliberately not added to that `pub use components::{…}`
   list, because `style.md` says a type is imported from where it is declared —
