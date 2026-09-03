@@ -61,6 +61,11 @@ pub(crate) fn dispatch_world_packet(packet: ClientPacket, id: ConnectionId) -> O
                 EncodedSubcommand::GuildGumpRequest => Some(Command::GuildWindowRequest { connection: id }),
                 // The design editor closed.
                 EncodedSubcommand::EndCustomisation => Some(Command::EndDesignSession { connection: id }),
+                // And the two that say what the working copy was for. Neither
+                // carries a payload: what commits is the design the shard has
+                // been keeping, not one the client names.
+                EncodedSubcommand::DesignCommit => Some(Command::CommitDesign { connection: id }),
+                EncodedSubcommand::DesignRevert => Some(Command::RevertDesign { connection: id }),
                 // And the three that change what it has open. The payload was
                 // decoded with the subcommand, so `edit` is present for exactly
                 // these three arms — see `EncodedCommand::edit`.
@@ -486,6 +491,32 @@ mod tests {
             Some(Command::EndDesignSession { connection })
         );
         assert_eq!(dispatch_world_packet(encoded(0x0D), connection), None);
+    }
+
+    /// The two brackets that say what the working copy was for. Neither carries
+    /// a payload, and the pair `0x1A`/`0x19` is the reason revert is asserted
+    /// beside the weapon ability rather than on its own.
+    #[test]
+    fn committing_and_reverting_a_design_attach_only_the_connection() {
+        use openshard_protocol::version::ClientVersion;
+
+        let connection = ConnectionId::from_raw(42);
+        let who = openshard_protocol::encoded::RawEncodedSerial(1);
+        let heard = |bytes: &[u8]| {
+            dispatch_world_packet(
+                ClientPacket::decode(bytes, ClientVersion::new(7, 0, 0, 0)).expect("it decodes"),
+                connection,
+            )
+        };
+
+        assert_eq!(
+            heard(&openshard_protocol::encoded::design_commit_request(who)),
+            Some(Command::CommitDesign { connection })
+        );
+        assert_eq!(
+            heard(&openshard_protocol::encoded::design_revert_request(who)),
+            Some(Command::RevertDesign { connection })
+        );
     }
 
     /// The three editing verbs, dispatched from the bytes a client sends rather

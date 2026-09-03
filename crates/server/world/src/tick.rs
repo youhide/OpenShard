@@ -1712,6 +1712,25 @@ impl World {
                     }
                 }
             }
+            Command::CommitDesign { connection } => {
+                if let Some(&player) = self.state.players.get(&connection) {
+                    // A refused commit *is* told, which is the one place this
+                    // area differs from a refused edit: the player pressed a
+                    // button and is watching for the house to change, so
+                    // silence would read as a shard that had stopped answering.
+                    if let Err(refusal) = openshard_housing::commit::commit(&mut self.state, player) {
+                        self.state.system_message(player, refusal.message());
+                    }
+                }
+            }
+            Command::RevertDesign { connection } => {
+                if let Some(&player) = self.state.players.get(&connection) {
+                    // `None` for a client with nothing open, which is the same
+                    // window-already-closed race `EndDesignSession` answers and
+                    // is not worth a word to anybody.
+                    openshard_housing::commit::revert(&mut self.state, player);
+                }
+            }
             Command::CloseGump { serial, gump_id } => self.close_gump(serial, gump_id),
             Command::Message { serial, text } => {
                 if let Some(entity) = self.state.registry.entity_of(serial) {

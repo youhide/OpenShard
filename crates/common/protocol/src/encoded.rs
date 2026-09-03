@@ -168,6 +168,37 @@ pub fn design_floor_request(serial: RawEncodedSerial, storey: RawStorey) -> Vec<
     })
 }
 
+/// The design editor's "make this the house" — `0xD7` subcommand `0x04`, and
+/// nothing but the terminator behind it.
+///
+/// A bracket rather than an edit, which is why it carries no [`DesignEdit`]: what
+/// is committed is the working design the shard has been keeping all along, and
+/// naming it on the wire would let a client commit something the shard never
+/// agreed to.
+///
+/// The reference answers this one with a confirmation window, because it charges
+/// gold per component and the player is owed the number before they pay it. This
+/// shard has no price on a house at all, so there is nothing to confirm and the
+/// commit is the commit.
+#[must_use]
+pub fn design_commit_request(serial: RawEncodedSerial) -> Vec<u8> {
+    EncodedCommand::encode(serial, EncodedSubcommand::DESIGN_COMMIT, |out| {
+        out.u8(PAYLOAD_END)
+    })
+}
+
+/// The design editor's "start again from the house as it stands" — `0xD7`
+/// subcommand `0x1A`, and the terminator.
+///
+/// The opposite of [`design_commit_request`] and not of any one edit: it throws
+/// the whole working copy away rather than undoing the last thing done to it.
+#[must_use]
+pub fn design_revert_request(serial: RawEncodedSerial) -> Vec<u8> {
+    EncodedCommand::encode(serial, EncodedSubcommand::DESIGN_REVERT, |out| {
+        out.u8(PAYLOAD_END)
+    })
+}
+
 /// What a `0xD7` asks be done to the house design its sender has open.
 ///
 /// The three verbs of `plans/housing/customisation/PLAN.md`'s step 2, and every
@@ -322,6 +353,8 @@ impl RawEncodedSubcommand {
     pub const fn interpret(self) -> EncodedSubcommand {
         match self.0 {
             EncodedSubcommand::SET_ABILITY => EncodedSubcommand::SetAbility,
+            EncodedSubcommand::DESIGN_COMMIT => EncodedSubcommand::DesignCommit,
+            EncodedSubcommand::DESIGN_REVERT => EncodedSubcommand::DesignRevert,
             EncodedSubcommand::DESIGN_ERASE => EncodedSubcommand::DesignErase,
             EncodedSubcommand::DESIGN_BUILD => EncodedSubcommand::DesignBuild,
             EncodedSubcommand::END_CUSTOMISATION => EncodedSubcommand::EndCustomisation,
@@ -340,6 +373,15 @@ pub enum EncodedSubcommand {
     /// Set a weapon's special ability (AoS). Not acted on: combat has no
     /// abilities yet. Named so the byte layout is not re-derived when it does.
     SetAbility,
+    /// The working design is the house from now on — the swap C7 exists for.
+    ///
+    /// Carries no [`DesignEdit`]: what commits is the design the shard has been
+    /// keeping, and a client naming its own would be a client asserting a shape
+    /// nothing checked.
+    DesignCommit,
+    /// Throw the working design away and start again from the committed one.
+    /// [`DesignCommit`](Self::DesignCommit)'s opposite, and not any edit's.
+    DesignRevert,
     /// A piece was taken off the design being edited. Carries a
     /// [`DesignEdit::Erase`].
     DesignErase,
@@ -365,6 +407,15 @@ pub enum EncodedSubcommand {
 
 impl EncodedSubcommand {
     const SET_ABILITY: u16 = 0x19;
+    /// ServUO's `Designer_Commit` (`HouseFoundation.cs:811`), ClassicUO's
+    /// `Send_CustomHouseCommit`.
+    const DESIGN_COMMIT: u16 = 0x04;
+    /// ServUO's `Designer_Revert` (`HouseFoundation.cs:825`), ClassicUO's
+    /// `Send_CustomHouseRevert`. One word away from [`SET_ABILITY`], which is
+    /// `0x19` — the reason both have a test naming the other.
+    ///
+    /// [`SET_ABILITY`]: Self::SET_ABILITY
+    const DESIGN_REVERT: u16 = 0x1A;
     /// ServUO's `Designer_Delete`, registered at `HouseFoundation.cs:812`, and
     /// ClassicUO's `Send_CustomHouseDeleteItem`. Every hex here is read out of
     /// the references rather than guessed, per `style.md`'s "ports name their
@@ -465,6 +516,44 @@ mod tests {
             RawEncodedSubcommand(0x0D).interpret(),
             EncodedSubcommand::Other(0x0D),
             "the stair subcommand is not the close one"
+        );
+    }
+
+    /// The two brackets that decide what the working design was for, written by
+    /// this crate and read back by it. Ten bytes each and no payload — the whole
+    /// of what `Send_CustomHouseCommit` and `Send_CustomHouseRevert` write.
+    #[test]
+    fn the_commit_and_revert_subcommands_decode_as_themselves() {
+        let who = RawEncodedSerial(0x0000_002A);
+        for (packet, expected) in [
+            (design_commit_request(who), EncodedSubcommand::DesignCommit),
+            (design_revert_request(who), EncodedSubcommand::DesignRevert),
+        ] {
+            assert_eq!(packet.len(), 10, "id, length, serial, subcommand, terminator");
+            assert_eq!(packet[9], 0x0A, "the terminator both clients write");
+            let decoded = EncodedCommand::decode(&packet).unwrap();
+            assert_eq!(decoded.subcommand.interpret(), expected);
+            assert_eq!(decoded.edit, None, "a bracket carries no edit");
+        }
+    }
+
+    /// Revert is `0x1A` and the weapon ability is `0x19`. One word apart, and
+    /// the only thing keeping them apart is that both are named.
+    #[test]
+    fn revert_is_not_the_weapon_ability_beside_it() {
+        assert_eq!(
+            RawEncodedSubcommand(0x19).interpret(),
+            EncodedSubcommand::SetAbility
+        );
+        assert_eq!(
+            RawEncodedSubcommand(0x1A).interpret(),
+            EncodedSubcommand::DesignRevert
+        );
+        // And the neighbours of commit, which this engine does not name: `0x02`
+        // and `0x03` are backup and restore, and they are the plan's step 5.
+        assert_eq!(
+            RawEncodedSubcommand(0x03).interpret(),
+            EncodedSubcommand::Other(0x03)
         );
     }
 

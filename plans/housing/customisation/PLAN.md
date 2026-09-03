@@ -2,13 +2,15 @@
 
 A designed house exists on this shard: its shape is a component on the entity,
 both design packets cross the wire, a foundation can be bought and stood in, and
-`.hdesign` copies one multi's components onto a house. An owner can now open the
-editor over their own foundation and move every wall in it — **and nothing they
-do there is visible to anybody**, because nothing commits. Every shape standing
-on this shard is still either a shipped multi or a staff copy of one.
+`.hdesign` copies one multi's components onto a house. An owner can open the
+editor over their own foundation, move every wall in it, and **commit** — so a
+shape a player made five minutes ago is now a shape that stands, blocks, saves
+and draws for everybody who walks past it. That was step 3, and it is the whole
+of what C7's held-back working copy was for: one commit, one swap.
 
-That gap is C7 working as designed rather than an accident of ordering: the
-working design touches nothing until one commit swaps it in. It closes at step 3.
+What is left is the shape's *edges* rather than the mechanism — roofs, a second
+working copy to fall back to, and the validation that says a design is a
+building.
 
 The model, the packets and the commit rule are
 [`docs/housing/design_customisation.md`](../../../docs/housing/design_customisation.md);
@@ -116,15 +118,52 @@ Three decisions are load-bearing here and none of them is open:
       the design, and that verb is the synch of step 5; until it exists the
       honest answer is to change nothing, so `EditRefusal` goes to the log and
       not to the player.
-- [ ] **3. Commit and revert**, which is the six-step tail plus throwing the
+- [x] **3. Commit and revert**, which is the six-step tail plus throwing the
       working copy away. This is the first step a player can see the result of,
       and the first that can leave a house in a state nobody wants — so the two
       rules the record already paid for apply: nothing comes down until the new
       shape is legal, and the old walls come out as the *old* shape.
+
+      Built as `housing/src/commit.rs`, behind two more subcommands — `0x04`
+      commit and `0x1A` revert, each cited to ServUO's registration and to
+      ClassicUO's own sender, and each carrying nothing but the terminator byte.
+      **The tail cost nothing**, which is C2's dividend arriving: `redesign` has
+      been paying for `.hdesign` since the seam landed, so committing an
+      editor's design is that call plus ending the session. The two rules above
+      are its, and were already tested as its.
+
+      **The session ends last, and that is the one place this differs from the
+      reference.** ServUO removes its `DesignContext` and then sends the new
+      shape; here the swap is the thing that can be refused, and a player whose
+      design was refused still needs the editor to fix it in — so a refused
+      commit leaves the house *and* the session exactly as they were. What a
+      client sees is the same two packets in the other order: the design detail
+      redraws its editor's plan one packet before the `0xBF 0x20` disposes the
+      window.
+
+      **A refused commit is spoken, and it is the only design verb that is.** A
+      refused edit stays in the log for step 2's reason; a commit is a button
+      the player pressed while watching the house, and silence there reads as a
+      shard that stopped answering rather than as a no.
+
+      **Revert answers with the design it reverted to** — ServUO's
+      `SendDetailedInfoTo`. The client has been drawing its own copy of every
+      edit since the session opened, so nothing else on this shard would tell it
+      those edits are gone. The storey the editor is on is deliberately left
+      alone: which floor is on screen is a fact about the window, and
+      `Designer_Revert` does not touch its `Level` either.
+
+      **What was deliberately left out.** ServUO's `ConfirmCommitGump` and the
+      gold behind it: the reference charges per component and owes the player
+      the number before they pay it, and this shard puts no price on a house at
+      all — so there is nothing to confirm and the commit is the commit. And
+      `Designer_Clear` (`0x10`), which empties the working design; it belongs to
+      no step of this plan, and is recorded below rather than smuggled in here.
 - [ ] **4. The cheap half of validation**, enforced at commit: inside the
       foundation's box, under a component ceiling, storeys within the limit.
 - [ ] **5. Roofs, backup and restore** — the roof plane and a second working
-      copy, which are the remaining `0xD7` roles.
+      copy. Synch (`0x0E`) belongs here too: step 2 promised it this step by
+      name, and it is what turns a refused edit from a log line into an answer.
 - [ ] **6. The support-and-reachability half of validation**, deferred by name:
       *is this design structurally coherent* is a graph problem, and a floating
       tower is a cosmetic bug rather than a hole in the shard. It is worth doing
@@ -160,6 +199,23 @@ and are recorded here rather than left to be re-found.
   takes before it removes anything. It is closest in kind to step 5's roofs,
   and it should be adopted by that step rather than left as the one editor
   button that does nothing.
+- **The synch verb is now one call away, and step 2's reason for silent
+  refusals has quietly expired.** `editing.rs` says a refused edit answers
+  nothing *because* the shard has no way to resend the design; step 3 needed
+  exactly that call for revert, and it turned out to already exist —
+  `WorldState::send_design_detail`, written for the client's own `0xD8` query.
+  So `Designer_Sync` (`0x0E`) is a subcommand word, a dispatch arm and one line,
+  and the day it lands `EditRefusal` should stop going only to the log. Step 5
+  owns it; what is worth recording is that the estimate behind "until that
+  exists" is now wrong by an order of magnitude.
+- **`Designer_Clear` (`0x10`) belongs to no step of this plan either.** The same
+  gap `Designer_Stairs` has, found the same way: C6's role table names *clear*
+  — "empties the working design" — and none of the six steps does. It is the
+  cheapest verb in the family (the working copy becomes the foundation's own
+  platform, which `design::initial_foundation` already derives) and the most
+  destructive one a client can send, since it throws away an editing session's
+  whole work with no confirmation. It should be adopted deliberately or refused
+  deliberately, and either way not by omission.
 - **Nothing says which art ids are house pieces.** ServUO gates every build
   against a shipped `ComponentVerification` table; this engine has no copy of it,
   so `build` refuses a roof (the tiledata flag is free) and accepts everything

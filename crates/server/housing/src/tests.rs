@@ -4017,3 +4017,206 @@ fn an_edit_reaches_the_house_its_editor_has_open() {
         "one editor's wall landed in another editor's house"
     );
 }
+
+// -- Commit and revert -------------------------------------------------------
+//
+// The first step of the editor a player can see the result of. Everything above
+// is C7 holding the world still; these two say what the held-back working copy
+// was for.
+
+/// Every `0xD8` this connection has been sent. The design packet is variable
+/// length and its id is the whole of what these tests need to know.
+fn designs_sent(state: &WorldState, connection: ConnectionId) -> usize {
+    state
+        .outbox
+        .iter()
+        .filter(|outbound| outbound.connection == connection)
+        .filter(|outbound| outbound.packet.first() == Some(&0xD8))
+        .count()
+}
+
+/// The swap: what the editor built becomes the house, the revision goes up, and
+/// the session is over — the whole of step 3 in one assertion apiece.
+#[test]
+fn committing_makes_the_working_copy_the_shape_of_the_house() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let revision = design::revision(&state, house);
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(WALL),
+            dx:      0,
+            dy:      0,
+        },
+    )
+    .expect("the editor may lay a wall inside their own house");
+    state.outbox.clear();
+
+    let committed = commit::commit(&mut state, actor).expect("a design with walls commits");
+
+    assert_eq!(committed, revision + 1, "the cache key clients hold stood still");
+    assert_eq!(design::revision(&state, house), committed);
+    assert!(
+        design::shape_of_house(&state, house)
+            .expect("a foundation is placed designed")
+            .contains(&component(WALL, 0, 0, editing::FIRST_STOREY_Z, true)),
+        "the working copy was thrown away instead of committed"
+    );
+    assert!(
+        !session::is_open(&state, house),
+        "the editor was left open over a design it had already committed"
+    );
+    assert_eq!(
+        brackets_sent(&state, ConnectionId::from_raw(1)),
+        vec![0x05],
+        "the editor's window was never told to close"
+    );
+}
+
+/// And the world changes with it, which is the half nothing before step 3 could
+/// do. The tile is `an_edit_lays_nothing_in_the_world`'s: the west end of the
+/// stair row, which the initial foundation leaves empty, so a wall appearing
+/// there is this commit's and nothing else's.
+#[test]
+fn a_committed_wall_blocks_the_world_the_edit_did_not() {
+    let mut state = world_with(cottage());
+    let (actor, _) = an_open_foundation(&mut state, 1);
+    let blocked = |state: &WorldState| state.facet_state(Facet(0)).obstructions().holds_anything(9, 12);
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(WALL),
+            dx:      -1,
+            dy:      2,
+        },
+    )
+    .expect("the stair row is inside the grid");
+    assert!(!blocked(&state), "an edit reached the obstruction index");
+
+    commit::commit(&mut state, actor).expect("a design with walls commits");
+
+    assert!(blocked(&state), "the committed wall is not in the world");
+}
+
+/// Nothing comes down until the new shape is legal — and the session is part of
+/// "nothing", because the player's next move is to fix what was refused.
+///
+/// The working copy is emptied here rather than erased down to nothing: the
+/// erase verb refuses the foundation's own floor, so the state a hundred
+/// refused erases cannot reach is written directly, which is the shortest way
+/// to ask what a commit does with it.
+#[test]
+fn a_commit_that_draws_nothing_leaves_the_house_and_the_session_alone() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let committed = design::shape_of_house(&state, house).expect("a foundation is placed designed");
+    let revision = design::revision(&state, house);
+    let nothing = vec![component(1, 0, 0, 0, false)];
+    state
+        .registry
+        .get_mut::<openshard_state::components::DesignSession>(house)
+        .expect("the session")
+        .working = nothing.clone();
+
+    assert_eq!(
+        commit::commit(&mut state, actor),
+        Err(commit::CommitRefusal::Rejected(
+            design::DesignRefusal::DrawsNothing
+        ))
+    );
+
+    assert_eq!(
+        design::shape_of_house(&state, house),
+        Some(committed),
+        "a refused commit reached the house"
+    );
+    assert_eq!(design::revision(&state, house), revision);
+    assert!(
+        session::is_open(&state, house),
+        "a refused commit shut the editor the player has to fix it in"
+    );
+    assert_eq!(
+        working(&state, house),
+        nothing,
+        "a refused commit threw the working copy away"
+    );
+}
+
+/// A commit from somebody with nothing open is refused rather than answered,
+/// because it is the one design verb whose refusal is spoken aloud.
+#[test]
+fn committing_with_no_session_is_refused() {
+    let mut state = world_with(cottage());
+    let (actor, _, house) = a_foundation(&mut state, 1);
+    let revision = design::revision(&state, house);
+
+    assert_eq!(
+        commit::commit(&mut state, actor),
+        Err(commit::CommitRefusal::NoSession)
+    );
+    assert_eq!(design::revision(&state, house), revision);
+}
+
+/// Revert throws the working copy away and keeps the editor open on the house
+/// as it stands — the opposite of a commit and not of any one edit.
+#[test]
+fn reverting_starts_again_from_the_committed_design() {
+    let mut state = world_with(cottage());
+    let (actor, house) = an_open_foundation(&mut state, 1);
+    let committed = design::shape_of_house(&state, house).expect("a foundation is placed designed");
+    let revision = design::revision(&state, house);
+    editing::apply(&mut state, actor, DesignEdit::Floor { storey: RawStorey(2) }).expect("a second storey");
+    editing::apply(
+        &mut state,
+        actor,
+        DesignEdit::Build {
+            graphic: Graphic(WALL),
+            dx:      0,
+            dy:      0,
+        },
+    )
+    .expect("the editor may lay a wall inside their own house");
+    state.outbox.clear();
+
+    assert_eq!(commit::revert(&mut state, actor), Some(house));
+
+    assert_eq!(
+        working(&state, house),
+        committed,
+        "the reverted working copy is not the committed design"
+    );
+    assert_eq!(
+        design::shape_of_house(&state, house),
+        Some(committed),
+        "a revert reached the committed design"
+    );
+    assert_eq!(
+        design::revision(&state, house),
+        revision,
+        "a revert bumped the revision"
+    );
+    assert!(session::is_open(&state, house), "a revert closed the editor");
+    assert_eq!(
+        storey(&state, house),
+        2,
+        "the storey on screen is a fact about the window, not about the design"
+    );
+    assert_eq!(
+        designs_sent(&state, ConnectionId::from_raw(1)),
+        1,
+        "the editor was never told what it reverted to"
+    );
+}
+
+/// And a revert from somebody with nothing open is the ordinary answer to a
+/// window the shard had already closed, exactly as `session::end` is.
+#[test]
+fn reverting_without_a_session_is_harmless() {
+    let mut state = world_with(cottage());
+    let (actor, _, _) = a_foundation(&mut state, 1);
+
+    assert_eq!(commit::revert(&mut state, actor), None);
+}

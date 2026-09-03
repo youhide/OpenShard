@@ -31,6 +31,7 @@
 //! and a house does not move, so asking `multi.mul` per step would be paying a
 //! hundred lookups for an answer that cannot have changed.
 
+pub mod commit;
 pub mod decay;
 pub mod design;
 pub mod editing;

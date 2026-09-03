@@ -25257,3 +25257,85 @@ fn the_design_close_command_ends_the_session() {
     world.queue(Command::EndDesignSession { connection });
     world.tick(now);
 }
+
+/// **And `0xD7 0x04` makes the working copy the house.** The routing proof for
+/// the first design verb whose result leaves the editor's own screen: what the
+/// commit does to the walls, the sign and the allowance is
+/// `openshard-housing`'s and is tested there.
+#[test]
+fn the_design_commit_command_makes_the_working_copy_the_house() {
+    let now = Instant::now();
+    let (mut world, connection, player, house) = a_house_being_designed(now);
+    let revision = openshard_housing::design::revision(&world.state, house);
+    openshard_housing::editing::apply(
+        &mut world.state,
+        player,
+        openshard_protocol::encoded::DesignEdit::Build {
+            // The fixture's wall, laid one row north of the stair strip.
+            graphic: Graphic(0x0006),
+            dx:      0,
+            dy:      0,
+        },
+    )
+    .expect("the middle of the fixture's grid");
+
+    world.queue(Command::CommitDesign { connection });
+    world.tick(now);
+
+    assert_eq!(
+        openshard_housing::design::revision(&world.state, house),
+        revision + 1,
+        "the commit never reached the house"
+    );
+    assert!(
+        !openshard_housing::session::is_open(&world.state, house),
+        "the editor was left open over a design it had already committed"
+    );
+}
+
+/// **A refused commit is spoken, and the editor stays open.** The one design
+/// verb whose refusal a player is told about: they pressed a button and are
+/// watching the house, so silence would read as a shard that had stopped
+/// answering — and shutting their editor would take away the place they have to
+/// fix it in.
+#[test]
+fn a_refused_commit_is_spoken_and_keeps_the_editor_open() {
+    let now = Instant::now();
+    let (mut world, connection, _, house) = a_house_being_designed(now);
+    // A working copy a hundred erases could not reach, written directly: what
+    // is under test is the answer to one, not the way there.
+    world
+        .state
+        .registry
+        .get_mut::<openshard_state::components::DesignSession>(house)
+        .expect("the session")
+        .working = Vec::new();
+    let _ = packets_for(&mut world, connection);
+
+    world.queue(Command::CommitDesign { connection });
+    world.tick(now);
+
+    let spoken: Vec<String> = packets_for(&mut world, connection)
+        .iter()
+        .filter(|packet| packet[0] == 0x1C || packet[0] == 0xAE)
+        // Unicode `0xAE`: strip the zero bytes and the ASCII reads through.
+        .map(|packet| {
+            packet
+                .iter()
+                .copied()
+                .filter(|byte| *byte != 0)
+                .map(char::from)
+                .collect()
+        })
+        .collect();
+    assert!(
+        spoken
+            .iter()
+            .any(|line| { line.contains(openshard_housing::design::DesignRefusal::DrawsNothing.message()) }),
+        "the player was refused in silence: {spoken:?}"
+    );
+    assert!(
+        openshard_housing::session::is_open(&world.state, house),
+        "a refused commit shut the editor the player has to fix it in"
+    );
+}

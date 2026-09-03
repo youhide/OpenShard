@@ -1188,6 +1188,23 @@ pub enum Command {
         /// Which verb, with what it names.
         edit:       openshard_protocol::encoded::DesignEdit,
     },
+    /// A client committed the design it has open (`0xD7`/`0x04`) — make the
+    /// working copy the house's shape and close the editor over it.
+    ///
+    /// Carries no design, for [`DesignEdit`](Self::DesignEdit)'s reason turned
+    /// up one notch: the shape that commits is the one the shard has been
+    /// keeping, and a client that named its own would be committing something
+    /// nothing checked.
+    CommitDesign {
+        /// Whose.
+        connection: ConnectionId,
+    },
+    /// A client reverted the design it has open (`0xD7`/`0x1A`) — throw the
+    /// working copy away and start again from the house as it stands.
+    RevertDesign {
+        /// Whose.
+        connection: ConnectionId,
+    },
     /// Close an open gump on a player's client — the dialog a page chain is
     /// replacing.
     CloseGump {
@@ -1418,6 +1435,8 @@ impl Command {
             Self::GuildWindowRequest { .. } => "GuildWindowRequest",
             Self::EndDesignSession { .. } => "EndDesignSession",
             Self::DesignEdit { .. } => "DesignEdit",
+            Self::CommitDesign { .. } => "CommitDesign",
+            Self::RevertDesign { .. } => "RevertDesign",
             Self::CloseGump { .. } => "CloseGump",
             Self::Message { .. } => "Message",
             Self::PlaySound { .. } => "PlaySound",
