@@ -73,7 +73,17 @@ started.
   Resmelt, recipe scrolls, make-number/make-max and the last-ten list, and the
   two material chains (hides → leather, cotton → cloth) that are addon
   interactions in ServUO rather than crafts.
-- **A lumberjack's logs have no sink; a carpenter's boards have no source.**
+- ~~**A lumberjack's logs have no sink; a carpenter's boards have no source.**~~
+  **Landed** (`c2ae15e0`). `crafting::chop` is the bridge, reached through the
+  lumberjack's own harvest cursor rather than a double click on the log: that
+  cursor answers two things upstream, a tile to swing at and an item in the pack
+  to cut up. The gate is either Carpentry or Lumberjacking at `harvest::WOODS`'
+  own `req_skill` — upstream writes those numbers twice, in the harvest
+  definition and in `Log.cs`, and they agree — so the wood a lumberjack cannot
+  fell is the wood a carpenter cannot work. `known_gaps()` did have to split by
+  era, exactly as the last paragraph of this entry predicted. The reading below
+  is kept because it is what the fix was designed against:
+
   Mining closes its loop — ore comes off a vein carrying a `MaterialId`
   (`crates/server/state/src/harvest.rs`, `ORES`), and `crafting::smelt` turns
   the pile into ingots of the same grade for the smith's material axis. Wood
@@ -113,9 +123,25 @@ started.
   special boards stay unreachable before Mondain's Legacy — no tree gives those
   logs — so the list has to split by era, or the pre-ML assertion goes red for
   the right reason.
-- **The audit found five more holes, and only two of them were written down.**
-  Everything below is `--bin economy` output, ranked by how much of the
-  catalogue it costs:
+- ~~**The audit found five more holes, and only two of them were written down.**~~
+  **Every one of them is closed except the first**, and what is left of that one
+  is a decision rather than an implementation. The order and the four tracks that
+  remain — the peerless ingredients, the vendor shelves the converter dropped,
+  and the catalogue's era leaks — are
+  [`plans/items/economy_closure/PLAN.md`](../../../plans/items/economy_closure/PLAN.md).
+  The report went from 56 unreachable resources to 25, from 1,213 stalled recipe
+  rows to 127, and from nine raw materials nothing consumed to none.
+
+  What each fix turned out to be, since none of them was the shape this entry
+  guessed: wheat is a `CropKind` variant and nine `Regions.xml` fields; the flour
+  sack opens on a double click (`items::flour`); the pitcher of water was a
+  vendor line the converter dropped, because upstream's tavern beverages are
+  `BeverageBuyInfo` and not `GenericBuyInfo`; a fish is `ICarvable` and cuts into
+  four steaks; horned and barbed hides came from making the dragon family
+  carvable, and every one of those bodies was already spawning; a bone is loot
+  off the undead rather than butchery; tainted wool comes off a woolly *corpse*
+  where the shear pays the fleece; and sand waited for the whole trade that
+  spends it, `defs::glassblowing`. The reading below is kept as written:
   - **Twenty-two Mondain's Legacy ingredients (`0x3183`–`0x3199`)** have no
     source at all. Upstream pays them out of Heartwood quest turn-ins and
     champion drops, and this shard has neither, so every ML recipe that wants
