@@ -34,6 +34,7 @@ pub mod admin;
 pub mod crops;
 pub mod decoration;
 mod doorgen;
+pub mod economy;
 pub mod events;
 pub mod gm;
 pub mod loot;

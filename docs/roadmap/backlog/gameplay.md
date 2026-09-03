@@ -35,6 +35,15 @@ Left open:
   passed as *arguments* — a spawner's `swing`, a script's `beat`, a decoration
   file's delay. Those are data, and data files carry the same unit ambiguity with
   nowhere to put a `const` assertion.
+
+  **And it did not cover every constant either.** The `npc` migration found three
+  survivors in one file: `GREET_COOLDOWN`, `GREET_COOLDOWN_JITTER` and
+  `BARK_COOLDOWN` (`server/npc/src/live.rs`) are written `seconds * 20` against a
+  `TICKS_PER_SECOND` of 40, so each runs at half the span its own doc comment
+  states — a townsperson greets every 7.5 seconds where the comment says fifteen.
+  `BEAT_TICKS` in the same file was converted and these were not, which is what a
+  partial sweep looks like a month later. Ranked as row 3 of
+  [`docs/npc/README.md`](../../npc/README.md).
 - **A kiting archer can livelock**, and that is how the tick change was caught: a
   turn costs a whole beat (`motion::step`'s turn-as-step), and combat re-faces a
   fighter at its target before each swing. Where the swing is quicker than the
@@ -64,6 +73,57 @@ started.
   Resmelt, recipe scrolls, make-number/make-max and the last-ten list, and the
   two material chains (hides → leather, cotton → cloth) that are addon
   interactions in ServUO rather than crafts.
+- **A lumberjack's logs have no sink; a carpenter's boards have no source.**
+  Mining closes its loop — ore comes off a vein carrying a `MaterialId`
+  (`crates/server/state/src/harvest.rs`, `ORES`), and `crafting::smelt` turns
+  the pile into ingots of the same grade for the smith's material axis. Wood
+  does not: `WOODS` pays seven grades of `ItemKindId(3)` (log), while every
+  carpentry, fletching and tinkering row spends `ItemKindId(36)` (board,
+  `0x1BD7`), and nothing anywhere converts one into the other. The only board
+  in the world is the twenty a vendor stocks
+  (`crates/server/world/data/townsfolk.json:203`), plain wood at that, so the
+  six special woods are unreachable by any crafter and chopping pays in an item
+  with no use. ServUO's own bridge is `BaseLog.OnDoubleClick` — a
+  Lumberjacking-gated craft that yields boards of the log's own resource — so
+  the missing piece is one recipe-shaped conversion, not a system.
+
+  **Now checked rather than remembered.** `openshard_world::economy` builds the
+  whole production graph — harvest tables, vendor shelves, loot tables, crop
+  fields, butchery, shearing, the wheel, the loom, the three hand-written
+  bridges in its `CONVERSIONS`, and every recipe at every grade of its trade's
+  material axis — and runs reachability from the sources. `cargo run -p
+  openshard-world --bin economy` prints it; a `#[test]` beside it pins today's
+  holes both ways, so a new one is a red test and closing one is a red test
+  until its row is deleted. The board gap is 1,213 stalled recipe rows in that
+  report.
+- **The audit found five more holes, and only two of them were written down.**
+  Everything below is `--bin economy` output, ranked by how much of the
+  catalogue it costs:
+  - **Twenty-two Mondain's Legacy ingredients (`0x3183`–`0x3199`)** have no
+    source at all. Upstream pays them out of Heartwood quest turn-ins and
+    champion drops, and this shard has neither, so every ML recipe that wants
+    one is unbuildable. The largest single group in the report, and the one that
+    most wants a decision rather than an implementation: a quest chain, a loot
+    line, or the rows deleted as unshippable.
+  - **The cooking chain never starts.** No field grows wheat (`0x1EBD`), so
+    flour (`0x103A`), dough (`0x103D`) and everything behind them are out of
+    reach. The recipes already declare a `Needs { mill: true }` that nothing
+    fills. `crops.json` grows cotton and only cotton, which is upstream's own
+    content — a wheat field is data, not a system.
+  - **Fish are caught and eaten by nothing.** `harvest::FISHES` pays `0x09CC`
+    and no cooking row consumes it: upstream cuts steaks off a fish with a
+    knife, an item action beside `items::cut` that does not exist here.
+  - **Sand has the same shape.** The `SAND` harvest definition shipped ahead of
+    glassblowing, which is not implemented, so a miner can fill a pack with
+    something no trade spends.
+  - **Horned and barbed leather are unreachable at both ends.** Tailoring spends
+    them and no carvable body wears them — `items::carve`'s own doc says every
+    ServUO creature that does is a dragon, drake, wyrm or serpent, and none of
+    those bodies is carvable here. The hides are as unreachable as the leather,
+    so this is a carve-table row, not a scissors one.
+  - Smaller: a **bone** (`0x0F7E`) for the tailor's bone armour, with nothing
+    carving an undead corpse; and **tainted wool** (`0x101F`), which the wheel
+    knows how to spin and only a lich's flock grows.
 - **Stamina has the mana bug mana just lost.** `0xA2` landed for mana
   (`WorldState::set_mana`, §6 `magic`); `0xA3` does not exist, and `Stamina` is
   mutated in place by every step and every regen tick with nothing sent, so the
@@ -224,13 +284,18 @@ them too, so it is `openshard_protocol::mounts` and there is no
   stays**, with the reason in its doc. Every shipped row is 1; batch recipes such
   as shafts, arrows and bolts use `use_all_res`, while `amount` remains the
   multiplier available to custom recipes.
-- **Three files are still over the 2k line.** `world/src/tick/tests.rs` is
+- **Three files are still over the 2k line, and every number in this entry was
+  stale.** Measured 2026-09-03: `world/src/tick/tests.rs` is **25,135** lines, not
   12,964 — by a wide margin the largest file in the repository, and the split
   mechanics in `architecture.md` are written for exactly this;
-  `state/src/runtime.rs` is 2,169 and `state/src/components.rs` 2,108, and
-  either is the easier warm-up. Deliberately left out of
+  `state/src/runtime.rs` is **5,508**, not 2,169, and `state/src/components.rs`
+  **3,908**, not 2,108. All three roughly doubled while the entry said otherwise,
+  which is the entry's own lesson twice over: **a number in a queue goes stale
+  without anybody seeing it**, and a claim is worth checking against the code
+  before planning around it. `components.rs` is still the easier warm-up.
+  Deliberately left out of
   [`unenforced.md`](../../server/evidence/2026-07-31-invariants-nothing-enforces.md) — see that file's last section for why a
-  13,000-line mechanical move wants a session that owns the tree outright.
+  mechanical move of this size wants a session that owns the tree outright.
 
 ## ~~A double door is two leaves, and nothing links them~~ — linked
 

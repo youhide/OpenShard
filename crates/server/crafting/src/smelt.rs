@@ -48,9 +48,15 @@ use crate::system::Needs;
 /// metals, told apart by hue exactly as the ore is.
 pub const INGOT_GRAPHIC: Graphic = Graphic(0x1BF2);
 /// Semantic kind of an ore pile in the item registry.
-const ORE_KIND: ItemKindId = ItemKindId(2);
+pub const ORE_KIND: ItemKindId = ItemKindId(2);
 /// Semantic kind of an ingot pile in the item registry.
-const INGOT_KIND: ItemKindId = ItemKindId(1);
+///
+/// This pair is public because it *is* the bridge: mining pays ore, every
+/// smithing row eats ingots, and this module is the only thing in the engine that
+/// turns one into the other. The reachability audit
+/// (`openshard_world::economy`) names the edge with these two constants rather
+/// than with a second spelling of the same numbers.
+pub const INGOT_KIND: ItemKindId = ItemKindId(1);
 
 /// How many ingots one unit of the large ore pile yields. ServUO's
 /// `ingotAmount = toConsume * 2` for art `0x19B9`, which is the only ore art this

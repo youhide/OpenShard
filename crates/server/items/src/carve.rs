@@ -25,11 +25,11 @@ pub const fn is_carving_tool(graphic: Graphic) -> bool {
 }
 
 /// The uncooked ribs produced by an ordinary animal.
-const RAW_RIBS: Graphic = Graphic(0x09F1);
+pub const RAW_RIBS: Graphic = Graphic(0x09F1);
 /// The uncooked bird produced by a bird or chicken.
-const RAW_BIRD: Graphic = Graphic(0x09B9);
+pub const RAW_BIRD: Graphic = Graphic(0x09B9);
 /// A bird's feathers.
-const FEATHERS: Graphic = Graphic(0x1BD1);
+pub const FEATHERS: Graphic = Graphic(0x1BD1);
 
 /// Regular leather — what all but a handful of bodies are worth.
 const REGULAR_LEATHER: MaterialId = MaterialId(40);
@@ -39,20 +39,33 @@ const SPINED_LEATHER: MaterialId = MaterialId(41);
 /// What one animal body yields when carved. These are intentionally keyed by
 /// body graphic, rather than creature name: a renamed cow is still a cow, and a
 /// player's chosen name must never turn their corpse into a resource table.
-#[derive(Clone, Copy)]
-struct Yield {
-    ribs:     u16,
-    hides:    u16,
+///
+/// Public because carving is a **root of the economy** — leather enters the
+/// shard here and nowhere else — and the reachability audit
+/// (`openshard_world::economy`) has to be able to ask what a body is worth. Its
+/// alternative is a second copy of this table written out by hand somewhere it
+/// would quietly drift from this one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CarvedYield {
+    /// How many racks of ribs.
+    pub ribs:     u16,
+    /// How many hides.
+    pub hides:    u16,
     /// Which grade the hides are — ServUO's `BaseCreature.HideType`, and the
     /// only thing that makes the tailor's upper three material grades reachable
     /// at all. A separate axis from [`hides`](Self::hides): how many a body
     /// gives and how good they are are two different facts about it.
-    hide:     MaterialId,
-    feathers: u16,
-    bird:     bool,
+    pub hide:     MaterialId,
+    /// How many feathers.
+    pub feathers: u16,
+    /// Whether the meat comes off as a bird rather than as ribs.
+    pub bird:     bool,
 }
 
-const fn yield_of(body: Graphic) -> Option<Yield> {
+/// What carving a body of this graphic pays, or `None` for a body nothing can be
+/// cut off. Sweep it over the whole graphic space to enumerate the table.
+#[must_use]
+pub const fn carved_yield(body: Graphic) -> Option<CarvedYield> {
     let (ribs, hides, feathers, bird) = match body.0 {
         // Birds
         0x0006 | 0x00D0 => (0, 0, 10, true),
@@ -73,7 +86,7 @@ const fn yield_of(body: Graphic) -> Option<Yield> {
         0x0097 => (4, 4, 0, false),                   // dolphin
         _ => return None,
     };
-    Some(Yield {
+    Some(CarvedYield {
         ribs,
         hides,
         hide: hide_grade_of(body),
@@ -85,7 +98,7 @@ const fn yield_of(body: Graphic) -> Option<Yield> {
 /// The grade of hide a body wears — ServUO's `BaseCreature.HideType`, which
 /// defaults to `Regular` and is overridden on the individual creature.
 ///
-/// Only the exceptions are listed, and only for bodies [`yield_of`] already
+/// Only the exceptions are listed, and only for bodies [`carved_yield`] already
 /// carves. **Keyed by body, so a body two creatures share cannot be split**:
 /// ServUO's hell cat is `Spined` and its ordinary cat is not, and both are
 /// `0xC9` — so `0xC9` stays regular rather than paying a housecat in monster
@@ -174,7 +187,7 @@ pub fn carve(state: &mut WorldState, carver: EntityId, tool: EntityId, target: O
         state.system_message(carver, "That is not a carcass you can carve.");
         return;
     };
-    let Some(yielded) = yield_of(body.body) else {
+    let Some(yielded) = carved_yield(body.body) else {
         state.system_message(carver, "You cannot carve anything useful from that corpse.");
         return;
     };
@@ -251,8 +264,8 @@ mod tests {
 
     #[test]
     fn only_animal_bodies_have_yields() {
-        assert!(yield_of(Graphic(0x00D8)).is_some(), "cow");
-        assert!(yield_of(Graphic(0x00D0)).is_some(), "chicken");
-        assert!(yield_of(Graphic(0x0011)).is_none(), "orc");
+        assert!(carved_yield(Graphic(0x00D8)).is_some(), "cow");
+        assert!(carved_yield(Graphic(0x00D0)).is_some(), "chicken");
+        assert!(carved_yield(Graphic(0x0011)).is_none(), "orc");
     }
 }

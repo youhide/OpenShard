@@ -200,6 +200,107 @@ pub struct Materials {
     pub res_hue:    Hue,
 }
 
+/// The material-axis row one craft resolves against.
+///
+/// Separate from [`Materials`] because it is the half that needs no pack: which
+/// grade the gump has selected, and what that grade *is*. The skill gate and the
+/// finished item's hue both hang off it, and so does every ingredient line
+/// marked [`CraftRes::from_axis`](crate::recipe::CraftRes::from_axis).
+#[derive(Clone, Copy, Debug)]
+pub struct AxisPick {
+    /// The semantic kind this system's axis substitutes — ingot, board, leather.
+    pub kind:  openshard_protocol::item_kind::ItemKindId,
+    /// The grade the selection names, defaulting to the plain one.
+    pub entry: &'static crate::recipe::SubRes,
+}
+
+/// Which grade of a system's material axis a selection index names.
+///
+/// `None` for a system with no axis **and** for a recipe that does not spend it:
+/// a fletcher with oak selected still assembles ordinary arrows out of shafts and
+/// feathers, and must not be asked for the skill to work oak in order to do it.
+/// An out-of-range index falls back to the plain grade rather than refusing —
+/// the index arrives from a gump button and is the client's word.
+#[must_use]
+pub fn axis_pick(system: &CraftSystemDef, recipe: &Recipe, sub_res: usize) -> Option<AxisPick> {
+    let uses_axis = recipe.resources.iter().any(|res| res.from_axis);
+    let axis = system.sub_res.filter(|_| uses_axis)?;
+    let entry = axis.entries.get(sub_res).or_else(|| axis.entries.first())?;
+    Some(AxisPick {
+        kind: axis.item_kind,
+        entry,
+    })
+}
+
+/// One thing a recipe eats, resolved to an identity but not yet to a pile.
+///
+/// [`ingredients`] answers this from the tables alone; [`check`] is that answer
+/// plus a pack. Keeping the two apart is what lets an offline reader — the
+/// economy audit in `openshard_world::economy` — ask what a recipe *would*
+/// consume without standing a crafter up in a world first, and ask it through
+/// the same resolution the live craft uses rather than a second copy of it.
+#[derive(Clone, Copy, Debug)]
+pub struct Ingredient {
+    /// The registry identity this line consumes, where the row has been migrated
+    /// or its art resolves through the audited bridge.
+    pub semantic: Option<(
+        openshard_protocol::item_kind::ItemKindId,
+        Option<openshard_protocol::item_kind::MaterialId>,
+    )>,
+    /// The classic presentation the same line names, with the material axis
+    /// already substituted into the hue where the line takes it.
+    pub legacy:   Drawn,
+    /// How many, per craft. Zero is a line that costs nothing and is dropped
+    /// before a pack is consulted.
+    pub amount:   u16,
+    /// What is said when there are not enough.
+    pub message:  Text,
+}
+
+/// What one craft would eat at a given material selection, before any pack is
+/// consulted.
+///
+/// The identity half of [`check`], and the *only* copy of it: a migrated row
+/// resolves its declared selector, an axis line takes the selected grade, and
+/// everything else falls back to the audited art bridge.
+#[must_use]
+pub fn ingredients(system: &CraftSystemDef, recipe: &Recipe, sub_res: usize) -> Vec<Ingredient> {
+    let pick = axis_pick(system, recipe, sub_res);
+    let axis_hue = pick.map(|pick| pick.entry.hue);
+    let axis_material = pick.map(|pick| pick.entry.material);
+    let axis_identity = pick.map(|pick| (pick.kind, pick.entry.material));
+    recipe
+        .resources
+        .iter()
+        .map(|res| {
+            // A line marked `from_axis` is the one the material selection
+            // substitutes into; every other line is its own graphic at its own
+            // hue.
+            let hue = if res.from_axis {
+                axis_hue.unwrap_or(res.hue)
+            } else {
+                res.hue
+            };
+            let legacy = Drawn { id: res.graphic, hue };
+            // A migrated row resolves its declared selector before it ever
+            // consults a classic presentation pair. The old rows retain the
+            // audited `kind_from_drawn` bridge while their data is being moved
+            // one by one.
+            let semantic = match res.selector {
+                Some(selector) => resolve_selector(selector, res.from_axis, axis_material),
+                None if res.from_axis => axis_identity.map(|(kind, material)| (kind, Some(material))),
+                None => kind_from_drawn(legacy),
+            };
+            Ingredient {
+                semantic,
+                legacy,
+                amount: res.amount,
+                message: res.message,
+            }
+        })
+        .collect()
+}
+
 /// One craft input after material-axis selection.
 #[derive(Clone, Copy, Debug)]
 pub struct MaterialLine {
@@ -274,76 +375,42 @@ where
     // Which material the axis is set to, and whether the crafter can work it.
     // ServUO checks this against the **base** skill, not the stat-lent value: no
     // amount of Strength teaches a smith what to do with valorite.
+    //
+    // The selected material belongs only to recipes whose primary resource comes
+    // from the axis, which is what `axis_pick` answers: a fletcher who has oak
+    // selected still makes ordinary arrows from shafts and feathers, and does not
+    // need the skill to work oak merely to assemble ammunition.
     let mut res_hue = Hue(0);
-    let mut axis_hue = None;
-    let mut axis_material = None;
-    let mut axis_identity = None;
-    // The selected material belongs only to recipes whose primary resource
-    // comes from the axis. A fletcher who has oak selected still makes ordinary
-    // arrows from shafts and feathers, and does not need the skill to work oak
-    // merely to assemble ammunition.
-    let uses_axis = recipe.resources.iter().any(|res| res.from_axis);
-    if let Some(axis) = system.sub_res.filter(|_| uses_axis) {
-        let entry = axis.entries.get(sub_res).or_else(|| axis.entries.first());
-        if let Some(entry) = entry {
-            if i32::from(skill_value(state, crafter, system.skill)) < entry.req_skill {
-                return Err(Refusal::CannotWork(entry.message));
-            }
-            res_hue = entry.hue;
-            axis_hue = Some(entry.hue);
-            axis_material = Some(entry.material);
-            axis_identity = Some((axis.item_kind, entry.material));
+    if let Some(pick) = axis_pick(system, recipe, sub_res) {
+        if i32::from(skill_value(state, crafter, system.skill)) < pick.entry.req_skill {
+            return Err(Refusal::CannotWork(pick.entry.message));
         }
+        res_hue = pick.entry.hue;
     }
 
     let mut lines = Vec::with_capacity(recipe.resources.len());
     // How many whole crafts the pack can pay for, for a `use_all_res` recipe.
     let mut affordable = u16::MAX;
-    for res in recipe.resources {
-        // A line marked `from_axis` is the one the material selection substitutes
-        // into; every other line is its own graphic at its own hue.
-        let hue = if res.from_axis {
-            axis_hue.or(Some(res.hue))
-        } else {
-            Some(res.hue)
-        };
-        // A migrated row resolves its declared selector before it ever consults
-        // a classic presentation pair. The old rows below retain the audited
-        // `kind_from_drawn` bridge while their data is being moved one by one.
-        let semantic = match res.selector {
-            Some(selector) => resolve_selector(selector, res.from_axis, axis_material),
-            None if res.from_axis => axis_identity.map(|(kind, material)| (kind, Some(material))),
-            None => hue.and_then(|hue| kind_from_drawn(Drawn { id: res.graphic, hue })),
-        };
-        let held = held(
-            semantic,
-            Drawn {
-                id:  res.graphic,
-                hue: hue.expect("a craft ingredient has a resolved hue"),
-            },
-        );
-        if res.amount == 0 {
+    for line in ingredients(system, recipe, sub_res) {
+        let held = held(line.semantic, line.legacy);
+        if line.amount == 0 {
             continue;
         }
-        if held < u32::from(res.amount) {
-            return Err(Refusal::NotEnough(res.message));
+        if held < u32::from(line.amount) {
+            return Err(Refusal::NotEnough(line.message));
         }
-        let whole = u16::try_from(held / u32::from(res.amount)).unwrap_or(u16::MAX);
+        let whole = u16::try_from(held / u32::from(line.amount)).unwrap_or(u16::MAX);
         affordable = affordable.min(whole);
-        let legacy = Drawn {
-            id:  res.graphic,
-            hue: hue.expect("a craft ingredient has a resolved hue"),
-        };
-        let Some(key) = craft_key_for(semantic, legacy.id, legacy.hue) else {
+        let Some(key) = craft_key_for(line.semantic, line.legacy.id, line.legacy.hue) else {
             return Err(Refusal::TooComplex);
         };
         lines.push(MaterialLine {
             key,
-            graphic: res.graphic,
-            hue,
-            amount: res.amount,
-            message: res.message,
-            semantic,
+            graphic: line.legacy.id,
+            hue: Some(line.legacy.hue),
+            amount: line.amount,
+            message: line.message,
+            semantic: line.semantic,
         });
     }
 

@@ -28,8 +28,12 @@ const FLEECE_TICKS: u64 = 2 * 60 * 60 * TICKS_PER_SECOND;
 /// The wool a shearing pays, `0xDF8` — [`Fibre::Wool`], three balls of dark yarn
 /// on the wheel.
 ///
+/// Public for [`yield_of`](crate::carve::yield_of)'s reason: a sheep is where wool
+/// enters the shard, and the reachability audit reads the fact here rather than
+/// keeping a second spelling of it.
+///
 /// [`Fibre::Wool`]: openshard_state::components::Fibre::Wool
-const WOOL: Graphic = Graphic(0x0DF8);
+pub const WOOL: Graphic = Graphic(0x0DF8);
 
 /// How much of it, on the facet the shard ships. ServUO pays `Map == Map.Felucca
 /// ? 2 : 1`, the era's own reward for shearing in the dangerous world, and this

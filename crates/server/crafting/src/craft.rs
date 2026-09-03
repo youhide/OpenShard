@@ -456,9 +456,14 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
         return;
     }
 
-    let (identity, hue) = match output_identity(recipe, &materials) {
-        Ok(Some((kind, material, drawn))) => (Some((kind, material)), drawn.hue),
-        Ok(None) => {
+    let resolved: Vec<_> = materials.lines.iter().map(|line| line.semantic).collect();
+    let (identity, hue) = match output_identity(recipe, &resolved) {
+        CraftOutput::Typed {
+            kind,
+            material,
+            drawn,
+        } => (Some((kind, material)), drawn.hue),
+        CraftOutput::Legacy => {
             let hue = if recipe.hue != Hue(0) {
                 recipe.hue
             } else if recipe.retain_color {
@@ -468,7 +473,7 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
             };
             (None, hue)
         }
-        Err(()) => {
+        CraftOutput::Unresolvable => {
             // A bad typed row is shard data, not a player mistake. Do not spend
             // ingredients trying to make an item whose identity has no valid
             // presentation in the registry.
@@ -617,33 +622,74 @@ fn complete(state: &mut WorldState, crafter: EntityId, work: &Crafting, def: &Cr
     );
 }
 
+/// What a finished craft is, before any ingredient has been spent.
+///
+/// Three outcomes rather than a `Result<Option<_>, _>` because they are three
+/// different statements: a migrated row *knows* what it makes, an unmigrated one
+/// leaves its identity to the recipe's own art and hue rules, and a row that
+/// contradicts itself is shard data to be refused rather than a player's mistake.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CraftOutput {
+    /// A registered kind and grade, with the presentation the registry derives
+    /// from the pair. Never the other way round: art does not decide identity.
+    Typed {
+        /// The semantic kind made.
+        kind:     ItemKindId,
+        /// Its grade, for a kind with a material family.
+        material: Option<MaterialId>,
+        /// What the classic client draws for that pair.
+        drawn:    Drawn,
+    },
+    /// An unmigrated row: the caller keeps [`Recipe::hue`] and
+    /// [`Recipe::retain_color`].
+    Legacy,
+    /// The row contradicts itself — a typed recipe carrying the legacy material
+    /// policy, an `InheritInput` naming a line that resolved to no material, or a
+    /// kind/material pair the registry will not project.
+    Unresolvable,
+}
+
 /// Resolve the semantic output before ingredients are spent.
-fn output_identity(
-    recipe: &Recipe,
-    materials: &consume::Materials,
-) -> Result<Option<(ItemKindId, Option<MaterialId>, Drawn)>, ()> {
+///
+/// `inputs` is each resolved ingredient's identity **in the order the craft
+/// counts them**, which is [`consume::ingredients`] with its zero-amount lines
+/// dropped — [`OutputMaterial::InheritInput`] indexes that list, so a caller that
+/// keeps the free lines in would inherit the wrong grade.
+#[must_use]
+pub fn output_identity(recipe: &Recipe, inputs: &[Option<(ItemKindId, Option<MaterialId>)>]) -> CraftOutput {
     let Some(kind) = recipe.kind else {
-        return matches!(recipe.output_material, OutputMaterial::Legacy)
-            .then_some(None)
-            .ok_or(());
+        return if matches!(recipe.output_material, OutputMaterial::Legacy) {
+            CraftOutput::Legacy
+        } else {
+            CraftOutput::Unresolvable
+        };
     };
     let material = match recipe.output_material {
-        OutputMaterial::Legacy => return Err(()),
+        OutputMaterial::Legacy => return CraftOutput::Unresolvable,
         OutputMaterial::None => None,
         OutputMaterial::Fixed(material) => Some(material),
         OutputMaterial::InheritInput(input) => {
-            materials
-                .lines
+            match inputs
                 .get(usize::from(input))
-                .and_then(|line| line.semantic)
+                .copied()
+                .flatten()
                 .and_then(|(_, material)| material)
-                .ok_or(())
-                .map(Some)?
+            {
+                Some(material) => Some(material),
+                None => return CraftOutput::Unresolvable,
+            }
         }
     };
-    presentation_of(kind, material)
-        .map(|drawn| Some((kind, material, drawn)))
-        .ok_or(())
+    match presentation_of(kind, material) {
+        Some(drawn) => {
+            CraftOutput::Typed {
+                kind,
+                material,
+                drawn,
+            }
+        }
+        None => CraftOutput::Unresolvable,
+    }
 }
 
 /// Whether the crafter is good enough to sign their work — ServUO's

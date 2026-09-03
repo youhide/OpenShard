@@ -48,7 +48,10 @@ pub const LEATHER_KIND: ItemKindId = ItemKindId(37);
 
 /// The art cut cloth takes — what fifty-six tailoring rows, and a dozen
 /// carpentry and smithing ones, actually spend.
-const CLOTH_GRAPHIC: Graphic = Graphic(0x1766);
+///
+/// Public beside [`HIDES_KIND`] and [`LEATHER_KIND`]: the scissors are a bridge in
+/// the economy graph, and the audit reads both ends of it here.
+pub const CLOTH_GRAPHIC: Graphic = Graphic(0x1766);
 /// How much cloth one bolt cuts into. ServUO's `ScissorHelper(from, new Cloth(),
 /// 50)`, and the number a bolt's own single-click line already quotes.
 const CLOTH_PER_BOLT: u32 = 50;
