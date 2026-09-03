@@ -860,7 +860,7 @@ fn sight_cursor(state: &mut WorldState, actor: EntityId) {
 /// call — `sight::trace` — same footing, same `Doors::AsTheyStand` every real
 /// caller passes. The point is that the two answers can be *read against each
 /// other*: the client computes its picture from its own copy of the map and its
-/// own live overlay (`docs/sight.md`'s D3), and the one thing it can be wrong
+/// own live overlay (`docs/combat/design_sight.md`'s D3), and the one thing it can be wrong
 /// about is a door the shard has not told it about. This is how that stops being
 /// an assumption. It changes nothing in the world.
 pub(crate) fn report_sight(state: &mut WorldState, actor: EntityId, to: Point) {

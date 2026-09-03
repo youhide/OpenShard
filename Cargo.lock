@@ -2516,6 +2516,7 @@ dependencies = [
  "openshard-combat",
  "openshard-entities",
  "openshard-items",
+ "openshard-magic",
  "openshard-map",
  "openshard-movement",
  "openshard-protocol",
