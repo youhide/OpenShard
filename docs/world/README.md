@@ -151,49 +151,40 @@ refused now reads to a player as a regression. It wants a pass over the shipped
 decoration data placing each classic multi before anybody is told housing is
 finished.
 
-**11. `WorldMap::from_parts`' grouping is a contract with no oracle.** It asserts
-that the counts are one per block and that they sum to the run's length —
-neither of which catches a caller that put the *right number* of items in the
-*wrong* block. That sorts them into the wrong span and every lookup after it is
-silently wrong, which is the failure mode this crate's block order has always
-had. Both callers are in-tree and tested end to end, so this is about the third
-one: a debug-only check that every item's coordinates fall in the block its count
-claims costs one pass over the run at load.
-
-**12. `Cluttered::sight_clear` is the map's answer only**, missing the shut-door
+**11. `Cluttered::sight_clear` is the map's answer only**, missing the shut-door
 half the server has. When it gets its reader, the shared arithmetic wants to
 live in `common/movement` once rather than on both ends. `sight_clear`'s own
 height blindness is the same shape one layer down: a sight line reads the tiles
 it crosses and not the endpoints' columns, so two mobiles on one tile at
 different z see each other through a floor.
 
-**13. The plan cache's invalidation boundary is not covered.**
+**12. The plan cache's invalidation boundary is not covered.**
 `net_command::entered` keeps the client's plan across mobile-only updates on the
 assumption that `WorldView.items` is the complete input to `Cluttered::can_step`.
 Enumerate every production update that can alter the predicate and assert the
 boundary.
 
-**14. The node budgets, and what a tick can afford.** 400 for server AI and 600
+**13. The node budgets, and what a tick can afford.** 400 for server AI and 600
 for a client plan were measured against *tiles*, and a node is a place now, so a
 column with two floors can be finalised twice. Half the argument exists — a
 `Weight::PLANNING` search at 400 arrives at more destinations than an exact one
 at 600, for routes 0.2% longer — and the missing half is the shard's own
 numbers rather than the probe's.
 
-**15. The radar's 21% tangent margin is three people saying 20.7% left a seam.**
+**14. The radar's 21% tangent margin is three people saying 20.7% left a seam.**
 The tests pin the arithmetic and nothing says the seam is gone, because nothing
 here can see. Attribute it with a debug view first.
 
-**16. Real-install facet-0 bake/load measurements** inside the dedicated
+**15. Real-install facet-0 bake/load measurements** inside the dedicated
 `MemoryMax=2G` cgroup — artifact size, peak memory, cold-load time, readiness —
 have not been re-recorded since the compact graph and component grouping landed.
 
-**17. The counters nobody reads.** `RadarCacheCounters` and `RadarWorkCounters`
+**16. The counters nobody reads.** `RadarCacheCounters` and `RadarWorkCounters`
 are written and unread outside the development HUD; markers on the minimap are
 the player and nothing else, and which of party, waypoint and corpse belongs
 there is a decision rather than a drawing.
 
-**18. The publish window.** A revision is visible before the rebake over its
+**17. The publish window.** A revision is visible before the rebake over its
 touched chunks finishes, and today's rule is that a stale artefact refuses itself
 — so routing in those chunks degrades to flat A\* until the rebake lands. The
 alternative is to rebuild the touched regions *inside* the publish and pay the
@@ -202,12 +193,12 @@ single-region rebuild rather than by preference. What made it urgent is gone: a
 restart inside the window used to refuse to boot, and boot replays the log's
 missed chunks now.
 
-**19. Two whole-facet CPU paths with no caller but their own tests.**
+**18. Two whole-facet CPU paths with no caller but their own tests.**
 `RadarCache`'s `bake` and `mark` are the whole-map image path, worth keeping only
 if something is going to want a whole-map image; the minimap's close affordance
 is a provisional `M` and says so in `event_loop.rs`.
 
-**20. The land's fourth byte is 29.4 MB of alignment, and it is bigger than
+**19. The land's fourth byte is 29.4 MB of alignment, and it is bigger than
 everything the statics run saved.** A `LandCell` is a `LandTileId` (`u16`) and a
 `z` (`i8`) — three bytes of fields in four of storage — and Felucca is 29,360,128
 cells, so the land is 117.4 MiB of which 29.4 MB is padding; the whole statics
