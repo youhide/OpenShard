@@ -86,19 +86,14 @@ pub fn equip_item(
         bounce(state, connection, held, DragCancelReason::Other);
         return;
     }
-    // Only a mobile wears things, and it still has to be in reach.
-    let (Some(&Position(wearer_pos)), Some(&Position(player_pos))) = (
-        state.registry.get::<Position>(wearer),
-        state.registry.get::<Position>(player),
-    ) else {
-        bounce(state, connection, held, DragCancelReason::Other);
-        return;
-    };
+    // Only a mobile wears things, and it still has to be in reach. The reach is
+    // `mobile_in_reach` rather than `in_reach`: the wearer is a body, and the
+    // item helper resolves an item's location, which a body does not have.
     if !state.registry.has::<Body>(wearer) {
         bounce(state, connection, held, DragCancelReason::Other);
         return;
     }
-    if state.facet_of(wearer) != state.facet_of(player) || !in_range(wearer_pos, player_pos, ITEM_REACH) {
+    if !crate::containers::mobile_in_reach(state, wearer, player) {
         bounce(state, connection, held, DragCancelReason::OutOfRange);
         return;
     }

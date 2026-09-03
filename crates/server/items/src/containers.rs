@@ -279,6 +279,31 @@ pub fn in_reach(state: &WorldState, container: EntityId, player: EntityId) -> bo
     facet == state.facet_of(player) && in_range(at, player_pos, ITEM_REACH)
 }
 
+/// Whether `player` may reach `mobile` — to shear it, to dress it, or to aim
+/// anything else at a body rather than at a thing.
+///
+/// The twin of [`in_reach`], and it exists because that one cannot be asked this
+/// question at all: it resolves an *item's* location, and a mobile has none, so
+/// it answers "too far away" for every living thing however close it is
+/// standing. That is correct for the question `in_reach` asks and a trap for
+/// anything that starts aiming at mobiles through the item helpers — the shear
+/// hit it and had to measure ahead of the carve's own check, and `equip`
+/// measured a wearer by hand for the same reason. Two callers arriving at the
+/// same six lines separately is what this name is for.
+///
+/// A mobile is reached on its own tile: the same facet, within [`ITEM_REACH`] —
+/// the distance every other cursor gesture in this crate uses. A body with no
+/// `Position` is not reachable, because it is not anywhere.
+pub fn mobile_in_reach(state: &WorldState, mobile: EntityId, player: EntityId) -> bool {
+    let (Some(&Position(mobile_at)), Some(&Position(player_at))) = (
+        state.registry.get::<Position>(mobile),
+        state.registry.get::<Position>(player),
+    ) else {
+        return false;
+    };
+    state.facet_of(mobile) == state.facet_of(player) && in_range(mobile_at, player_at, ITEM_REACH)
+}
+
 /// The container an item is sitting in, or `None` when it is not in one — worn,
 /// lying on the ground, or held on the cursor.
 ///
@@ -1275,6 +1300,46 @@ mod tests {
             openshard_map::grid::Tile::new(0, 0),
             1,
         )
+    }
+
+    /// A body standing at `at`, which is everything a reach test needs of one.
+    fn mobile_at(state: &mut WorldState, at: Point) -> EntityId {
+        let entity = state.registry.spawn();
+        state.registry.insert(
+            entity,
+            Body {
+                id:  Graphic(0x0190),
+                hue: Hue(0),
+            },
+        );
+        state.registry.insert(entity, Position(at));
+        entity
+    }
+
+    /// The trap `mobile_in_reach` was named for: a body has no item location,
+    /// so the item helper refuses it at every distance, and a caller that
+    /// reaches for the wrong one of the two gets a shard where nothing can be
+    /// shorn or dressed.
+    #[test]
+    fn a_body_is_reached_by_its_own_tile_and_never_through_the_item_helper() {
+        let mut state = world();
+        let player = mobile_at(&mut state, Point::new(100, 100, 0));
+        let beside = mobile_at(&mut state, Point::new(101, 100, 0));
+        let edge = mobile_at(&mut state, Point::new(100 + ITEM_REACH as u16, 100, 0));
+        let beyond = mobile_at(&mut state, Point::new(101 + ITEM_REACH as u16, 100, 0));
+
+        assert!(mobile_in_reach(&state, beside, player), "one tile away");
+        assert!(mobile_in_reach(&state, edge, player), "exactly ITEM_REACH away");
+        assert!(
+            !mobile_in_reach(&state, beyond, player),
+            "one tile past ITEM_REACH"
+        );
+
+        assert!(
+            !in_reach(&state, beside, player),
+            "the item helper answers 'too far away' for a body standing next to the player, \
+             which is the whole reason the mobile twin exists"
+        );
     }
 
     fn empty_container(state: &mut WorldState) -> Serial {

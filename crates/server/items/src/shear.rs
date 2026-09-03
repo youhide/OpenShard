@@ -63,16 +63,9 @@ pub(crate) fn shear(state: &mut WorldState, shearer: EntityId, sheep: EntityId) 
     };
     // Its own reach, because the carve's is an item's: a mobile has no item
     // location at all, and asking `in_reach` about one refuses every sheep on
-    // the shard. The distance is the crate's own, as `equip` measures a mobile.
-    let (Some(&Position(sheep_at)), Some(&Position(shearer_at))) = (
-        state.registry.get::<Position>(sheep),
-        state.registry.get::<Position>(shearer),
-    ) else {
-        return;
-    };
-    if state.facet_of(sheep) != state.facet_of(shearer)
-        || !in_range(sheep_at, shearer_at, crate::drag::ITEM_REACH)
-    {
+    // the shard. `mobile_in_reach` is that question with a name, and `equip`
+    // asks the same one of the body it is dressing.
+    if !crate::containers::mobile_in_reach(state, sheep, shearer) {
         return;
     }
     if body.id != WOOLLY_SHEEP {
