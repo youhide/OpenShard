@@ -246,7 +246,14 @@ Asking the table would need no tag. **A mapmaker's pen and a scribe's pen are on
 kind here**, because ServUO tells its two classes apart only by the craft system
 they open and this engine has no Cartography; the day it has one, `0x0FBF` needs
 a tell that art cannot give it, and `shared_art` is not that tell — it removes
-*both* kinds from the reverse lookup rather than choosing between them.
+*both* kinds from the reverse lookup rather than choosing between them. **Four
+test worlds in this crate conjure their multi catalogue out of
+`Default::default()`** — `containers.rs`, `drag.rs`, `spawn.rs` and `stack.rs`,
+with three more in `state` (`item_location.rs` and two in `runtime.rs`) spelling
+it `Multis::default()` — which the workspace's own rule against `Default` exists
+to prevent: the argument is positional, so nothing at the call site says what an
+empty catalogue is. `cut.rs`'s world names `Multis::of([])` instead, and the
+rest are the same one-line change whenever a session is in those files anyway.
 
 ## The documents
 
