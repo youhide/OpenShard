@@ -79,8 +79,15 @@ pub fn craft_tool(graphic: Graphic) -> Option<CraftToolData> {
 
 /// The craft-tool row for a registered item kind.
 ///
-/// This is deliberately kind-keyed. [`craft_tool`] below remains the named
+/// This is deliberately kind-keyed. [`craft_tool`] above remains the named
 /// compatibility adapter for items not yet migrated into the registry.
+///
+/// The two tables are hand-kept and must agree wherever both can answer. What
+/// says so is `every_craft_tool_graphic_names_the_same_trade_by_kind` below, and
+/// it walks every graphic [`craft_tool`] knows rather than a sample: since the
+/// registry now names all of them, a tool added to one table only is a test
+/// failure rather than a trade that opens for a bought tool and not a crafted
+/// one.
 #[must_use]
 pub fn craft_tool_for_kind(kind: ItemKindId) -> Option<CraftToolData> {
     let skill = match kind.0 {
@@ -90,6 +97,8 @@ pub fn craft_tool_for_kind(kind: ItemKindId) -> Option<CraftToolData> {
         23 => Skill::Tinkering,
         24 => Skill::Alchemy,
         25 => Skill::Fletching,
+        142..=144 => Skill::Cooking,
+        145 => Skill::Inscribe,
         _ => return None,
     };
     Some(CraftToolData {
@@ -168,6 +177,44 @@ mod tests {
         ] {
             assert_eq!(craft_tool_for_kind(kind).map(|tool| tool.skill), Some(skill));
         }
+    }
+
+    /// Both tool tables answer one question, and until now nothing said they
+    /// agreed except a spot check on the tongs.
+    ///
+    /// Which of the two a given item reaches is decided by whether it carries an
+    /// `ItemKind`, and that in turn by where it came from — a migrated recipe, a
+    /// restored save, a legacy shelf. So a tool listed in one table only is a
+    /// trade that opens for a bought tool and refuses an identical crafted one,
+    /// and neither answer looks wrong on its own. Every art `craft_tool` knows is
+    /// now a registered kind, so this can walk the whole table rather than
+    /// sampling it.
+    #[test]
+    fn every_craft_tool_graphic_names_the_same_trade_by_kind() {
+        let mut checked = 0;
+        for graphic in (0..=u16::MAX).map(Graphic) {
+            let Some(by_art) = craft_tool(graphic) else {
+                continue;
+            };
+            let (kind, _) = crate::item_definition::kind_from_drawn(crate::Drawn {
+                id:  graphic,
+                hue: openshard_protocol::wire::Hue::NONE,
+            })
+            .unwrap_or_else(|| panic!("craft tool {:#06X} is in no item definition", graphic.0));
+            assert_eq!(
+                craft_tool_for_kind(kind),
+                Some(by_art),
+                "{:#06X} is a {:?} tool by art and something else as kind {}",
+                graphic.0,
+                by_art.skill,
+                kind.0
+            );
+            checked += 1;
+        }
+        // A sweep that matched nothing would pass in silence; the count is what
+        // makes "every tool" mean the thirty-four arts the table above lists,
+        // both facings of a flippable one counted separately.
+        assert_eq!(checked, 34, "craft tool arts checked");
     }
 
     #[test]

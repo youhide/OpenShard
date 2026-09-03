@@ -336,14 +336,14 @@ static WEAPONS: &[WeaponData] = &[
     with_item_kind(w(0x13B9, SWORDS, SLASHING, 30, 6, 34, 28, 15, 19, 375, SoundId(0x23A), false), ItemKindId(72)), // Viking sword
     with_item_kind(w(0x1441, SWORDS, SLASHING, 45, 6, 28, 44, 10, 14, 250, SoundId(0x23A), false), ItemKindId(67)), // Cutlass
     with_item_kind(w(0x13B6, SWORDS, SLASHING, 43, 4, 30, 37, 12, 16, 300, SoundId(0x23A), false), ItemKindId(71)), // Scimitar
-    w(0x13B8, SWORDS,  SLASHING, 35,  5, 33, 30, 15, 16, 350, SoundId(0x23A), false), // Thin longsword
+    with_item_kind(w(0x13B8, SWORDS, SLASHING, 35, 5, 33, 30, 15, 16, 350, SoundId(0x23A), false), ItemKindId(121)), // Thin longsword
     // -- Knives (BaseKnife; the dagger is the one that pierces) --------------------
     with_item_kind(w(0x0F52, SWORDS, PIERCING, 55, 3, 15, 56, 10, 12, 200, SoundId(0x238), false), ItemKindId(68)), // Dagger
-    w(0x13F6, SWORDS,  SLASHING, 40,  2, 14, 49, 10, 13, 225, SoundId(0x238), false), // Butcher knife
-    w(0x0EC3, SWORDS,  SLASHING, 40,  2, 13, 46, 10, 14, 250, SoundId(0x238), false), // Cleaver
-    w(0x0EC4, SWORDS,  SLASHING, 40,  1, 10, 49, 10, 13, 225, SoundId(0x238), false), // Skinning knife
+    with_item_kind(w(0x13F6, SWORDS, SLASHING, 40, 2, 14, 49, 10, 13, 225, SoundId(0x238), false), ItemKindId(122)), // Butcher knife
+    with_item_kind(w(0x0EC3, SWORDS, SLASHING, 40, 2, 13, 46, 10, 14, 250, SoundId(0x238), false), ItemKindId(123)), // Cleaver
+    with_item_kind(w(0x0EC4, SWORDS, SLASHING, 40, 1, 10, 49, 10, 13, 225, SoundId(0x238), false), ItemKindId(124)), // Skinning knife
     // -- Axes (BaseAxe, Swords skill; the war axe bashes) -------------------------
-    w(0x0F43, SWORDS,  AXE,      40,  2, 17, 41, 13, 16, 275, SoundId(0x23A), true ), // Hatchet
+    with_item_kind(w(0x0F43, SWORDS, AXE, 40, 2, 17, 41, 13, 16, 275, SoundId(0x23A), true), ItemKindId(125)), // Hatchet
     w(0x0F44, SWORDS,  AXE,      40,  2, 17, 41, 13, 16, 275, SoundId(0x23A), true ), //   its other facing
     with_item_kind(w(0x0F49, SWORDS, AXE, 37, 6, 33, 37, 14, 17, 300, SoundId(0x23A), true), ItemKindId(73)), // Axe
     with_item_kind(both_hands(w(0x0F47, SWORDS, AXE, 30, 6, 38, 31, 16, 19, 350, SoundId(0x23A), true)), ItemKindId(74)), // Battle axe
@@ -357,17 +357,17 @@ static WEAPONS: &[WeaponData] = &[
     with_item_kind(w(0x0F4D, SWORDS, POLEARM, 26, 5, 43, 28, 17, 20, 375, SoundId(0x238), false), ItemKindId(80)), // Bardiche
     with_item_kind(w(0x143E, SWORDS, POLEARM, 25, 5, 49, 25, 18, 21, 400, SoundId(0x238), false), ItemKindId(81)), // Halberd
     // -- Maces (BaseBashing) & staves (BaseStaff) ---------------------------------
-    w(0x13B4, MACING,  BASHING,  40,  8, 24, 44, 10, 14, 250, SoundId(0x239), false), // Club
+    with_item_kind(w(0x13B4, MACING, BASHING, 40, 8, 24, 44, 10, 14, 250, SoundId(0x239), false), ItemKindId(126)), // Club
     with_item_kind(w(0x0F5C, MACING, BASHING, 30, 8, 32, 40, 11, 15, 275, SoundId(0x239), false), ItemKindId(86)), // Mace
     with_item_kind(w(0x143B, MACING, BASHING, 30, 10, 30, 32, 14, 18, 350, SoundId(0x239), false), ItemKindId(87)), // Maul
     with_item_kind(w(0x1407, MACING, BASHING, 32, 10, 30, 26, 16, 20, 400, SoundId(0x239), false), ItemKindId(88)), // War mace
     with_item_kind(both_hands(w(0x1439, MACING, BASHING, 31, 8, 36, 28, 17, 20, 375, SoundId(0x239), false)), ItemKindId(89)), // War hammer
     with_item_kind(one_hand(w(0x143D, MACING, BASHING, 30, 6, 33, 28, 13, 17, 325, SoundId(0x239), false)), ItemKindId(85)), // Hammer pick
-    w(0x0E89, MACING,  STAFF,    48,  8, 28, 48, 11, 14, 225, SoundId(0x239), false), // Quarter staff
-    w(0x0DF0, MACING,  STAFF,    35,  8, 33, 39, 13, 16, 275, SoundId(0x239), false), // Black staff
+    with_item_kind(w(0x0E89, MACING, STAFF, 48, 8, 28, 48, 11, 14, 225, SoundId(0x239), false), ItemKindId(127)), // Quarter staff
+    with_item_kind(w(0x0DF0, MACING, STAFF, 35, 8, 33, 39, 13, 16, 275, SoundId(0x239), false), ItemKindId(128)), // Black staff
     w(0x0DF1, MACING,  STAFF,    35,  8, 33, 39, 13, 16, 275, SoundId(0x239), false), //   its other facing
-    w(0x13F8, MACING,  STAFF,    33, 10, 30, 33, 15, 18, 325, SoundId(0x239), false), // Gnarled staff
-    w(0x0E81, MACING,  STAFF,    30,  3, 12, 40, 13, 16, 275, SoundId(0x239), false), // Shepherd's crook
+    with_item_kind(w(0x13F8, MACING, STAFF, 33, 10, 30, 33, 15, 18, 325, SoundId(0x239), false), ItemKindId(129)), // Gnarled staff
+    with_item_kind(w(0x0E81, MACING, STAFF, 30, 3, 12, 40, 13, 16, 275, SoundId(0x239), false), ItemKindId(130)), // Shepherd's crook
     // -- Fencing (BaseSpear, and the kryss) ---------------------------------------
     with_item_kind(w(0x1401, FENCING, PIERCING, 53, 3, 28, 53, 10, 12, 200, SoundId(0x238), false), ItemKindId(70)), // Kryss
     with_item_kind(w(0x1405, FENCING, PIERCING, 45, 4, 32, 43, 10, 14, 250, SoundId(0x238), false), ItemKindId(84)), // War fork
@@ -559,6 +559,42 @@ mod tests {
             let weapon = weapon_data_for_kind(definition.id)
                 .unwrap_or_else(|| panic!("{} has no weapon row", definition.name));
             assert_eq!(weapon.item_kind, Some(definition.id));
+        }
+    }
+
+    /// Every art this table fights with is one the registry can name, and the
+    /// row it names back is this row.
+    ///
+    /// The migration's shape is that a reader may ask either way round — by
+    /// graphic for a legacy item, by kind for a typed one — so an art with no
+    /// definition behind it is a weapon that exists on only one of the two paths.
+    /// A flipped facing with no `legacy_graphics` entry is the same fault for
+    /// half a weapon: it swings on the legacy path and is unknown on the semantic
+    /// one. Both are silent, which is why this walks the table.
+    #[test]
+    fn every_weapon_art_resolves_to_a_kind_that_fights_the_same() {
+        for row in WEAPONS {
+            let (kind, _) = crate::item_definition::kind_from_drawn(crate::Drawn {
+                id:  row.graphic,
+                hue: openshard_protocol::wire::Hue::NONE,
+            })
+            .unwrap_or_else(|| panic!("weapon {:#06X} is in no item definition", row.graphic.0));
+            let semantic = weapon_data_for_kind(kind)
+                .unwrap_or_else(|| panic!("registered kind {} has no combat row", kind.0));
+            assert_eq!(
+                (semantic.skill, semantic.kind, semantic.is_axe),
+                (row.skill, row.kind, row.is_axe),
+                "{:#06X} is a different weapon class as kind {}",
+                row.graphic.0,
+                kind.0
+            );
+            assert_eq!(
+                (semantic.old_speed, semantic.old_min, semantic.old_max),
+                (row.old_speed, row.old_min, row.old_max),
+                "{:#06X} deals different damage as kind {}",
+                row.graphic.0,
+                kind.0
+            );
         }
     }
 

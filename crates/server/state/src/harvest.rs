@@ -311,13 +311,32 @@ pub fn tool_data(graphic: Graphic) -> Option<ToolData> {
 /// The harvesting-tool row for a registered item kind.
 ///
 /// This table is kind-keyed; [`tool_data`] remains the explicit legacy adapter
-/// for unregistered tools and all of the weapon-table axes.
+/// for unregistered tools.
 #[must_use]
 pub fn tool_data_for_kind(kind: ItemKindId) -> Option<ToolData> {
     let skill = match kind.0 {
         9 | 17 => Skill::Mining,
         18 => Skill::Fishing,
-        _ => return None,
+        // Every axe chops wood, and the weapon table is the one place that says
+        // which weapons those are — derived here exactly as [`tool_data`] derives
+        // it from a graphic, and deliberately not written out as a second list.
+        //
+        // The arm is load-bearing rather than tidy: while it was missing, a
+        // registered axe answered `None` here, so a smith-made axe — which
+        // carries an `ItemKind`, because its blacksmithy recipe is migrated —
+        // could neither chop nor come off the anvil with a `Tool` count, while an
+        // identical bought one, which carries no kind and so fell to
+        // [`tool_data`], could do both. The pickaxe is above this arm and stays
+        // Mining: it is an axe by the weapon table's reckoning too.
+        _ => {
+            return crate::weapon::weapon_data_for_kind(kind)
+                .is_some_and(|weapon| weapon.is_axe)
+                .then_some(ToolData {
+                    skill:    Skill::Lumberjacking,
+                    min_uses: AXE_MIN_USES,
+                    max_uses: AXE_MAX_USES,
+                });
+        }
     };
     Some(ToolData {
         skill,
@@ -764,8 +783,15 @@ static ORE_VEINS: &[HarvestVein] = &[
 ];
 
 /// The seven woods — ServUO's ML table, with `CraftResources.GetHue`'s colours.
+///
+/// Public for [`ORES`]' reason, and one more of its own: `req_skill` is also the
+/// skill it takes to *work* the wood once it is off the tree. ServUO writes that
+/// number twice — once here and once in `Log.cs`'s `TryCreateBoards(from, 65, new
+/// OakBoard())` — and they are the same number in both places, so
+/// `crafting::chop` reads this table rather than keeping a second copy of it that
+/// could disagree about oak.
 #[rustfmt::skip]
-static WOODS: &[HarvestResource] = &[
+pub static WOODS: &[HarvestResource] = &[
     wood(   0,   0, 1000, 1_072_540, 0x0000, 20), // regular
     wood( 650, 250, 1050, 1_072_541, 0x07DA, 21), // oak
     wood( 800, 400, 1200, 1_072_542, 0x04A7, 22), // ash
@@ -1135,5 +1161,39 @@ mod tests {
             tool_data_for_kind(ItemKindId(18)).map(|tool| tool.skill),
             Some(Skill::Fishing)
         );
+    }
+
+    /// The two harvest-tool tables must answer alike wherever both can answer,
+    /// and this is the test the missing axe arm would have failed.
+    ///
+    /// Which table an item reaches is decided by whether it carries an
+    /// `ItemKind`: a smith-made axe does, because its blacksmithy recipe is
+    /// migrated, and a bought one does not. So while `tool_data_for_kind` knew
+    /// nothing about axes, the crafted axe could not chop and the bought one
+    /// could — one item, two answers, neither of them visibly wrong.
+    #[test]
+    fn every_harvest_tool_graphic_names_the_same_trade_by_kind() {
+        let mut checked = 0;
+        for graphic in (0..=u16::MAX).map(Graphic) {
+            let Some(by_art) = tool_data(graphic) else {
+                continue;
+            };
+            let (kind, _) = crate::item_definition::kind_from_drawn(crate::Drawn {
+                id:  graphic,
+                hue: openshard_protocol::wire::Hue::NONE,
+            })
+            .unwrap_or_else(|| panic!("harvest tool {:#06X} is in no item definition", graphic.0));
+            assert_eq!(
+                tool_data_for_kind(kind).map(|tool| tool.skill),
+                Some(by_art.skill),
+                "{:#06X} harvests one way by art and another as kind {}",
+                graphic.0,
+                kind.0
+            );
+            checked += 1;
+        }
+        // Six purpose-built tool arts — pickaxe, shovel and fishing pole, each
+        // with its flipped facing — and the nine axe arts the weapon table lends.
+        assert_eq!(checked, 15, "harvest tool arts checked");
     }
 }

@@ -1150,33 +1150,39 @@
       ]
     },
     {
+      "kind": 131,
       "graphic": "0x1C00",
       "name": 1027168,
       "group": 7,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tailoring", "min": 622, "max": 872 }],
       "resources": [
-        { "graphic": "0x1081", "amount": 8, "name": 1044462, "message": 1044463, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 37, "material": "any" }, "graphic": "0x1081", "amount": 8, "name": 1044462, "message": 1044463, "from_axis": true }
       ]
     },
     {
+      "kind": 132,
       "graphic": "0x1C08",
       "name": 1027176,
       "group": 7,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tailoring", "min": 580, "max": 830 }],
       "resources": [
-        { "graphic": "0x1081", "amount": 6, "name": 1044462, "message": 1044463, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 37, "material": "any" }, "graphic": "0x1081", "amount": 6, "name": 1044462, "message": 1044463, "from_axis": true }
       ]
     },
     {
+      "kind": 133,
       "graphic": "0x1C0A",
       "name": 1027178,
       "group": 7,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tailoring", "min": 580, "max": 830 }],
       "resources": [
-        { "graphic": "0x1081", "amount": 6, "name": 1044462, "message": 1044463, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 37, "material": "any" }, "graphic": "0x1081", "amount": 6, "name": 1044462, "message": 1044463, "from_axis": true }
       ]
     },
     {
@@ -1216,68 +1222,80 @@
       ]
     },
     {
+      "kind": 138,
       "graphic": "0x1451",
       "name": 1025206,
       "group": 8,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tailoring", "min": 850, "max": 1100 }],
       "resources": [
-        { "graphic": "0x1081", "amount": 4, "name": 1044462, "message": 1044463, "from_axis": true },
+        { "selector": { "type": "kind_with_material", "kind": 37, "material": "any" }, "graphic": "0x1081", "amount": 4, "name": 1044462, "message": 1044463, "from_axis": true },
         { "graphic": "0x0F7E", "amount": 2, "name": 1049064, "message": 1049063 }
       ]
     },
     {
+      "kind": 137,
       "graphic": "0x1450",
       "name": 1025205,
       "group": 8,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tailoring", "min": 890, "max": 1140 }],
       "resources": [
-        { "graphic": "0x1081", "amount": 6, "name": 1044462, "message": 1044463, "from_axis": true },
+        { "selector": { "type": "kind_with_material", "kind": 37, "material": "any" }, "graphic": "0x1081", "amount": 6, "name": 1044462, "message": 1044463, "from_axis": true },
         { "graphic": "0x0F7E", "amount": 2, "name": 1049064, "message": 1049063 }
       ]
     },
     {
+      "kind": 135,
       "graphic": "0x144E",
       "name": 1025203,
       "group": 8,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tailoring", "min": 920, "max": 1170 }],
       "resources": [
-        { "graphic": "0x1081", "amount": 8, "name": 1044462, "message": 1044463, "from_axis": true },
+        { "selector": { "type": "kind_with_material", "kind": 37, "material": "any" }, "graphic": "0x1081", "amount": 8, "name": 1044462, "message": 1044463, "from_axis": true },
         { "graphic": "0x0F7E", "amount": 4, "name": 1049064, "message": 1049063 }
       ]
     },
     {
+      "kind": 136,
       "graphic": "0x1452",
       "name": 1025202,
       "group": 8,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tailoring", "min": 950, "max": 1200 }],
       "resources": [
-        { "graphic": "0x1081", "amount": 10, "name": 1044462, "message": 1044463, "from_axis": true },
+        { "selector": { "type": "kind_with_material", "kind": 37, "material": "any" }, "graphic": "0x1081", "amount": 10, "name": 1044462, "message": 1044463, "from_axis": true },
         { "graphic": "0x0F7E", "amount": 6, "name": 1049064, "message": 1049063 }
       ]
     },
     {
+      "kind": 134,
       "graphic": "0x144F",
       "name": 1025199,
       "group": 8,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tailoring", "min": 960, "max": 1210 }],
       "resources": [
-        { "graphic": "0x1081", "amount": 12, "name": 1044462, "message": 1044463, "from_axis": true },
+        { "selector": { "type": "kind_with_material", "kind": 37, "material": "any" }, "graphic": "0x1081", "amount": 12, "name": 1044462, "message": 1044463, "from_axis": true },
         { "graphic": "0x0F7E", "amount": 10, "name": 1049064, "message": 1049063 }
       ]
     },
     {
+      "kind": 139,
       "graphic": "0x1F0B",
       "name": 1027947,
       "group": 8,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Tailoring", "min": 900, "max": 1150 }],
       "resources": [
-        { "graphic": "0x1081", "amount": 6, "name": 1044462, "message": 1044463, "from_axis": true },
+        { "selector": { "type": "kind_with_material", "kind": 37, "material": "any" }, "graphic": "0x1081", "amount": 6, "name": 1044462, "message": 1044463, "from_axis": true },
         { "graphic": "0x0F7E", "amount": 4, "name": 1049064, "message": 1049063 }
       ]
     }

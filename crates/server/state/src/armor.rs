@@ -259,9 +259,9 @@ static ARMOR: &[ArmorData] = &[
     with_item_kind(a(0x13C7, 13, ALL), ItemKindId(95)),                // Leather gorget
     with_item_kind(a(0x1DB9, 13, ALL), ItemKindId(107)), a(0x1DBA, 13, ALL), // Leather cap
     with_item_kind(a(0x1C06, 13, ALL), ItemKindId(106)), a(0x1C07, 13, ALL), // Female leather chest
-    a(0x1C00, 13, ALL), a(0x1C01, 13, ALL), // Leather shorts
-    a(0x1C08, 13, ALL), a(0x1C09, 13, ALL), // Leather skirt
-    a(0x1C0A, 13, ALL), a(0x1C0B, 13, ALL), // Leather bustier sleeves
+    with_item_kind(a(0x1C00, 13, ALL), ItemKindId(131)), a(0x1C01, 13, ALL), // Leather shorts
+    with_item_kind(a(0x1C08, 13, ALL), ItemKindId(132)), a(0x1C09, 13, ALL), // Leather skirt
+    with_item_kind(a(0x1C0A, 13, ALL), ItemKindId(133)), a(0x1C0B, 13, ALL), // Leather bustier sleeves
     // -- Studded (16) ----------------------------------------------------------
     with_item_kind(a(0x13DB, 16, HALF), ItemKindId(104)), a(0x13E2, 16, HALF), // Studded chest
     with_item_kind(a(0x13DC, 16, HALF), ItemKindId(102)), a(0x13D4, 16, HALF), // Studded sleeves
@@ -288,23 +288,23 @@ static ARMOR: &[ArmorData] = &[
     with_item_kind(a(0x1412, 40, NONE), ItemKindId(54)),                // Plate helm
     with_item_kind(a(0x1C04, 30, NONE), ItemKindId(105)), a(0x1C05, 30, NONE), // Female plate chest
     // -- Bone (30) -------------------------------------------------------------
-    a(0x144F, 30, NONE), a(0x1454, 30, NONE), // Bone chest
-    a(0x144E, 30, NONE), a(0x1453, 30, NONE), // Bone arms
-    a(0x1452, 30, NONE), a(0x1457, 30, NONE), // Bone legs
-    a(0x1450, 30, NONE), a(0x1455, 30, NONE), // Bone gloves
-    a(0x1451, 30, NONE), a(0x1456, 30, NONE), // Bone helm
+    with_item_kind(a(0x144F, 30, NONE), ItemKindId(134)), a(0x1454, 30, NONE), // Bone chest
+    with_item_kind(a(0x144E, 30, NONE), ItemKindId(135)), a(0x1453, 30, NONE), // Bone arms
+    with_item_kind(a(0x1452, 30, NONE), ItemKindId(136)), a(0x1457, 30, NONE), // Bone leggings
+    with_item_kind(a(0x1450, 30, NONE), ItemKindId(137)), a(0x1455, 30, NONE), // Bone gloves
+    with_item_kind(a(0x1451, 30, NONE), ItemKindId(138)), a(0x1456, 30, NONE), // Bone helm
     // -- Helms -----------------------------------------------------------------
     with_item_kind(a(0x140C, 18, NONE), ItemKindId(55)),                // Bascinet
     with_item_kind(a(0x1408, 30, NONE), ItemKindId(56)),                // Close helm
     with_item_kind(a(0x140A, 30, NONE), ItemKindId(57)),                // Helmet
     with_item_kind(a(0x140E, 30, NONE), ItemKindId(58)),                // Norse helm
-    a(0x1F0B, 20, NONE),                // Orc helm
+    with_item_kind(a(0x1F0B, 20, NONE), ItemKindId(139)),               // Orc helm
     // -- Shields ---------------------------------------------------------------
     with_item_kind(a(0x1B73, 7, NONE), ItemKindId(59)),                 // Buckler
-    a(0x1B7A,  8, NONE),                // Wooden shield
+    with_item_kind(a(0x1B7A, 8, NONE), ItemKindId(140)),                // Wooden shield
     with_item_kind(a(0x1B72, 10, NONE), ItemKindId(60)),                // Bronze shield
     with_item_kind(a(0x1B7B, 11, NONE), ItemKindId(62)),                // Metal shield
-    a(0x1B78, 12, NONE),                // Wooden kite shield
+    with_item_kind(a(0x1B78, 12, NONE), ItemKindId(141)),               // Wooden kite shield
     with_item_kind(a(0x1B74, 16, NONE), ItemKindId(63)),                // Metal kite shield
     with_item_kind(a(0x1B76, 23, NONE), ItemKindId(61)),                // Heater shield
     with_item_kind(a(0x1BC4, 30, NONE), ItemKindId(65)),                // Order shield
@@ -363,6 +363,35 @@ mod tests {
                 .unwrap_or_else(|| panic!("{} has no armour row", definition.name));
             assert_eq!(armor.rating, rating, "{}", definition.name);
             assert_eq!(armor.item_kind, Some(definition.id));
+        }
+    }
+
+    /// Every art this table protects with is one the registry can name, and the
+    /// row it names back is this row. [`crate::weapon`]'s twin of this test says
+    /// why, and armour has the sharper edge: a flipped breastplate whose facing
+    /// no definition claims rates forty on the legacy path and nothing at all on
+    /// the semantic one, because `piece_rating` asks the registry the moment an
+    /// item carries a kind.
+    #[test]
+    fn every_armour_art_resolves_to_a_kind_that_protects_the_same() {
+        for row in ARMOR {
+            let (kind, _) = crate::item_definition::kind_from_drawn(Drawn {
+                id:  row.graphic,
+                hue: Hue::NONE,
+            })
+            .unwrap_or_else(|| panic!("armour {:#06X} is in no item definition", row.graphic.0));
+            let semantic = armor_data_for_kind(kind)
+                .unwrap_or_else(|| panic!("registered kind {} has no armour row", kind.0));
+            assert_eq!(
+                semantic.rating, row.rating,
+                "{:#06X} rates differently as kind {}",
+                row.graphic.0, kind.0
+            );
+            assert_eq!(
+                semantic.meditation, row.meditation,
+                "{:#06X} hinders meditation differently as kind {}",
+                row.graphic.0, kind.0
+            );
         }
     }
 

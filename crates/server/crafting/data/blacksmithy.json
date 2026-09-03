@@ -467,13 +467,15 @@
       ]
     },
     {
+      "kind": 141,
       "graphic": "0x1B78",
       "name": 1027032,
       "group": 2,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Blacksmith", "min": -152, "max": 348 }],
       "resources": [
-        { "graphic": "0x1BF2", "amount": 8, "name": 1044036, "message": 1044037, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 1, "material": "any" }, "graphic": "0x1BF2", "amount": 8, "name": 1044036, "message": 1044037, "from_axis": true }
       ]
     },
     {

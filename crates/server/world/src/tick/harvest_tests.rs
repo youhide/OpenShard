@@ -15,7 +15,10 @@
 use openshard_movement::scene::Scene;
 use openshard_protocol::containers::GridSlot;
 use openshard_protocol::gump::GumpPoint;
-use openshard_protocol::item_kind::ItemKindId;
+use openshard_protocol::item_kind::{
+    ItemKindId,
+    MaterialId,
+};
 use openshard_protocol::serial::RawSerial;
 use openshard_protocol::wire::{
     Graphic,
@@ -52,6 +55,10 @@ use super::*;
 const PICKAXE: Graphic = Graphic(0x0E86);
 /// A hatchet — a weapon that is also a lumberjack's tool, which is the point.
 const HATCHET: Graphic = Graphic(0x0F43);
+/// A smith's axe, ServUO's `Axe`. The same tool as the hatchet and a different
+/// test, because this one has carried an `ItemKind` since its recipe was migrated
+/// and the hatchet's art had no definition at all.
+const SMITHS_AXE: Graphic = Graphic(0x0F49);
 /// A fishing pole.
 const POLE: Graphic = Graphic(0x0DC0);
 
@@ -103,7 +110,11 @@ fn ground(world: &mut World, land: u16, static_at: Option<(u16, i8)>) {
 /// Put a tool in the player's pack and return its entity.
 ///
 /// Through `spawn_with_serial` and `apply_core_defaults`, the same door a vendor's
-/// shelf uses — so the uses on it are the ones a bought tool would have.
+/// shelf uses — so the uses on it are the ones a bought tool would have. The
+/// semantic identity is installed for the same reason and is not decoration:
+/// `spawn_item` names every art the registry knows, so a tool built here without
+/// one would be on a path no bought tool is ever on, and the kind-keyed half of
+/// every table these tests reach would go unexercised.
 fn give_tool(world: &mut World, connection: ConnectionId, graphic: Graphic) -> EntityId {
     let player = world.state.players[&connection];
     let owner = world.state.registry.serial_of(player).unwrap();
@@ -126,6 +137,12 @@ fn give_tool(world: &mut World, connection: ConnectionId, graphic: Graphic) -> E
         }),
     )
     .unwrap();
+    if let Some((kind, material)) = openshard_state::kind_from_drawn(Drawn {
+        id:  graphic,
+        hue: Hue(0),
+    }) {
+        items::install_identity(&mut world.state, item, kind, material);
+    }
     items::apply_core_defaults(&mut world.state, item, graphic);
     item
 }
@@ -532,6 +549,46 @@ fn a_hatchet_asks_what_to_use_it_on_instead_of_where_to_dig() {
     assert!(!messages.contains(&503_033), "the axe asked where to dig");
 }
 
+/// The axe a smith makes chops, and it reaches the chop cursor rather than the
+/// paperdoll.
+///
+/// This reads as a duplicate of the test below and is not. The hatchet's art was
+/// the one axe art no item definition claimed, so every *other* axe arrived
+/// carrying an `ItemKind` — off a migrated blacksmithy recipe, and off a shelf,
+/// because `spawn_item` names every art the registry knows. `tool_data_for_kind`
+/// had no axe arm, so those axes answered "not a harvesting tool": a double-click
+/// equipped them instead of raising the crosshair, they came with no swings on
+/// them, and Lumberjacking was a skill only a hatchet could practise. Both halves
+/// are asserted here, because the tag that routes the double-click and the table
+/// that answers the swing are two different fixes.
+#[test]
+fn a_registered_axe_chops_the_way_the_unregistered_hatchet_did() {
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    ground(&mut world, GRASS, Some((TREE, 0)));
+    train(&mut world, player, Skill::Lumberjacking, 1000);
+    let axe = give_tool(&mut world, player, SMITHS_AXE);
+    world.tick(now);
+    assert_eq!(
+        world.state.registry.get::<ItemKind>(axe),
+        Some(&ItemKind(ItemKindId(73))),
+        "a shelf axe carries its registered kind, which is the whole difference"
+    );
+    assert!(
+        world.state.registry.has::<Tool>(axe),
+        "a typed axe still comes with the swings a harvest tool has"
+    );
+    let _ = packets_for(&mut world, player);
+
+    swing_at(&mut world, player, axe, 1, TREE, now);
+    let entity = world.state.players[&player];
+    assert!(
+        world.state.registry.has::<Harvesting>(entity),
+        "the axe should be chopping rather than hanging off the paperdoll"
+    );
+}
+
 #[test]
 fn a_hatchet_chops_a_tree_static() {
     // Two things at once: an axe is a harvesting tool *derived* from the weapon
@@ -875,4 +932,132 @@ fn a_pile_already_in_the_pack_takes_more_at_the_item_ceiling() {
         carried(&world, player, ORE_GRAPHIC) > mined,
         "the ore did not reach the pile it should have merged onto"
     );
+}
+
+/// Oak, the first wood that asks for skill at all.
+const OAK: MaterialId = MaterialId(21);
+/// Frostwood, the hardest of the seven.
+const FROSTWOOD: MaterialId = MaterialId(26);
+/// The art every grade of board takes, told apart by its hue.
+const BOARD_GRAPHIC: Graphic = Graphic(0x1BD7);
+
+/// A pile of logs of one wood in the player's pack, the way a felled tree pays.
+fn give_logs(world: &mut World, connection: ConnectionId, material: MaterialId, amount: u32) -> EntityId {
+    let player = world.state.players[&connection];
+    let owner = world.state.registry.serial_of(player).unwrap();
+    let backpack = items::backpack_of(&world.state, owner).expect("a backpack");
+    items::give_kind(
+        &mut world.state,
+        backpack,
+        openshard_crafting::chop::LOG_KIND,
+        Some(material),
+        amount,
+    )
+    .expect("logs have a registered presentation")
+    .last
+    .expect("the pile was created")
+}
+
+/// Double-click the axe and answer its cursor with a pile of logs rather than a
+/// tile — the second click ServUO's harvest target accepts.
+fn chop(world: &mut World, connection: ConnectionId, axe: EntityId, logs: EntityId, now: Instant) {
+    let axe_serial = world.state.registry.serial_of(axe).unwrap();
+    world.queue(Command::DoubleClick {
+        connection,
+        request: UseRequest::Use(RawSerial(axe_serial.raw())),
+    });
+    world.tick(now);
+    let cursor_id = {
+        let entity = world.state.players[&connection];
+        world.state.registry.serial_of(entity).unwrap().raw()
+    };
+    let log_serial = world.state.registry.serial_of(logs).unwrap();
+    world.queue(Command::TargetResponse {
+        connection,
+        response: openshard_protocol::target::TargetResponse {
+            cursor_id: openshard_protocol::wire::CursorId(cursor_id),
+            object:    Some(log_serial),
+            location:  Point::new(START.x, START.y, 0),
+            graphic:   None,
+            cancelled: false,
+        },
+    });
+    world.tick(now);
+}
+
+#[test]
+fn an_axe_cuts_a_pile_of_logs_into_boards_of_the_same_wood() {
+    // The bridge the reachability audit was written to find missing: a
+    // lumberjack is paid in logs and every carpentry, fletching and tinkering row
+    // spends boards. The grade is the half that matters most — a cut that dropped
+    // it would turn the six special woods into the plain one, and with them the
+    // whole reason a tree is worth finding.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let axe = give_tool(&mut world, player, HATCHET);
+    let logs = give_logs(&mut world, player, OAK, 7);
+    // Carpentry alone, and no Lumberjacking at all: ServUO's `TryCreateBoards`
+    // passes on either trade, so a carpenter can work wood somebody else felled.
+    train(&mut world, player, Skill::Carpentry, 700);
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+
+    chop(&mut world, player, axe, logs, now);
+
+    assert_eq!(
+        carried(&world, player, LOG_GRAPHIC),
+        0,
+        "the whole pile goes in one cut, ServUO's `ScissorHelper`"
+    );
+    assert_eq!(carried(&world, player, BOARD_GRAPHIC), 7, "one board per log");
+    let board = world
+        .state
+        .registry
+        .query::<ItemKind>()
+        .find(|(_, kind)| **kind == ItemKind(openshard_crafting::chop::BOARD_KIND))
+        .map(|(entity, _)| entity)
+        .expect("chopping creates a semantic board");
+    assert_eq!(
+        world.state.registry.get::<Material>(board),
+        Some(&Material(OAK)),
+        "the oak came out plain"
+    );
+}
+
+#[test]
+fn a_wood_neither_trade_can_work_is_refused_rather_than_spent() {
+    // The flat gate, and the shape of it: frostwood asks for 100 in either trade,
+    // and a crafter under the bar must keep the logs. A refusal that consumed the
+    // pile would be worse than no bridge at all.
+    let now = Instant::now();
+    let mut world = world();
+    let player = enter(&mut world, now);
+    let axe = give_tool(&mut world, player, HATCHET);
+    let logs = give_logs(&mut world, player, FROSTWOOD, 4);
+    train(&mut world, player, Skill::Carpentry, 999);
+    train(&mut world, player, Skill::Lumberjacking, 999);
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+
+    chop(&mut world, player, axe, logs, now);
+
+    assert!(
+        clilocs(&mut world, player).contains(&1_072_652),
+        "the refusal line is what tells a crafter the wood is beyond them"
+    );
+    assert_eq!(
+        carried(&world, player, LOG_GRAPHIC),
+        4,
+        "the logs are still there"
+    );
+    assert_eq!(carried(&world, player, BOARD_GRAPHIC), 0);
+
+    // And the same pile at the bar itself, which is the other half of the rule:
+    // 100.0 exactly is enough, in either trade.
+    train(&mut world, player, Skill::Lumberjacking, 1000);
+    world.tick(now);
+    let _ = packets_for(&mut world, player);
+    chop(&mut world, player, axe, logs, now);
+    assert_eq!(carried(&world, player, BOARD_GRAPHIC), 4);
 }

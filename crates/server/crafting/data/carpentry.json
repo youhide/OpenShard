@@ -661,33 +661,39 @@
       ]
     },
     {
+      "kind": 130,
       "graphic": "0x0E81",
       "name": 1023713,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Carpentry", "min": 789, "max": 1039 }],
       "resources": [
-        { "graphic": "0x1BD7", "amount": 7, "name": 1044041, "message": 1044351, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 36, "material": "any" }, "graphic": "0x1BD7", "amount": 7, "name": 1044041, "message": 1044351, "from_axis": true }
       ]
     },
     {
+      "kind": 127,
       "graphic": "0x0E89",
       "name": 1023721,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Carpentry", "min": 736, "max": 986 }],
       "resources": [
-        { "graphic": "0x1BD7", "amount": 6, "name": 1044041, "message": 1044351, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 36, "material": "any" }, "graphic": "0x1BD7", "amount": 6, "name": 1044041, "message": 1044351, "from_axis": true }
       ]
     },
     {
+      "kind": 129,
       "graphic": "0x13F8",
       "name": 1025112,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Carpentry", "min": 789, "max": 1039 }],
       "resources": [
-        { "graphic": "0x1BD7", "amount": 7, "name": 1044041, "message": 1044351, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 36, "material": "any" }, "graphic": "0x1BD7", "amount": 7, "name": 1044041, "message": 1044351, "from_axis": true }
       ]
     },
     {
@@ -730,33 +736,39 @@
       ]
     },
     {
+      "kind": 126,
       "graphic": "0x13B4",
       "name": 1025043,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Carpentry", "min": 650, "max": 900 }],
       "resources": [
-        { "graphic": "0x1BD7", "amount": 9, "name": 1044041, "message": 1044351, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 36, "material": "any" }, "graphic": "0x1BD7", "amount": 9, "name": 1044041, "message": 1044351, "from_axis": true }
       ]
     },
     {
+      "kind": 128,
       "graphic": "0x0DF0",
       "name": 1023568,
       "group": 3,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Carpentry", "min": 815, "max": 1065 }],
       "resources": [
-        { "graphic": "0x1BD7", "amount": 9, "name": 1044041, "message": 1044351, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 36, "material": "any" }, "graphic": "0x1BD7", "amount": 9, "name": 1044041, "message": 1044351, "from_axis": true }
       ]
     },
     {
+      "kind": 140,
       "graphic": "0x1B7A",
       "name": 1027034,
       "group": 4,
       "markable": true,
+      "output_material": { "inherit_input": 0 },
       "skills": [{ "skill": "Carpentry", "min": 526, "max": 776 }],
       "resources": [
-        { "graphic": "0x1BD7", "amount": 9, "name": 1044041, "message": 1044351, "from_axis": true }
+        { "selector": { "type": "kind_with_material", "kind": 36, "material": "any" }, "graphic": "0x1BD7", "amount": 9, "name": 1044041, "message": 1044351, "from_axis": true }
       ]
     },
     {
