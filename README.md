@@ -96,7 +96,7 @@ crates/
     events        double-buffered typed event bus
     movement      the walk handshake, terrain rules, A* pathfinding
     config        TOML, validated at load
-    metrics       counters                                stub, future
+    metrics       tick rate, save backlog, /metrics and /health
   server/       the shard
     gateway       sans-io connection + Tokio listener
     login         accounts, auth keys, the whole login sequence
@@ -148,6 +148,14 @@ The one setting worth reading before you touch anything else is
 `server.advertise`. It is **not** `server.listen`: it is the address the server
 tells clients to dial, so it defaults to `127.0.0.1` and only works on the
 machine running the shard. Behind NAT it must be your public address.
+
+Set `metrics.listen` and the shard answers `GET /metrics` (the Prometheus text
+exposition) and `GET /health` (the same instant as JSON) on that address. It is
+off by default and has no authentication, so bind it to loopback or to an
+interface only your monitoring can reach. What it publishes is the tick rate
+against the rate the shard promises, how far behind its disk is, and how many
+clients are connected — the numbers a log line cannot give you, because a shard
+whose tick has wedged prints nothing at all.
 
 ## Content
 

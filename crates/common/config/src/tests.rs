@@ -855,3 +855,79 @@ fn an_absurd_slow_is_refused_at_load() {
         })
     ));
 }
+
+/// A shard publishes nothing until an operator says where, and a config written
+/// before the section existed is one of those shards.
+#[test]
+fn no_metrics_endpoint_is_the_default_and_the_shipped_config_has_none() {
+    assert!(
+        config(MINIMAL).metrics.listen.is_none(),
+        "a config that never heard of the section opened a port"
+    );
+    let shipped: Config = toml::from_str(DEFAULT_TOML).expect("DEFAULT_TOML must parse");
+    assert!(
+        shipped.metrics.listen.is_none(),
+        "the shipped config opens a second, unauthenticated port on a fresh checkout"
+    );
+}
+
+#[test]
+fn a_metrics_endpoint_is_read_as_a_socket() {
+    let config = config(
+        r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [metrics]
+            listen = "127.0.0.1:9598"
+            "#,
+    );
+    config.validate().expect("a metrics port of its own is fine");
+    assert_eq!(
+        config.metrics.listen,
+        Some("127.0.0.1:9598".parse().expect("a socket address"))
+    );
+}
+
+/// The mistake the variant exists for: two listeners on one socket. Whichever
+/// binds second fails, so what an operator finds missing — the metrics, or the
+/// whole shard — depends on the order that run happened to start things in.
+#[test]
+fn the_metrics_endpoint_may_not_be_the_game_port() {
+    let config = config(
+        r#"
+            [server]
+            name = "OpenShard"
+            listen = "0.0.0.0:2593"
+            advertise = "127.0.0.1:2593"
+
+            [metrics]
+            listen = "0.0.0.0:2593"
+            "#,
+    );
+    let Err(ConfigError::MetricsListenIsGamePort { address }) = config.validate() else {
+        panic!("two listeners on one socket were accepted");
+    };
+    assert_eq!(address, "0.0.0.0:2593".parse().expect("a socket address"));
+}
+
+/// The same port on a different interface is a real configuration, not a
+/// contradiction: `127.0.0.1:2593` and `192.168.1.10:2593` bind twice without
+/// conflict, and refusing it would be this crate guessing at somebody's network.
+#[test]
+fn the_same_port_on_another_interface_is_not_the_game_port() {
+    let config = config(
+        r#"
+            [server]
+            name = "OpenShard"
+            listen = "192.168.1.10:2593"
+            advertise = "192.168.1.10:2593"
+
+            [metrics]
+            listen = "127.0.0.1:2593"
+            "#,
+    );
+    config.validate().expect("two interfaces are two sockets");
+}

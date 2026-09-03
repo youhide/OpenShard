@@ -40,10 +40,8 @@ use std::time::Instant;
 
 use openshard_client_net::transport::Dial;
 use openshard_config::Config;
-use openshard_gateway::{
-    Gate,
-    Shutdown,
-};
+use openshard_gateway::Gate;
+use openshard_server::shard::Reins;
 use tokio::io::DuplexStream;
 
 use crate::Running;
@@ -98,9 +96,10 @@ pub fn spawn(
     let (ready, opened) = std::sync::mpsc::channel();
 
     // Outside the thread, because it is half of what is handed back. See
-    // `crate::spawn`.
-    let shutdown = Shutdown::new();
-    let served = shutdown.clone();
+    // `crate::spawn`, including why it is the whole `Reins` and not the stop
+    // alone.
+    let reins = Reins::new();
+    let served = reins.clone();
 
     let thread = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -121,7 +120,7 @@ pub fn spawn(
             // stop reach a connection here at all: nothing binds a port, so
             // there is no listener to close and the pipes are the whole of what
             // is open.
-            let (gate, events) = Gate::new(served.clone());
+            let (gate, events) = Gate::new(served.shutdown());
             eprintln!(
                 "in-process shard +{:.3}s: connection gate created",
                 started.elapsed().as_secs_f64()
@@ -146,8 +145,7 @@ pub fn spawn(
             eprintln!("in-process shard +{:.3}s: ready", started.elapsed().as_secs_f64());
             // The tally inside the reins goes unread, as in `crate::spawn` —
             // see there.
-            let reins = openshard_server::shard::Reins::over(served);
-            openshard_server::shard::run_shard(events, config, world, store, reins, &seed).await;
+            openshard_server::shard::run_shard(events, config, world, store, served, &seed).await;
         });
     });
 
@@ -157,7 +155,7 @@ pub fn spawn(
     (
         dial,
         Running {
-            stop:   shutdown,
+            reins,
             thread: Some(thread),
         },
     )

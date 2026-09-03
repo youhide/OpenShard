@@ -82,21 +82,25 @@ impl Unwritten {
 }
 
 /// What the outside world holds of a running shard: the one word that stops it,
-/// and the tally of what its save task still owes the disk.
+/// the tally of what its save task still owes the disk, and the numbers it
+/// publishes about itself.
 ///
 /// # Why they travel together
 ///
-/// They are already handed to the same two places. [`run_shard`] watches the
-/// word and counts into the tally; `stop::watch` says the word on the first
-/// signal and reads the tally on the second. Neither may live *inside* the
-/// shard, and for one reason: the force-exit of `docs/server/design_shutdown.md`
-/// D2 has to work at the moment `run_shard` is not going to return, so what
-/// reads the tally cannot be owned by the thing that is stuck.
+/// They are handed to the same places. [`run_shard`] watches the word, counts
+/// into the tally and publishes into the metrics; `stop::watch` says the word on
+/// the first signal and reads the tally on the second; [`crate::run`] gives the
+/// metrics to a socket. None of the three may live *inside* the shard, and for
+/// one reason: the force-exit of `docs/server/design_shutdown.md` D2 has to work
+/// at the moment `run_shard` is not going to return, so what reads them cannot
+/// be owned by the thing that is stuck. The metrics endpoint wants exactly the
+/// same thing for exactly the same reason — a shard nobody can stop is a shard
+/// somebody wants to ask about.
 ///
-/// A caller with no way to force-exit — every test — builds one with
-/// [`Reins::new`] or [`Reins::over`] and never looks at it. That is the point of
-/// the type: it was two arguments passed blind, and a signature stops being
-/// readable long before it stops compiling.
+/// A caller with no way to force-exit and nothing to scrape — every test —
+/// builds one with [`Reins::new`] or [`Reins::over`] and never looks at it. That
+/// is the point of the type: it was two arguments passed blind, and a signature
+/// stops being readable long before it stops compiling.
 ///
 /// Cloning hands out another hold on the same shard, the way cloning a
 /// [`Shutdown`] does; there is no owner among the clones.
@@ -104,6 +108,7 @@ impl Unwritten {
 pub struct Reins {
     shutdown:  Shutdown,
     unwritten: Unwritten,
+    metrics:   ShardMetrics,
 }
 
 impl Reins {
@@ -121,6 +126,11 @@ impl Reins {
         Self {
             shutdown,
             unwritten: Unwritten::new(),
+            // The rate the shard is about to run at, told to the thing that
+            // publishes it. `openshard-metrics` knows nothing about what a tick
+            // is, which is why it has to be handed the one number every duration
+            // this shard puts on the wire is denominated in.
+            metrics: ShardMetrics::declaring(TickInterval(TICK_INTERVAL)),
         }
     }
 
@@ -132,6 +142,11 @@ impl Reins {
     /// The tally of what the save task has been handed and not written.
     pub fn unwritten(&self) -> Unwritten {
         self.unwritten.clone()
+    }
+
+    /// What this shard publishes about itself, for whatever serves it.
+    pub fn metrics(&self) -> ShardMetrics {
+        self.metrics.clone()
     }
 }
 
@@ -557,6 +572,25 @@ impl Shard {
     }
 }
 
+/// One measured window in the shape the metrics endpoint publishes.
+///
+/// Here rather than in [`crate::pace`] for the same reason [`report_pace`] is:
+/// a type that measures a clock should not know who is listening to it, and
+/// `Pace` has to stay drivable by a test with nothing attached.
+///
+/// The work summary is rendered here, once a second, and only reaches the health
+/// document — [`openshard_metrics::exposition`] deliberately drops it, because a
+/// Prometheus label per command mix is unbounded cardinality.
+fn published(window: crate::pace::Window) -> TickWindow {
+    TickWindow {
+        observed_rate: window.observed_rate(),
+        busy_share:    window.busy_share(),
+        worst:         window.worst,
+        worst_work:    window.worst_work.to_string(),
+        behind_ticks:  window.behind_ticks(),
+    }
+}
+
 /// Say what a closed window found, when it found something new.
 ///
 /// # Why the line reads the way it does
@@ -646,6 +680,11 @@ pub async fn run_shard(
     seed: &[String],
 ) {
     let shutdown = reins.shutdown();
+    // Read once a tick below and handed to whatever is serving them. Taken here
+    // rather than through `reins` at each use so that the loop's own lines say
+    // which of the three it is touching.
+    let unwritten = reins.unwritten();
+    let metrics = reins.metrics();
     // `Config::validate` (run by `Config::load`, which every `Config` reaching
     // here has been through) refuses an IPv6 `server.advertise`, so this is
     // always `Some` in practice.
@@ -755,10 +794,27 @@ pub async fn run_shard(
                     // accepted while the existing controlled shutdown tail runs.
                     break;
                 }
+                // Everything an operator watching from outside the process reads,
+                // published where the loop already knows it: three relaxed atomic
+                // writes and a `HashMap::len`, forty times a second. The
+                // connection count is read from the table rather than kept on the
+                // open/close edges, which is `Sessions::len`'s own argument.
+                metrics.tick_ran();
+                metrics.connections(shard.sessions.len());
+                metrics.save_backlog(SaveBacklog {
+                    writes: unwritten.writes() as u64,
+                    rows:   unwritten.rows() as u64,
+                });
                 // Measured around the tick rather than inside it: the world is
                 // never handed a wall clock, so replay is untouched and a run
                 // with this measurement produces the same world as one without.
                 if let Some(window) = pace.record(began, began.elapsed(), work) {
+                    // Every window, and not only the ones worth a line. A log is
+                    // edge-triggered because a standing state restated every
+                    // second buries it; a sample is the opposite, and a series
+                    // with a hole in it where the shard was fine is a series
+                    // nobody can average.
+                    metrics.tick_window(published(window));
                     report_pace(&mut pace, window, &shutdown);
                 }
             }
@@ -767,12 +823,16 @@ pub async fn run_shard(
             // ahead of the next packet, and there is never a queue of these.
             Some(()) = failures.recv() => {
                 warn!("a save failed; marking the world for a full sweep");
+                metrics.save_failed();
                 shard.world.resweep();
             }
 
             // A periodic save was announced before snapshot construction, and
             // only this success signal lets us say that it truly landed.
-            Some(tick) = saved_rx.recv() => shard.announce_completed_periodic_save(tick),
+            Some(tick) = saved_rx.recv() => {
+                metrics.save_completed();
+                shard.announce_completed_periodic_save(tick);
+            }
 
             // Before `events` as well: a client waiting on a password check is a
             // client that has been waiting for a hash, and answering it costs
@@ -812,6 +872,13 @@ pub async fn run_shard(
     // patience of whoever is holding Ctrl-C) has nothing else to set it from, and
     // the number they need is this one and not the wall clock of a whole run.
     let stopping = Instant::now();
+
+    // Said before the goodbye, because this is the span it is for. The endpoint
+    // outlives this function deliberately — see [`crate::run`] — so a launcher
+    // that asks during a long save is told "not serving" rather than left with a
+    // refused connection and no way to tell a shard that is going from one that
+    // has crashed.
+    metrics.stopping();
 
     // The shard's last word, and then the hang-up — in that order, and the order
     // is the whole of it.

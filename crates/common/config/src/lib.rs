@@ -79,6 +79,9 @@ pub struct Config {
     /// What the shard does when it stops keeping its own declared tick rate.
     #[serde(default)]
     pub watchdog:    WatchdogConfig,
+    /// Where the shard answers questions about itself, if anywhere.
+    #[serde(default)]
+    pub metrics:     MetricsConfig,
 }
 
 /// What the shard does when it stops being the thing it says it is.
@@ -127,6 +130,52 @@ impl Default for WatchdogConfig {
         Self {
             tick_behind_windows: default_tick_behind_windows(),
         }
+    }
+}
+
+/// Where the shard answers questions about itself.
+///
+/// # Why a shard publishes nothing until it is told to
+///
+/// Binding a port is a decision about the machine the shard runs on, and the
+/// only safe default for one is *none*: a shard that opened a second port on
+/// every interface the moment this crate learned how would be a shard that
+/// started publishing its connection count to whoever could reach it, on an
+/// upgrade nobody read the notes for. So the absence here is the domain's — a
+/// shard with no endpoint is a working shard, and the common one — rather than a
+/// value waiting to be filled in.
+///
+/// What it publishes has no authentication and is not meant to. See
+/// `openshard_metrics::endpoint`, and prefer a loopback or a private interface;
+/// the shard says so at boot when it is bound anywhere else.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// The socket serving `GET /metrics` and `GET /health`, or nothing at all.
+    ///
+    /// Not [`ServerConfig::listen`]: that is the game port, and the two cannot
+    /// share a socket — see [`ConfigError::MetricsListenIsGamePort`], which
+    /// refuses the mistake at load rather than letting the second bind fail
+    /// after the shard is already up.
+    #[serde(default)]
+    pub listen: Option<SocketAddr>,
+}
+
+impl MetricsConfig {
+    /// A shard that answers no questions about itself, which is what every
+    /// config that does not mention the section asks for.
+    ///
+    /// Named rather than left to a derive, because "no endpoint" is a decision
+    /// with a paragraph behind it — see the type — and a `#[derive(Default)]`
+    /// says only that somebody wanted the field to compile.
+    pub const fn publishing_nothing() -> Self {
+        Self { listen: None }
+    }
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self::publishing_nothing()
     }
 }
 
@@ -1382,6 +1431,16 @@ pub enum ConfigError {
     /// point the packet is built, which is a boot-time mistake and deserves
     /// a boot-time error.
     AdvertisedNotIpv4,
+    /// `metrics.listen` is the socket the game itself binds.
+    ///
+    /// Its own variant because the mistake is silent in the worst way: the
+    /// second bind fails, and whichever of the two lost the race is the one an
+    /// operator finds missing — a shard with no metrics, or a shard nobody can
+    /// log in to, depending on the order things started in that run.
+    MetricsListenIsGamePort {
+        /// The socket both were pointed at.
+        address: SocketAddr,
+    },
     /// The shard name is empty, or will not fit its wire field.
     BadShardName {
         /// How long the name is.
@@ -1524,6 +1583,13 @@ impl fmt::Display for ConfigError {
                 f.write_str(
                     "server.advertise is IPv6; the UO relay packet has four bytes for an address \
                  and no way to carry one",
+                )
+            }
+            Self::MetricsListenIsGamePort { address } => {
+                write!(
+                    f,
+                    "metrics.listen and server.listen are both {address}; the metrics endpoint \
+                 needs a port of its own, and it is not the one clients dial",
                 )
             }
             Self::BadShardName { length } => {
@@ -1685,6 +1751,7 @@ impl Config {
     /// Check everything that would otherwise fail silently at runtime.
     pub fn validate(&self) -> Result<(), ConfigError> {
         validate_server(&self.server)?;
+        validate_metrics(&self.metrics, &self.server)?;
         validate_accounts(&self.accounts)?;
         validate_gameplay(&self.gameplay)?;
         validate_world(&self.world)
@@ -1721,6 +1788,20 @@ fn validate_server(server: &ServerConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::BadShardName { length });
     }
     Ok(())
+}
+
+/// The one way the two listeners can be wrong about each other.
+///
+/// Only the exact socket is refused. A metrics endpoint on the same *port* as
+/// the game but a different interface is a real configuration — `127.0.0.1:2593`
+/// beside `192.168.1.10:2593` binds twice without conflict — and refusing it
+/// would be this crate guessing at an operator's network rather than checking a
+/// contradiction.
+fn validate_metrics(metrics: &MetricsConfig, server: &ServerConfig) -> Result<(), ConfigError> {
+    match metrics.listen {
+        Some(address) if address == server.listen => Err(ConfigError::MetricsListenIsGamePort { address }),
+        _ => Ok(()),
+    }
 }
 
 fn validate_accounts(accounts: &[AccountConfig]) -> Result<(), ConfigError> {

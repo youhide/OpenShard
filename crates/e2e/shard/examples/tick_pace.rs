@@ -51,12 +51,10 @@ use openshard_e2e_shard::{
 const WATCH: Duration = Duration::from_secs(10);
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("openshard_server=info")),
-        )
-        .init();
+    // The same subscriber the shard binary installs, through the same call: what
+    // this example watches is a `tracing` line, so a filter of its own would be
+    // a second answer to a question the shard already has one for.
+    openshard_metrics::logging::install("openshard_server=info");
 
     let named = std::env::args().nth(1);
     match &named {

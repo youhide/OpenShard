@@ -2726,6 +2726,7 @@ dependencies = [
  "openshard-config",
  "openshard-gateway",
  "openshard-map",
+ "openshard-metrics",
  "openshard-movement",
  "openshard-persistence",
  "openshard-protocol",
@@ -2734,7 +2735,6 @@ dependencies = [
  "openshard-uofiles",
  "tokio",
  "toml",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2863,6 +2863,12 @@ dependencies = [
 [[package]]
 name = "openshard-metrics"
 version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "openshard-movement"
@@ -2978,6 +2984,7 @@ dependencies = [
  "openshard-housing",
  "openshard-login",
  "openshard-map",
+ "openshard-metrics",
  "openshard-movement",
  "openshard-persistence",
  "openshard-protocol",

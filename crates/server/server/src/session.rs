@@ -234,6 +234,17 @@ impl Sessions {
         self.0.remove(&id);
     }
 
+    /// How many connections the shard is holding.
+    ///
+    /// Read once a tick by the loop that publishes it rather than counted on the
+    /// open/close edges: [`Sessions::close`] is also called by a handler that
+    /// refused a packet, by a decode that failed and by a login verdict for a
+    /// socket that has gone, so a tally kept on the edges is a tally with five
+    /// places to forget. The table is the count.
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub(crate) fn get(&self, id: ConnectionId) -> Option<&Session> {
         self.0.get(&id)
     }

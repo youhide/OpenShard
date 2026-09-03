@@ -125,6 +125,28 @@ save_seconds = 180
 #   tick_behind_windows = 120
 tick_behind_windows = 60
 
+[metrics]
+# Where the shard answers questions about ITSELF, over HTTP:
+#
+#   GET /metrics   the Prometheus text exposition — tick rate against the rate
+#                  the shard publishes, the busy share that says whether a slow
+#                  window is the tick or the machine, the worst tick in it, how
+#                  many writes and rows the save task still owes the disk,
+#                  connections, uptime.
+#   GET /health    the same instant as JSON, plus the worst tick's command mix.
+#                  200 while the shard is taking play, 503 once it has been asked
+#                  to stop and is saving on its way out.
+#
+# Commented out, and that is the default: a shard publishes nothing until an
+# operator says where. Uncommenting it opens a SECOND port, and that port has NO
+# AUTHENTICATION — anyone who can reach it can read the numbers above. Bind it to
+# loopback, or to an interface only your monitoring can reach. The shard warns at
+# boot if you bind it anywhere else.
+#
+# Not the same port as server.listen: that one is the game, and the two cannot
+# share a socket.
+#   listen = "127.0.0.1:9598"
+
 [gameplay]
 # The rules knobs — the SphereServer sphere.ini equivalents. Every value here has
 # a working default; uncomment one only to change the shard's feel.

@@ -12,7 +12,6 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use tracing::error;
-use tracing_subscriber::EnvFilter;
 
 /// A shard, and the world it was asked to lay before it starts ticking.
 #[derive(Debug, Parser)]
@@ -37,9 +36,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .init();
+    openshard_metrics::logging::install("info");
 
     let cli = Cli::parse();
 

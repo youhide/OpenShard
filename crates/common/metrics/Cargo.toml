@@ -12,3 +12,15 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# The health document, rendered rather than hand-spliced: a work summary that
+# happened to contain a quote would otherwise produce a body no parser accepts.
+serde_json.workspace = true
+# Only the features the endpoint uses. It opens one socket, reads one request
+# with a deadline and writes one response; `tokio = "full"` would pull in
+# process spawning, signals and the filesystem for that.
+tokio = { workspace = true, features = ["net", "io-util", "rt", "macros", "time"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }

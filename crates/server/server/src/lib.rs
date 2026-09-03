@@ -76,6 +76,13 @@ use openshard_login::{
     Outcome,
     Response,
 };
+use openshard_metrics::endpoint::MetricsEndpoint;
+use openshard_metrics::shard::{
+    SaveBacklog,
+    ShardMetrics,
+    TickInterval,
+    TickWindow,
+};
 use openshard_persistence::{
     AccountRecord,
     PgStore,
@@ -214,8 +221,57 @@ pub async fn run(seed: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // The endpoint gets a stop of its own rather than the shard's. A shard that
+    // has been asked to stop is the one an operator most wants to ask about —
+    // the last save takes as long as the store takes, and the log goes quiet
+    // across all of it — so this outlives `run_shard` and is closed below,
+    // answering "not serving" in the meantime. See `shard::run_shard`'s
+    // `metrics.stopping()`.
+    let watching = serve_metrics(&config, reins.metrics()).await?;
+
     tokio::spawn(gateway_server.run());
     run_shard(events, &config, world, store, reins, seed).await;
 
+    if let Some(watching) = watching {
+        watching.stop();
+    }
+
     Ok(())
+}
+
+/// Bind and spawn the metrics and health endpoint, if the operator asked for one.
+///
+/// Returns the stop that ends it, or nothing when `[metrics] listen` is absent —
+/// which is the default and the common case, and is a shard that publishes
+/// nothing rather than a feature that failed to start.
+///
+/// Bound here, before anything is spawned, so that a port already in use is a
+/// sentence on the terminal at boot rather than a line in a log from a task that
+/// quietly gave up.
+async fn serve_metrics(
+    config: &Config,
+    metrics: ShardMetrics,
+) -> Result<Option<Shutdown>, Box<dyn std::error::Error>> {
+    let Some(address) = config.metrics.listen else {
+        return Ok(None);
+    };
+    // Said once, at boot, and worth saying: nothing on that port asks who is
+    // calling, so a shard's tick rate, its connection count and how far behind
+    // its disk is are readable by whoever can reach it.
+    if !address.ip().is_loopback() {
+        warn!(
+            %address,
+            "the metrics endpoint is not on loopback and has no authentication; anyone who can \
+             reach this address can read this shard's numbers"
+        );
+    }
+    let endpoint = MetricsEndpoint::bind(address, metrics).await?;
+    let stop = Shutdown::new();
+    let watching = stop.clone();
+    tokio::spawn(async move {
+        if let Err(error) = endpoint.serve(async move { watching.requested().await }).await {
+            error!(%error, "the metrics endpoint stopped accepting");
+        }
+    });
+    Ok(Some(stop))
 }

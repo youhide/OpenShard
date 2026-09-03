@@ -23,6 +23,10 @@ workspace = true
 openshard-client-net.workspace = true
 openshard-config.workspace = true
 openshard-gateway.workspace = true
+# `Running` hands a test the shard's own metrics — the same handle the binary
+# gives its endpoint — so a scrape in `tests/` reads the running shard rather
+# than a fixture that looks like one.
+openshard-metrics.workspace = true
 openshard-protocol.workspace = true
 openshard-server.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
@@ -54,7 +58,3 @@ openshard-uofiles.workspace = true
 # dev-dependency because the reading end is a test's, not the playground's.
 openshard-persistence.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
-# For `examples/tick_pace.rs` alone: the thing that example measures is a
-# `tracing` line the shard emits, so it needs somebody listening. Nothing in the
-# library or the tests installs a subscriber, and none of them should.
-tracing-subscriber.workspace = true

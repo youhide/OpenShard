@@ -53,7 +53,9 @@ belongs in a crate.
 | One word stops a shard: `SIGTERM` or Ctrl-C, the outbox drained, the player told, the world on disk before `run_shard` returns | ✅ shipping | the save await is unbounded — row 2 | [`design_shutdown.md`](design_shutdown.md) |
 | A tick-pace watchdog: a window behind its declared rate warns, and `[watchdog] tick_behind_windows` of them stops the shard the way Ctrl-C would | ✅ shipping | — | `server/src/pace.rs`'s own docs |
 | An operator's stop from inside the world — a GM command with a countdown | ⬜ not built | [`plans/server/operations/PLAN.md`](../../plans/server/operations/PLAN.md) | the same |
-| Metrics, tracing, Prometheus, health endpoints; plugin lifecycle; the REST/JWT admin API | ⬜ not built | the crates are declared and empty | the same plan |
+| A shard publishes itself: `GET /metrics` and `GET /health` on `[metrics] listen`, off unless an operator names an address | ✅ shipping | no authentication, and none intended — row 14 | [`evidence/2026-09-03-metrics-and-health.md`](evidence/2026-09-03-metrics-and-health.md) |
+| One subscriber for every shard binary: `openshard_metrics::logging::install` | ✅ shipping | the client's two binaries still build their own — row 14 | the same |
+| Plugin lifecycle; the REST/JWT admin API | ⬜ not built | `crates/server/plugins` is declared and empty | [`plans/server/operations/PLAN.md`](../../plans/server/operations/PLAN.md) |
 | Embedded scripting | ⬜ deliberately absent | spiked, proven to fit, and deleted in favour of Rust and data tables | [`evidence/2026-08-24-the-scripting-spike.md`](evidence/2026-08-24-the-scripting-spike.md) |
 
 ## What is enforced, and by what
@@ -88,6 +90,11 @@ What holds today, and what would notice if it stopped:
   place in the shard allowed to read the wall clock — outside `World::tick`, so
   replay is untouched — and it compares in whole ticks rather than against a
   margin somebody chose by eye.
+- **What the endpoint publishes comes off a running shard**, not a fixture.
+  `e2e/shard/tests/metrics_endpoint.rs` starts one, waits for it to close a real
+  pace window, and scrapes it over a socket: every unit test in
+  `openshard-metrics` feeds the registry by hand and would go on passing if
+  `run_shard` stopped publishing tomorrow.
 
 Two crate-wide invariants sit above all of that:
 
@@ -199,7 +206,19 @@ beside `save_every` in `[persistence]` the day an operator finds it wrong. And
 `Shard::announce_shutdown` is the only caller of `World::announce`, so that seam
 is unproven until a GM broadcast or a scheduled stop is the second.
 
-**14. The licence gate is not written and its audit is stale.** Nothing notices
+**14. What the new endpoint leaves open, and one of the three is deliberate.**
+The port has **no authentication**, by design: it publishes numbers and nothing
+else, and the place authority belongs is the REST/JWT admin API that has not been
+built — so the answer today is "bind it to loopback", which the shard says at boot
+when it is not. The other two are real: `openshard_tick_age_seconds` makes a
+wedged tick loop visible for the first time, but nothing decides how long is too
+long — that is an alerting rule the operator writes, and a shard whose tick has
+stopped still answers `/health` with a 200. And the client's two binaries still
+build their own `tracing` subscriber (`--log` and a jank directive in the
+playground, a `warn` default in `openshard-client-app`), so `RUST_LOG` means one
+thing to the shard's binaries and another to those.
+
+**15. The licence gate is not written and its audit is stale.** Nothing notices
 when a dependency arrives under terms the workspace cannot take; `cargo-deny`
 with a `[licenses]` allow list belongs beside the commands CI already runs. The
 audit that would seed it names `cooked-waker` as arriving through `deno_core`,
@@ -251,9 +270,12 @@ notices file.
 - [`evidence/2026-08-24-the-licensing-audit.md`](evidence/2026-08-24-the-licensing-audit.md)
   — the GPL/MIT contradiction, how it was resolved, and the two things it left
   open.
+- [`evidence/2026-09-03-metrics-and-health.md`](evidence/2026-09-03-metrics-and-health.md)
+  — what a shard now publishes about itself, the four decisions that shaped it,
+  and the three questions it deliberately refuses to answer.
 
 **Plans** — what is not built lives outside `docs/`:
 
 - [`plans/server/operations/PLAN.md`](../../plans/server/operations/PLAN.md) —
-  metrics and tracing, plugin lifecycle, the administration API, the operator's
-  stop, and the licence gate.
+  the operator's stop, plugin lifecycle, the administration API, the dashboard
+  and launcher, and the licence gate.

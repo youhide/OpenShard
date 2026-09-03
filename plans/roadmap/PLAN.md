@@ -72,10 +72,13 @@ without cutting the record itself.
 
 ## Operations
 
-Moved out with the `server` migration: metrics and tracing, the plugin
-lifecycle, the administration API, the operator's stop and the licence gate are
+Moved out with the `server` migration: the plugin lifecycle, the administration
+API, the operator's stop and the licence gate are
 [`plans/server/operations/PLAN.md`](../server/operations/PLAN.md), in the domain
-whose crates they are. The map editor keeps its own plan,
+whose crates they are. Metrics and tracing were on that list and are not any
+more — a shard publishes `GET /metrics` and `GET /health` and the record is
+[`docs/server/evidence/2026-09-03-metrics-and-health.md`](../../docs/server/evidence/2026-09-03-metrics-and-health.md).
+The map editor keeps its own plan,
 [`plans/world/map_editor/PLAN.md`](../world/map_editor/PLAN.md).
 
 ## Later

@@ -47,15 +47,14 @@ use openshard_config::{
     ConfigError,
     DEFAULT_TOML,
 };
-use openshard_gateway::{
-    ClientGatewayServer,
-    Shutdown,
-};
+use openshard_gateway::ClientGatewayServer;
+use openshard_metrics::shard::ShardMetrics;
 use openshard_protocol::identity::{
     RawAccountName,
     RawPlaintextPassword,
 };
 use openshard_protocol::version::ClientVersion;
+use openshard_server::shard::Reins;
 
 /// The client we claim to be. ClassicUO's own opening version, which is what
 /// keeps the shard on the modern packet shapes.
@@ -202,7 +201,11 @@ pub fn window_base_set(config: Option<&Config>) -> Option<PathBuf> {
 #[derive(Debug)]
 #[must_use = "the shard stops when this is dropped"]
 pub struct Running {
-    stop:   Shutdown,
+    /// What the outside world holds of this shard: the stop below, and the
+    /// numbers it publishes about itself. The whole value rather than the stop
+    /// alone, because a test watching a shard wants the same two things a
+    /// process running one does.
+    reins:  Reins,
     /// `Option` only because [`Drop`] has to move the handle out of a `&mut
     /// self` to join it. It is `Some` for the whole life of the value.
     thread: Option<JoinHandle<()>>,
@@ -217,6 +220,15 @@ impl Running {
     /// assertion.
     pub fn stop(mut self) {
         self.halt();
+    }
+
+    /// What this shard publishes about itself, for a test that wants to read it.
+    ///
+    /// The same handle `openshard_server::run` hands to the endpoint it serves,
+    /// so a test binding one of its own is scraping the running shard rather
+    /// than a fixture that looks like it.
+    pub fn metrics(&self) -> ShardMetrics {
+        self.reins.metrics()
     }
 
     /// What both [`Running::stop`] and [`Drop`] do. Idempotent: whichever runs
@@ -239,7 +251,7 @@ impl Running {
     /// inside a panic aborts the runner rather than failing — so the argument is
     /// here instead.
     fn halt(&mut self) {
-        self.stop.stop();
+        self.reins.shutdown().stop();
         if let Some(thread) = self.thread.take() {
             if let Err(payload) = thread.join() {
                 if std::thread::panicking() {
@@ -279,10 +291,15 @@ pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (Soc
     let (ready, listening) = std::sync::mpsc::channel();
 
     // Built out here rather than inside the thread, because it is half of what
-    // is handed back — and unlike a `Gate`, a `Shutdown` needs no runtime to
-    // exist in.
-    let shutdown = Shutdown::new();
-    let served = shutdown.clone();
+    // is handed back — and unlike a `Gate`, neither a `Shutdown` nor the tally
+    // and metrics beside it need a runtime to exist in.
+    //
+    // `Reins::new` rather than a bare `Shutdown`: the caller's `Running` holds
+    // this value, and the shard below is handed a clone, so the stop a test says
+    // and the numbers it reads are the shard's own rather than a second set that
+    // happens to look alike.
+    let reins = Reins::new();
+    let served = reins.clone();
 
     let thread = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -291,9 +308,10 @@ pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (Soc
             .expect("a runtime for the shard");
 
         runtime.block_on(async move {
-            let (gateway, events) = ClientGatewayServer::bind("127.0.0.1:0".parse().unwrap(), served.clone())
-                .await
-                .expect("a loopback port");
+            let (gateway, events) =
+                ClientGatewayServer::bind("127.0.0.1:0".parse().unwrap(), served.shutdown())
+                    .await
+                    .expect("a loopback port");
             let address = gateway.local_address().expect("the bound address");
 
             // A local, not a leak. `run_shard` borrows the config for as long as
@@ -308,14 +326,12 @@ pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (Soc
 
             tokio::spawn(gateway.run());
             ready.send(address).expect("the caller is still waiting");
-            // The reins carry a fresh tally nobody reads: what counts unwritten
+            // The reins carry a tally nobody reads here: what counts unwritten
             // saves is there for the force-exit of
-            // `docs/server/design_shutdown.md` D2, and a
-            // test shard has no signals to force-exit on. `over` rather than
-            // `new`, because the stop it is held by already exists — the caller
-            // is holding a clone of it in the `Running` below.
-            let reins = openshard_server::shard::Reins::over(served);
-            openshard_server::shard::run_shard(events, config, world, store, reins, &[]).await;
+            // `docs/server/design_shutdown.md` D2, and a test shard has no
+            // signals to force-exit on. What a test may read is the metrics
+            // beside it, through `Running::metrics`.
+            openshard_server::shard::run_shard(events, config, world, store, served, &[]).await;
         });
     });
 
@@ -326,7 +342,7 @@ pub fn spawn(config: impl FnOnce(SocketAddr) -> Config + Send + 'static) -> (Soc
     (
         address,
         Running {
-            stop:   shutdown,
+            reins,
             thread: Some(thread),
         },
     )
@@ -372,7 +388,7 @@ mod tests {
     #[should_panic(expected = "the shard thread died on purpose")]
     fn a_shard_thread_that_panicked_fails_the_test() {
         let running = Running {
-            stop:   Shutdown::new(),
+            reins:  Reins::new(),
             thread: Some(std::thread::spawn(|| panic!("the shard thread died on purpose"))),
         };
         running.stop();
