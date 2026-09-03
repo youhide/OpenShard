@@ -71,7 +71,7 @@ pub fn use_cloth_material(state: &mut WorldState, weaver: EntityId, material: En
     if !is_cloth_material(graphic) {
         return false;
     }
-    if !carried_by(state, weaver, material) {
+    if !carried_in_pack(state, weaver, material) {
         state.localized_message(weaver, NOT_IN_PACK, "");
         return true;
     }
@@ -115,7 +115,7 @@ pub fn weave(state: &mut WorldState, weaver: EntityId, material: EntityId, targe
         state.localized_message(weaver, NOT_A_LOOM, "");
         return;
     }
-    if !carried_by(state, weaver, material) {
+    if !carried_in_pack(state, weaver, material) {
         state.localized_message(weaver, NOT_IN_PACK, "");
         return;
     }
@@ -160,16 +160,6 @@ fn loom_root(state: &WorldState, item: EntityId) -> Option<EntityId> {
     let part = state.registry.get::<AddonPart>(item)?;
     part.addon.is_loom().then_some(())?;
     state.registry.entity_of(part.root)
-}
-
-/// Whether an item is in this mobile's own pack — [`spin`](crate::spin)'s check,
-/// and ServUO's recursive `IsChildOf(from.Backpack)`.
-fn carried_by(state: &WorldState, mobile: EntityId, item: EntityId) -> bool {
-    state
-        .registry
-        .serial_of(mobile)
-        .and_then(|owner| backpack_of(state, owner))
-        .is_some_and(|pack| state.craft_stock_root_of_item(item) == Some(pack))
 }
 
 #[cfg(test)]

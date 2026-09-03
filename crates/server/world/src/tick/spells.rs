@@ -57,6 +57,10 @@ const TOO_MANY_FOLLOWERS_TO_SUMMON: openshard_protocol::wire::ClilocId =
 const SUMMON_LOCATION_BLOCKED: openshard_protocol::wire::ClilocId =
     openshard_protocol::wire::ClilocId(501_942);
 
+/// "That must be in your pack for you to use it." — what a scroll double-clicked
+/// out of reach is answered with, ServUO's own line for the same click.
+const SCROLL_NOT_IN_PACK: openshard_protocol::wire::ClilocId = openshard_protocol::wire::ClilocId(1_042_001);
+
 impl World {
     /// A client asked to cast a spell (`0xBF`). Begin it: right away in the
     /// Sphere style, or as a rooted [`Casting`] with a cast delay in the ServUO
@@ -65,6 +69,17 @@ impl World {
         let Some(&caster) = self.state.players.get(&connection) else {
             return;
         };
+        self.start_cast(caster, spell, None);
+    }
+
+    /// Begin a cast, either out of the caster's spellbook (`scroll` is `None`) or
+    /// off a scroll it is holding.
+    ///
+    /// Everything below the spellbook gate is the same either way — ServUO builds
+    /// one `Spell` object and hands it the scroll or a null, rather than having
+    /// two cast paths that would drift apart the first time one of them learned a
+    /// new refusal.
+    fn start_cast(&mut self, caster: EntityId, spell: SpellId, scroll: Option<Serial>) {
         let Some(info) = magic::info(spell) else {
             return; // past the eighth circle; not a spell
         };
@@ -79,7 +94,11 @@ impl World {
         // The classic gate: a spell is castable only if it is written in a
         // spellbook the caster carries. A scroll learned into the book, or the
         // full book the mage sells, is what puts it there.
-        if !self.caster_has_spell(caster, spell) {
+        //
+        // A cast *off a scroll* skips the gate, and that is the whole reason a
+        // scroll is worth buying: ServUO's `SpellScroll.OnDoubleClick` builds the
+        // spell with the scroll in hand and never asks `Spellbook.Find`.
+        if scroll.is_none() && !self.caster_has_spell(caster, spell) {
             self.notify_self(caster, "That spell is not in your spellbook.");
             return;
         }
@@ -139,7 +158,7 @@ impl World {
                 // Nothing to wait out: the gesture and the effect are the same
                 // instant, so the animation is given no duration to hold for.
                 self.state.animate(caster, gesture);
-                self.resolve_cast(caster, spell);
+                self.resolve_cast(caster, spell, scroll);
             }
             CastStyle::Stop => {
                 let delay = magic::cast_delay_ticks(info, TICKS_PER_SECOND);
@@ -153,6 +172,7 @@ impl World {
                     Casting {
                         spell,
                         complete_at: self.state.ticks + delay,
+                        scroll,
                     },
                 );
             }
@@ -216,42 +236,68 @@ impl World {
         }
         // Then the casts whose delay is up.
         let now = self.state.ticks;
-        let ready: Vec<(EntityId, SpellId)> = self
+        let ready: Vec<(EntityId, SpellId, Option<Serial>)> = self
             .state
             .registry
             .query::<Casting>()
             .filter(|(_, casting)| now >= casting.complete_at)
-            .map(|(entity, casting)| (entity, casting.spell))
+            .map(|(entity, casting)| (entity, casting.spell, casting.scroll))
             .collect();
-        for (caster, spell) in ready {
+        for (caster, spell, scroll) in ready {
             self.state.registry.remove::<Casting>(caster);
-            self.resolve_cast(caster, spell);
+            self.resolve_cast(caster, spell, scroll);
         }
     }
 
     /// Pay for a cast and roll it, then either land a self-cast now or raise the
     /// target cursor a targeted spell waits on. A fizzle (short mana or a
     /// reagent) says so and stops.
-    fn resolve_cast(&mut self, caster: EntityId, spell: SpellId) {
+    ///
+    /// `scroll` is the scroll the cast came off, and it changes three things and
+    /// nothing else: no reagents are taken, the roll is two circles easier, and
+    /// the scroll itself is spent when the cast lands.
+    fn resolve_cast(&mut self, caster: EntityId, spell: SpellId, scroll: Option<Serial>) {
         let Some(info) = magic::info(spell) else {
             return;
         };
         let Some(serial) = self.state.registry.serial_of(caster) else {
             return;
         };
+        // A scroll can leave the pack while a rooted cast is held — traded away,
+        // dropped, or banked. ServUO re-checks it in `CheckSequence` and fizzles
+        // rather than casting for free, and so does this: the scroll *is* this
+        // cast's reagent list, and a reagent list that walked away is a fizzle.
+        if scroll.is_some_and(|scroll| !self.scroll_in_hand(caster, scroll)) {
+            self.state.bus.send(magic::SpellCast {
+                caster,
+                serial,
+                spell,
+                target: None,
+                success: false,
+            });
+            self.notify_self(caster, "The scroll is no longer in your pack.");
+            return;
+        }
         // Read the cost knobs first — a copy each, so the `&mut self.state` the
         // call takes does not clash with reading `self.state.gameplay`.
         let reagents_required = self.state.gameplay.reagents;
         let mana_loss_on_fail = self.state.gameplay.mana_loss_on_fail;
         let reagent_loss_on_fail = self.state.gameplay.reagent_loss_on_fail;
         // Reagents off means an empty list: nothing to check, nothing to consume.
-        let reagents: Vec<(Graphic, u16)> = if reagents_required {
+        // So does a scroll, whatever the knob says — ServUO's
+        // `Spell.ConsumeReagents` returns true unconditionally once the cast came
+        // off one, because the scroll was already paid for at the scribe's.
+        let reagents: Vec<(Graphic, u16)> = if reagents_required && scroll.is_none() {
             info.reagents.iter().map(|&graphic| (graphic, 1)).collect()
         } else {
             Vec::new()
         };
         let pack = self.caster_pack(serial);
-        let (min_skill, max_skill) = magic::cast_skills(info);
+        let (min_skill, max_skill) = if scroll.is_some() {
+            magic::scroll_cast_skills(info)
+        } else {
+            magic::cast_skills(info)
+        };
         let Some(success) = magic::pay_and_roll(
             &mut self.state,
             caster,
@@ -273,6 +319,16 @@ impl World {
             self.notify_self(caster, "You lack the mana or reagents to cast that.");
             return;
         };
+
+        // The scroll is torn up by a cast that *worked*, and survives one that
+        // fizzled — ServUO consumes it inside `CheckSequence`'s `CheckFizzle`
+        // success branch and nowhere else. Deliberately not under
+        // `reagent_loss_on_fail`: that knob governs a pile of reagents, and a
+        // scroll is one item that is the whole cast. A fizzle still costs the
+        // mana whenever `mana_loss_on_fail` is on, so a retry is not free.
+        if let Some(scroll) = scroll.filter(|_| success) {
+            items::consume(&mut self.state, scroll, 1);
+        }
 
         match info.target {
             SpellTarget::SelfCast => {
@@ -778,6 +834,50 @@ impl World {
         }
     }
 
+    /// Cast the spell a double-clicked Magery scroll holds.
+    ///
+    /// ServUO's `SpellScroll.OnDoubleClick`: the scroll has to be in the reader's
+    /// own pack, and then the spell is begun with the scroll in hand — no
+    /// spellbook is asked for, no reagents are taken, the roll is two circles
+    /// easier, and the scroll is spent when it lands. It is what makes a scroll
+    /// worth buying for a mage who cannot yet hold the circle, rather than a
+    /// textbook to be read into a book and thrown away.
+    ///
+    /// Returns whether the item was a Magery scroll at all, so the double-click
+    /// dispatch can fall through to everything else it knows.
+    pub(super) fn cast_from_scroll(&mut self, reader: EntityId, scroll: EntityId) -> bool {
+        let Some(spell) = self
+            .state
+            .registry
+            .get::<Drawn>(scroll)
+            .and_then(|drawn| openshard_state::components::scroll_spell(drawn.id))
+        else {
+            return false;
+        };
+        // Asked before anything is begun, and answered with the line that says
+        // why: a scroll on the ground or in somebody else's pack is not yours to
+        // read, and a cast that simply did nothing would look like a bug.
+        if !items::carried_in_pack(&self.state, reader, scroll) {
+            self.state.localized_message(reader, SCROLL_NOT_IN_PACK, "");
+            return true;
+        }
+        let Some(scroll) = self.state.registry.serial_of(scroll) else {
+            return true;
+        };
+        self.start_cast(reader, spell, Some(scroll));
+        true
+    }
+
+    /// Whether a scroll is still where a cast off it needs it to be: in the
+    /// caster's own pack. Asked again at resolution, because a rooted cast holds
+    /// for up to a couple of seconds and the pack is not frozen for them.
+    fn scroll_in_hand(&self, caster: EntityId, scroll: Serial) -> bool {
+        self.state
+            .registry
+            .entity_of(scroll)
+            .is_some_and(|scroll| items::carried_in_pack(&self.state, caster, scroll))
+    }
+
     /// Whether the caster carries a spellbook that holds `spell` — a book in its
     /// backpack with the spell's bit set. The gate `begin_cast` reads.
     ///
@@ -809,5 +909,209 @@ impl World {
     /// A private system line to a player, if it is one. A creature hears nothing.
     pub(super) fn notify_self(&mut self, entity: EntityId, text: &str) {
         self.state.system_message(entity, text);
+    }
+}
+
+/// The scroll cast, held here rather than in `tick/tests.rs` — that file is
+/// already the largest in the repository, and these tests are about this module.
+#[cfg(test)]
+mod scroll_tests {
+    use std::time::Instant;
+
+    use super::*;
+    use crate::tick::tests::{
+        backpack_serial,
+        enter,
+        packets_for,
+        serial_of,
+        world,
+    };
+
+    /// Fireball: third circle, targeted, and the spell the other cast tests use,
+    /// so a failure here is about the scroll rather than about the spell.
+    const FIREBALL: SpellId = SpellId(17);
+
+    /// The art of a Fireball scroll.
+    fn scroll_graphic() -> Graphic {
+        Graphic(openshard_state::components::spell_scroll_graphic(FIREBALL))
+    }
+
+    /// A grandmaster mage carrying `count` Fireball scrolls and **no spellbook**
+    /// — the whole claim being that a scroll casts without one. Returns the
+    /// connection, the mage, and one entity out of the scroll pile.
+    fn mage_with_scrolls(world: &mut World, now: Instant, count: u32) -> (ConnectionId, EntityId, EntityId) {
+        let connection = enter(world, now);
+        let player = world.state.players[&connection];
+        let serial = serial_of(world, connection);
+        world.queue(Command::SetSkill {
+            serial,
+            skill: 25, // Magery
+            value: 1000,
+        });
+        world.tick(now);
+        let backpack = backpack_serial(world, connection);
+        let graphic = scroll_graphic();
+        assert!(
+            items::give(&mut world.state, backpack, graphic, Hue(0), count).is_complete(),
+            "the scrolls did not fit in the pack"
+        );
+        let scroll = openshard_state::contained_items(&world.state, backpack)
+            .map(|(entity, _)| entity)
+            .find(|&entity| {
+                world
+                    .state
+                    .registry
+                    .get::<Drawn>(entity)
+                    .is_some_and(|drawn| drawn.id == graphic)
+            })
+            .expect("the scrolls went into the pack");
+        let _ = packets_for(world, connection);
+        (connection, player, scroll)
+    }
+
+    /// Tick a world through a whole second, which outlasts a third-circle cast
+    /// delay ([`magic::cast_delay_ticks`] is `(circle + 1) / 4` seconds).
+    fn wait_out_the_cast(world: &mut World, from: Instant) {
+        let mut later = from;
+        for _ in 0..Gameplay::ticks(1) {
+            later += TICK_INTERVAL;
+            world.tick(later);
+        }
+    }
+
+    #[test]
+    fn a_scroll_casts_the_spell_it_holds_and_is_torn_up() {
+        let now = Instant::now();
+        let mut world = world(); // the rooted ServUO style
+        let (connection, player, scroll) = mage_with_scrolls(&mut world, now, 2);
+
+        assert!(
+            world.cast_from_scroll(player, scroll),
+            "the double-click was not recognised as a scroll's"
+        );
+        assert!(
+            world
+                .state
+                .registry
+                .get::<Casting>(player)
+                .is_some_and(|casting| casting.scroll.is_some()),
+            "the cast began without a spellbook, and remembers the scroll it came off"
+        );
+
+        wait_out_the_cast(&mut world, now);
+
+        assert!(
+            packets_for(&mut world, connection).iter().any(|p| p[0] == 0x6C),
+            "the cast resolved and raised Fireball's target cursor"
+        );
+        // Scrolls stack, so one is torn up and the rest of the pile stays — the
+        // same distinction the potion makes.
+        assert_eq!(
+            items::amount_of(&world.state, scroll),
+            1,
+            "the whole pile went up with one cast"
+        );
+    }
+
+    #[test]
+    fn a_scroll_cast_takes_no_reagents() {
+        let now = Instant::now();
+        let mut world = world();
+        let (connection, player, scroll) = mage_with_scrolls(&mut world, now, 1);
+        let backpack = backpack_serial(&world, connection);
+
+        // Stocked with everything Fireball would want out of a spellbook, so the
+        // claim is "they were not taken" and not "they were never there".
+        let wanted = magic::info(FIREBALL).unwrap().reagents;
+        assert!(!wanted.is_empty(), "Fireball asks for no reagents at all");
+        for &graphic in wanted {
+            assert!(items::give(&mut world.state, backpack, graphic, Hue(0), 20).is_complete());
+        }
+        assert!(
+            world.state.gameplay.reagents,
+            "the shard under test has reagents switched off"
+        );
+
+        world.cast_from_scroll(player, scroll);
+        wait_out_the_cast(&mut world, now);
+
+        for &graphic in wanted {
+            assert_eq!(
+                items::count_in_container(&world.state, backpack, graphic),
+                20,
+                "the scroll cast spent a reagent"
+            );
+        }
+    }
+
+    #[test]
+    fn a_scroll_that_left_the_pack_mid_cast_fizzles() {
+        let now = Instant::now();
+        let mut world = world();
+        let (connection, player, scroll) = mage_with_scrolls(&mut world, now, 1);
+        let mana_before = world.state.registry.get::<Mana>(player).unwrap().current;
+
+        world.cast_from_scroll(player, scroll);
+        // Traded away, dropped, banked — whatever took it, the cast is holding a
+        // scroll that is no longer in the pack.
+        let scroll_serial = world.state.registry.serial_of(scroll).unwrap();
+        items::consume(&mut world.state, scroll_serial, 1);
+        let _ = packets_for(&mut world, connection);
+
+        wait_out_the_cast(&mut world, now);
+
+        assert!(
+            world.state.registry.get::<Casting>(player).is_none(),
+            "the cast is still being held"
+        );
+        assert!(
+            !packets_for(&mut world, connection).iter().any(|p| p[0] == 0x6C),
+            "a cast off a scroll that is gone still raised its cursor"
+        );
+        assert_eq!(
+            world.state.registry.get::<Mana>(player).unwrap().current,
+            mana_before,
+            "the fizzle charged for a cast that never happened"
+        );
+    }
+
+    #[test]
+    fn a_scroll_in_somebody_elses_pack_is_not_cast() {
+        let now = Instant::now();
+        let mut world = world();
+        let (_, owner, scroll) = mage_with_scrolls(&mut world, now, 1);
+        let second = enter(&mut world, now);
+        let thief = world.state.players[&second];
+
+        assert!(
+            world.cast_from_scroll(thief, scroll),
+            "the click was a scroll's, whoever's pack it is in"
+        );
+        assert!(
+            world.state.registry.get::<Casting>(thief).is_none(),
+            "a scroll in another player's pack was cast from"
+        );
+        assert!(
+            world.state.registry.get::<Casting>(owner).is_none(),
+            "and it was not cast on the owner's behalf either"
+        );
+    }
+
+    #[test]
+    fn an_item_that_is_not_a_scroll_is_left_alone() {
+        // The engine's own dispatch has already run by the time this is reached,
+        // so claiming an item it did not mean to would be taking one away from it.
+        let now = Instant::now();
+        let mut world = world();
+        let (connection, player, _) = mage_with_scrolls(&mut world, now, 1);
+        let backpack = backpack_serial(&world, connection);
+        let gold = items::give(&mut world.state, backpack, Graphic(0x0EED), Hue(0), 1)
+            .last
+            .expect("the gold went into the pack");
+
+        assert!(
+            !world.cast_from_scroll(player, gold),
+            "gold was read as a spell scroll"
+        );
     }
 }

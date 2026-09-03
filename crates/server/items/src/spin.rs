@@ -52,7 +52,7 @@ pub fn use_fibre(state: &mut WorldState, spinner: EntityId, fibre: EntityId) -> 
     // ServUO asks this *before* raising the cursor, and so does this: a pile on
     // the ground is refused with the line that says why, not with a cursor that
     // then refuses the click.
-    if !carried_by(state, spinner, fibre) {
+    if !carried_in_pack(state, spinner, fibre) {
         state.localized_message(spinner, NOT_IN_PACK, "");
         return true;
     }
@@ -99,7 +99,7 @@ pub fn spin(state: &mut WorldState, spinner: EntityId, fibre: EntityId, target: 
         state.localized_message(spinner, NOT_A_WHEEL, "");
         return;
     }
-    if !carried_by(state, spinner, fibre) {
+    if !carried_in_pack(state, spinner, fibre) {
         state.localized_message(spinner, NOT_IN_PACK, "");
         return;
     }
@@ -224,21 +224,6 @@ fn draw_wheel(state: &mut WorldState, root: Serial, turning: bool) {
     for (part, graphic) in parts {
         redraw_item(state, part, graphic);
     }
-}
-
-/// Whether an item is in this mobile's own pack, ServUO's recursive
-/// `IsChildOf(from.Backpack)`: a pile in a bag in the pack counts, one on the
-/// ground or in somebody else's pack does not.
-///
-/// [`cut`](crate::cut)'s check, and the same root walk — kept here rather than
-/// shared because the two modules ask it of different things and neither wants
-/// the other's refusal message.
-fn carried_by(state: &WorldState, mobile: EntityId, item: EntityId) -> bool {
-    state
-        .registry
-        .serial_of(mobile)
-        .and_then(|owner| backpack_of(state, owner))
-        .is_some_and(|pack| state.craft_stock_root_of_item(item) == Some(pack))
 }
 
 /// The tick a wheel started now would finish on — the one place the six seconds

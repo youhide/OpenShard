@@ -1525,6 +1525,16 @@ pub struct Casting {
     pub spell:       SpellId,
     /// The tick the cast finishes and resolves.
     pub complete_at: WorldTick,
+    /// The scroll the spell is being cast *from*, or `None` when it comes out of
+    /// the caster's own spellbook — ServUO's `Spell.Scroll`, the same nullable
+    /// item and read for the same three things: no reagents, two circles' relief
+    /// on the roll, and one scroll spent when the cast lands.
+    ///
+    /// It rides on the component rather than being looked up again at
+    /// resolution because a scroll can leave the pack during the cast delay, and
+    /// a resolution that re-derived it would quietly become a *spellbook* cast
+    /// instead of fizzling.
+    pub scroll:      Option<Serial>,
 }
 
 /// Marks a mobile as run by the server rather than a person: it has a brain.
@@ -2495,7 +2505,7 @@ pub struct SwingSpeed {
 /// the commit and are never re-derived at the impact. That is the
 /// difference between this and the scalar deadline it replaced — a deadline can
 /// only arrive, while an action can be sustained, spoiled, and *ended with a
-/// reason the player is told*. `docs/combat_actions.md` is the plan.
+/// reason the player is told*. `docs/combat/design_actions.md` is the plan.
 ///
 /// The three axes it separates are `kind` (what the impact does), the `watch`
 /// inside [`Phase::Armed`] (what releases it) and the condition rules applied to
@@ -2547,7 +2557,7 @@ pub struct CombatAction {
 /// only while an action does. The two are mutually exclusive by construction:
 /// the commit pass either starts an action or records why it could not.
 ///
-/// This is the state `docs/combat_actions.md`'s D1 named and did not build. D1
+/// This is the state `docs/combat/design_actions.md`'s D1 named and did not build. D1
 /// says a precondition that fails is *"an outcome with a name, never a
 /// `continue`"* — and that was made true at the impact and left false at the
 /// commit, where the pass declined in silence for as long as the obstacle
@@ -3149,7 +3159,7 @@ pub struct HouseDoor {
 /// *house* — two houses on one foundation id have two designs and one key — and
 /// it is world state, which that seam is documented as deliberately not being.
 /// So it is a component, and the three readers of a house's shape take it as a
-/// parameter instead. See `docs/customisation.md`'s D1 and C1.
+/// parameter instead. See `docs/housing/design_customisation.md`'s D1 and C1.
 ///
 /// # What is never saved, said accurately
 ///

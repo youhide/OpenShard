@@ -1068,10 +1068,39 @@ pub fn mana(info: &SpellInfo) -> u16 {
 /// circles are harder to hold. Fed to the same band roll a mined ore uses.
 #[must_use]
 pub fn cast_skills(info: &SpellInfo) -> (i32, i32) {
-    // ServUO's `MagerySpell.GetCastSkills`: the band's centre climbs 100/7 skill
-    // points a circle, so the first circle sits at 0.0 and the eighth at 100.0,
-    // and the band is twenty points either side of it. In tenths.
-    let centre = i32::from(info.circle.get() - SpellCircle::MIN) * 1000 / 7;
+    cast_band(circle_index(info))
+}
+
+/// The band a spell cast *off a scroll* is rolled against.
+///
+/// ServUO's `MagerySpell.GetCastSkills` subtracts two circles when the cast came
+/// from a scroll, and that relief is the whole reason a scroll is worth buying:
+/// an eighth-circle scroll is rolled as if it were a sixth-circle spell, so a
+/// mage who cannot yet hold the circle can still get the spell off.
+///
+/// The index goes *negative* for the first two circles, which is why this
+/// arithmetic is signed. A band below zero is one nobody fails, and that is the
+/// intended answer: a Magic Arrow scroll always works.
+#[must_use]
+pub fn scroll_cast_skills(info: &SpellInfo) -> (i32, i32) {
+    cast_band(circle_index(info) - SCROLL_CIRCLE_RELIEF)
+}
+
+/// How many circles easier a scroll makes its spell — ServUO's `circle -= 2`.
+const SCROLL_CIRCLE_RELIEF: i32 = 2;
+
+/// A circle's `0`-based place in the eight, which is what the band measures
+/// from: the first circle is `0` and the eighth `7`.
+fn circle_index(info: &SpellInfo) -> i32 {
+    i32::from(info.circle.get() - SpellCircle::MIN)
+}
+
+/// The band around a circle index's centre, in tenths — ServUO's
+/// `MagerySpell.GetCastSkills`: the centre climbs 100/7 skill points a circle,
+/// so the first circle sits at 0.0 and the eighth at 100.0, and the band is
+/// twenty points either side of it.
+fn cast_band(circle: i32) -> (i32, i32) {
+    let centre = circle * 1000 / 7;
     (centre - CAST_CHANCE_OFFSET, centre + CAST_CHANCE_OFFSET)
 }
 
@@ -1105,6 +1134,32 @@ mod tests {
             );
             assert!(!spell.reagents.is_empty(), "{} has no reagents", spell.name);
         }
+    }
+
+    /// A scroll is worth buying because it is rolled as a spell two circles
+    /// lower: ServUO's `MagerySpell.GetCastSkills` with `circle -= 2`. Stated as
+    /// an identity between two bands rather than as literal numbers, so it stays
+    /// true if the band arithmetic itself is ever retuned.
+    #[test]
+    fn a_scroll_is_rolled_two_circles_easier() {
+        let eighth = info(SpellId(63)).unwrap(); // Earthquake, eighth circle
+        let sixth = info(SpellId(47)).unwrap(); // Mark, sixth
+        assert_eq!(eighth.circle.get(), 8);
+        assert_eq!(sixth.circle.get(), 6);
+        assert_eq!(
+            scroll_cast_skills(eighth),
+            cast_skills(sixth),
+            "an eighth-circle scroll is rolled as a sixth-circle spell"
+        );
+        // And the relief runs off the bottom of the table rather than clamping at
+        // the first circle: a Clumsy scroll's whole band is below zero, which is a
+        // roll nobody fails.
+        let first = info(SpellId(0)).unwrap();
+        assert_eq!(first.circle.get(), 1);
+        assert!(
+            scroll_cast_skills(first).1 < 0,
+            "a first-circle scroll can still be failed"
+        );
     }
 
     #[test]

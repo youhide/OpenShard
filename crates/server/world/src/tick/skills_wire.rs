@@ -222,6 +222,13 @@ impl World {
             skills::BANDAGE_GRAPHIC => {
                 skills::use_bandage(&mut self.state, player, item);
             }
+            // A Magery scroll is cast *from*, not read: the spell goes off with
+            // no reagents and two circles' relief on the roll, and the scroll is
+            // spent. Dragging one onto a spellbook still teaches it instead —
+            // that is the drop path, and this is the click.
+            _ if openshard_state::components::scroll_spell(graphic).is_some() => {
+                self.cast_from_scroll(player, item);
+            }
             // A deed is not a skill, and it is matched here anyway: this is the
             // one place a double-clicked item gets a *default* meaning, and the
             // alternative is a second dispatch beside it doing the same match.

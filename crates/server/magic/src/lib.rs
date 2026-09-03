@@ -56,6 +56,7 @@ pub use spells::{
     cast_skills,
     info,
     mana,
+    scroll_cast_skills,
 };
 
 mod dispel;

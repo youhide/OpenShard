@@ -130,12 +130,7 @@ pub fn cut(state: &mut WorldState, cutter: EntityId, tool: EntityId, target: Opt
     // ServUO's `IsChildOf(from.Backpack)`, and the root walk is what makes it
     // recursive: hides in a bag in the pack are still in the pack, and hides in
     // a corpse on the ground — where carving leaves them — are not.
-    let in_own_pack = state
-        .registry
-        .serial_of(cutter)
-        .and_then(|owner| backpack_of(state, owner))
-        .is_some_and(|pack| state.craft_stock_root_of_item(target) == Some(pack));
-    if !in_own_pack {
+    if !carried_in_pack(state, cutter, target) {
         state.localized_message(cutter, NOT_IN_PACK, "");
         return;
     }

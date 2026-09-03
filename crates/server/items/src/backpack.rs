@@ -70,6 +70,28 @@ pub fn carries_spell(state: &WorldState, mobile: Serial, spell: SpellId) -> bool
     })
 }
 
+/// Whether an item is in this mobile's own pack — ServUO's recursive
+/// `IsChildOf(from.Backpack)`.
+///
+/// The root walk is what makes it *recursive*, and that is the difference from
+/// [`carries_spell`] above: a pile in a bag in the pack is still in the pack,
+/// while one on the ground, in a corpse, or in somebody else's pack is not.
+///
+/// Three modules asked this with three private copies of the same four lines —
+/// [`cut`](crate::cut), [`spin`](crate::spin), [`weave`](crate::weave) — and the
+/// scroll cast would have been the fourth, which is exactly the drift this
+/// module's header warns about. Only the *check* is shared: each caller keeps its
+/// own refusal, because "use that on a spinning wheel" and "that must be in your
+/// pack" are different sentences about the same fact.
+#[must_use]
+pub fn carried_in_pack(state: &WorldState, mobile: EntityId, item: EntityId) -> bool {
+    state
+        .registry
+        .serial_of(mobile)
+        .and_then(|owner| backpack_of(state, owner))
+        .is_some_and(|pack| state.craft_stock_root_of_item(item) == Some(pack))
+}
+
 /// Put an item into a mobile's backpack: merged onto a like pile when
 /// `stackable` (gold, reagents), else placed as a discrete piece.
 ///

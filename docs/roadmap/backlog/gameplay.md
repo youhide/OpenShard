@@ -98,11 +98,34 @@ started.
   world never casts back. The cast path itself is reusable (`begin_cast` is a
   client seam, but `resolve_cast`/`apply_spell_effect` are not), so what is
   missing is the *decision*: which spell, at whom, and how often.
-- **A scroll is a textbook and not a spell.** A Magery scroll can be dragged onto
-  a spellbook to learn its spell (§6 `magic`, schema v8) and that is all it does:
-  double-clicking one casts nothing. Classic UO casts from the scroll itself, at
-  the circle's difficulty less one and without reagents, consuming it — the piece
-  that makes a scroll worth buying for a mage who cannot yet hold the circle.
+- ~~**A scroll is a textbook and not a spell.**~~ **Landed.** Double-clicking a
+  Magery scroll in your own pack now casts its spell: the spellbook gate is
+  skipped, no reagents are taken, the roll is easier, and the scroll is torn up
+  when the cast lands. Dragging one onto a spellbook still teaches it instead —
+  that is the drop path, and this is the click. Four things the entry did not
+  say, each settled against ServUO rather than guessed:
+  - **The relief is two circles, not one.** `MagerySpell.GetCastSkills` does
+    `circle -= 2`, so an eighth-circle scroll is rolled as a sixth-circle spell
+    and a first-circle scroll's whole band sits below zero. This entry said
+    "less one" — one more for the rule the `Text::Cliloc(0)` entry above states:
+    **check a backlog claim against the code before planning around it.**
+  - **The mana is not discounted.** Only a wand casts free in ServUO; a scroll
+    pays its circle's mana in full.
+  - **The scroll is spent on a cast that *landed*.** ServUO consumes it inside
+    `CheckSequence`'s `CheckFizzle` success branch and nowhere else, so it is
+    deliberately *not* under `reagent_loss_on_fail`: that knob governs a pile of
+    reagents, and a scroll is one item that is the whole cast. A fizzle still
+    costs the mana while `mana_loss_on_fail` is on, so a retry is not free.
+  - **A scroll can leave the pack mid-cast.** The rooted (ServUO-style) cast
+    carries the scroll on `Casting` and re-checks it at resolution, so a scroll
+    traded away during the delay fizzles rather than casting for free.
+
+  Left open from it: **a scroll cast is a player's alone**, because a creature
+  reaches no double-click — which is the "nothing but a player ever casts" entry
+  above, not a second thing. And **the cast is unbounded by reach**: a scroll
+  deep in a bag in the pack casts, which is ServUO's recursive
+  `IsChildOf(from.Backpack)` and so is correct, but it means the shard has no
+  notion of a scroll being *held* the way a wand would be.
 - **Eleven of the fourteen unbuilt spells need no new subsystem.** They are
   `SpellEffect::Unimplemented` only because nobody has written the arm: Create
   Food (spawn into the pack), Mana Drain and Mana Vampire (`Mana` is right there),
