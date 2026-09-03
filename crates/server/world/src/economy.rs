@@ -955,18 +955,19 @@ mod tests {
     #[test]
     fn the_only_raw_materials_with_no_sink_are_the_ones_we_know_about() {
         // The other direction, and the one that catches a trade paying in an item
-        // with no use. **One finding left**: sand (`0x423A`), whose harvest
-        // definition shipped ahead of glassblowing — the trade that spends it is
-        // not implemented at all, so a miner can still fill a pack with something
-        // no recipe wants.
+        // with no use. **Nothing is left**, in either era, and the three that
+        // were are worth naming for what closing one looked like: logs, which the
+        // axe now cuts into boards; fish, which a blade cuts into the steaks
+        // `DefCooking` always had rows for; and sand, which waited for the whole
+        // trade that spends it — `defs::glassblowing`, thirteen rows and a
+        // blowpipe.
         //
-        // Two have gone. Logs, which the axe now eats in every grade and in both
-        // eras; and fish, which a blade cuts into the steaks `DefCooking` already
-        // had rows for. Both are in [`CONVERSIONS`].
-        let sand = Resource::Art(Graphic(0x423A), Hue(0));
+        // An empty expectation is a real assertion here rather than a vacuous
+        // one: this list is built from the report, so a resource that stopped
+        // being spent tomorrow appears in it and fails.
         for ml in [true, false] {
             let report = Economy::of(ml).report();
-            let expected: Vec<Resource> = vec![sand];
+            let expected: Vec<Resource> = Vec::new();
             let found: Vec<Resource> = report.dead_ends.keys().copied().collect();
             assert_eq!(found, expected, "ml={ml}: the dead ends moved.\n{report}");
         }

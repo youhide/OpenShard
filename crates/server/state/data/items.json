@@ -143,5 +143,6 @@
   { "id": 142, "name": "skillet", "graphic": "0x097F", "material_family": "metal", "tags": ["tool"] },
   { "id": 143, "name": "rolling pin", "graphic": "0x1043", "tags": ["tool"] },
   { "id": 144, "name": "flour sifter", "graphic": "0x103E", "material_family": "metal", "tags": ["tool"] },
-  { "id": 145, "name": "scribe's pen", "graphic": "0x0FBF", "legacy_graphics": ["0x0FC0"], "material_family": "metal", "tags": ["tool"] }
+  { "id": 145, "name": "scribe's pen", "graphic": "0x0FBF", "legacy_graphics": ["0x0FC0"], "material_family": "metal", "tags": ["tool"] },
+  { "id": 146, "name": "blowpipe", "graphic": "0x0E8A", "tags": ["tool"] }
 ]

@@ -6,9 +6,14 @@
 //! prop; `crafting` reads it on a double-click, to know which trade gump to
 //! open. Data keyed by graphic, default in core.
 //!
-//! A tool is named by the *skill* it drives rather than by a craft system, because
-//! `state` sits below the systems and must not learn their shape. Each system owns
-//! exactly one main skill, so the mapping is complete either way round.
+//! A tool names **both** the skill it drives and the trade it opens, and the
+//! second is not derivable from the first: glassblowing's main skill is Alchemy,
+//! the same as the alchemist's own, so a mortar and pestle and a blowpipe are one
+//! skill and two gumps. The trade is carried as the *name* its row in
+//! `crafting/data/craft_systems.json` already has — `state` sits below the
+//! systems and learns that trades have names, not what a system is. What keeps
+//! the two fields honest is a sweep in `crafting::defs`, which resolves every
+//! tool's trade and asserts the system it finds practises the tool's skill.
 
 use openshard_protocol::item_kind::ItemKindId;
 use openshard_protocol::wire::Graphic;
@@ -18,8 +23,12 @@ use crate::skill::Skill;
 /// A craft tool: the trade it practises and how many attempts are in it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CraftToolData {
-    /// The trade this tool opens.
+    /// The skill this tool trains and rolls.
     pub skill:    Skill,
+    /// Which trade's gump it opens, by the name `craft_systems.json` gives that
+    /// system. Two tools can share a skill — a blowpipe and a mortar are both
+    /// Alchemy — so this is the half that decides the window.
+    pub trade:    &'static str,
     /// The fewest uses a fresh one has.
     pub min_uses: u16,
     /// And the most.
@@ -41,11 +50,11 @@ const MAX_USES: u16 = 75;
 #[must_use]
 pub fn craft_tool(graphic: Graphic) -> Option<CraftToolData> {
     // Opened once, so the arms below stay the terse art table they read as.
-    let skill = match graphic.0 {
+    let (skill, trade) = match graphic.0 {
         // Blacksmithy: a smith hammer, tongs, or a sledge.
-        0x13E3 | 0x13E4 | 0x0FBB | 0x0FBC | 0x0FB4 | 0x0FB5 => Skill::Blacksmith,
+        0x13E3 | 0x13E4 | 0x0FBB | 0x0FBC | 0x0FB4 | 0x0FB5 => (Skill::Blacksmith, BLACKSMITHY),
         // Tailoring: a sewing kit.
-        0x0F9D => Skill::Tailoring,
+        0x0F9D => (Skill::Tailoring, TAILORING),
         // Carpentry: the whole bench of them.
         0x1034 | 0x1035 // saw
         | 0x1028 | 0x1029 // dovetail saw
@@ -57,25 +66,59 @@ pub fn craft_tool(graphic: Graphic) -> Option<CraftToolData> {
         | 0x10E4 // draw knife
         | 0x10E5 // froe
         | 0x10E6 // inshave
-        | 0x10E7 => Skill::Carpentry, // scorp
+        | 0x10E7 => (Skill::Carpentry, CARPENTRY), // scorp
         // Tinkering: tinker's tools.
-        0x1EB8 | 0x1EB9 => Skill::Tinkering,
+        0x1EB8 | 0x1EB9 => (Skill::Tinkering, TINKERING),
         // Alchemy: a mortar and pestle.
-        0x0E9B => Skill::Alchemy,
+        0x0E9B => (Skill::Alchemy, ALCHEMY),
+        // Glassblowing: a blowpipe. The same skill as the mortar above and a
+        // different trade — ServUO's `DefGlassblowing.MainSkill` is `Alchemy`,
+        // and the tool is what tells the two windows apart.
+        //
+        // **One facing only**, unlike every other flippable tool here: upstream's
+        // `[Flipable(0xE8A, 0xE89)]` puts the blowpipe's other face on `0x0E89`,
+        // which is already the quarter staff's art. Claiming it would make a
+        // staff open the glassblowing window, so the flipped blowpipe is a
+        // recorded gap rather than a collision — the same call the item registry
+        // makes, where `0x0E89` belongs to the staff.
+        0x0E8A => (Skill::Alchemy, GLASSBLOWING),
         // Bowcraft/Fletching: both facings of fletcher's tools.
-        0x1022 | 0x1023 => Skill::Fletching,
+        0x1022 | 0x1023 => (Skill::Fletching, FLETCHING),
         // Cooking: skillet, rolling pin, and flour sifter.
-        0x097F | 0x1043 | 0x103E => Skill::Cooking,
+        0x097F | 0x1043 | 0x103E => (Skill::Cooking, COOKING),
         // Inscription: both facings of a scribe's pen.
-        0x0FBF | 0x0FC0 => Skill::Inscribe,
+        0x0FBF | 0x0FC0 => (Skill::Inscribe, INSCRIPTION),
         _ => return None,
     };
     Some(CraftToolData {
         skill,
+        trade,
         min_uses: MIN_USES,
         max_uses: MAX_USES,
     })
 }
+
+/// The trade names, spelled exactly as `craft_systems.json` spells them.
+///
+/// Constants rather than literals at each arm so a typo is one compile error
+/// here instead of a tool that silently opens nothing.
+const BLACKSMITHY: &str = "blacksmithy";
+/// Tailoring's row.
+const TAILORING: &str = "tailoring";
+/// Carpentry's row.
+const CARPENTRY: &str = "carpentry";
+/// Tinkering's row.
+const TINKERING: &str = "tinkering";
+/// Alchemy's row.
+const ALCHEMY: &str = "alchemy";
+/// Glassblowing's row — the second trade to name [`Skill::Alchemy`].
+const GLASSBLOWING: &str = "glassblowing";
+/// Bowcraft's row.
+const FLETCHING: &str = "fletching";
+/// Cooking's row.
+const COOKING: &str = "cooking";
+/// Inscription's row.
+const INSCRIPTION: &str = "inscription";
 
 /// The craft-tool row for a registered item kind.
 ///
@@ -90,19 +133,21 @@ pub fn craft_tool(graphic: Graphic) -> Option<CraftToolData> {
 /// one.
 #[must_use]
 pub fn craft_tool_for_kind(kind: ItemKindId) -> Option<CraftToolData> {
-    let skill = match kind.0 {
-        10 | 19 | 20 => Skill::Blacksmith,
-        21 => Skill::Tailoring,
-        22 | 26..=35 => Skill::Carpentry,
-        23 => Skill::Tinkering,
-        24 => Skill::Alchemy,
-        25 => Skill::Fletching,
-        142..=144 => Skill::Cooking,
-        145 => Skill::Inscribe,
+    let (skill, trade) = match kind.0 {
+        10 | 19 | 20 => (Skill::Blacksmith, BLACKSMITHY),
+        21 => (Skill::Tailoring, TAILORING),
+        22 | 26..=35 => (Skill::Carpentry, CARPENTRY),
+        23 => (Skill::Tinkering, TINKERING),
+        24 => (Skill::Alchemy, ALCHEMY),
+        25 => (Skill::Fletching, FLETCHING),
+        142..=144 => (Skill::Cooking, COOKING),
+        145 => (Skill::Inscribe, INSCRIPTION),
+        146 => (Skill::Alchemy, GLASSBLOWING),
         _ => return None,
     };
     Some(CraftToolData {
         skill,
+        trade,
         min_uses: MIN_USES,
         max_uses: MAX_USES,
     })
@@ -212,9 +257,10 @@ mod tests {
             checked += 1;
         }
         // A sweep that matched nothing would pass in silence; the count is what
-        // makes "every tool" mean the thirty-four arts the table above lists,
-        // both facings of a flippable one counted separately.
-        assert_eq!(checked, 34, "craft tool arts checked");
+        // makes "every tool" mean the thirty-five arts the table above lists,
+        // both facings of a flippable one counted separately — and the blowpipe
+        // has only one, because the other is the quarter staff's.
+        assert_eq!(checked, 35, "craft tool arts checked");
     }
 
     #[test]

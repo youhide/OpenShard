@@ -929,6 +929,7 @@ fn generate_systems(systems: &Systems, tables: &BTreeMap<String, Table>) -> Stri
             writeln!(out, "    // {}", row.note).unwrap();
         }
         out.push_str("    CraftSystemDef {\n");
+        writeln!(out, "        trade: {:?},", row.trade).unwrap();
         writeln!(out, "        skill: Skill::{},", skill(&row.skill)).unwrap();
         writeln!(out, "        title: {},", row.title.expr()).unwrap();
         writeln!(out, "        chance_at_min: {},", row.chance_at_min).unwrap();

@@ -125,6 +125,11 @@ impl Needs {
 /// component can hold one without borrowing.
 #[derive(Clone, Copy, Debug)]
 pub struct CraftSystemDef {
+    /// The trade's name, as `craft_systems.json` spells it and as a tool names
+    /// it. Not decoration: it is the key a double-clicked tool is resolved
+    /// through, because [`skill`](Self::skill) is not unique — glassblowing and
+    /// alchemy are both `Alchemy`.
+    pub trade:         &'static str,
     /// The skill rolled and trained — `MainSkill`.
     pub skill:         Skill,
     /// The title over the gump.

@@ -21,6 +21,7 @@ pub mod blacksmithy;
 pub mod carpentry;
 pub mod cooking;
 pub mod fletching;
+pub mod glassblowing;
 pub mod inscription;
 pub mod tailoring;
 pub mod tinkering;
@@ -271,12 +272,16 @@ mod tests {
 
     #[test]
     fn every_trade_has_exactly_one_system() {
-        // `tool_system` finds a system by its main skill, so two systems sharing
-        // one would make a tool open whichever came first — silently, and only
-        // for one of the two trades.
+        // The name is the key `tool_system` resolves through, so two systems
+        // sharing one would make a tool open whichever came first — silently,
+        // and only for one of the two trades.
+        //
+        // The *skill* is deliberately not asked about here any more: glassblowing
+        // and alchemy are both `Alchemy` upstream, which is exactly why a tool
+        // names a trade.
         for (i, def) in SYSTEMS.iter().enumerate() {
             for other in &SYSTEMS[i + 1..] {
-                assert_ne!(def.skill, other.skill, "{:?} appears twice", def.skill);
+                assert_ne!(def.trade, other.trade, "{} appears twice", def.trade);
             }
         }
     }
@@ -287,14 +292,22 @@ mod tests {
         // table with no system behind it is a tool that answers a double-click
         // with nothing at all, which is what every one of these was before this
         // slice.
+        //
+        // And the second assertion is what keeps `CraftToolData`'s two halves
+        // from drifting: a tool names a trade *and* a skill, and the system the
+        // trade resolves to must be the one that practises that skill.
         for graphic in 0..=u16::MAX {
             let Some(tool) = openshard_state::craft::craft_tool(Graphic(graphic)) else {
                 continue;
             };
-            assert!(
-                SYSTEMS.iter().any(|def| def.skill == tool.skill),
-                "{graphic:#06X} names {:?}, which no system practises",
-                tool.skill
+            let system = SYSTEMS.iter().find(|def| def.trade == tool.trade);
+            let Some(system) = system else {
+                panic!("{graphic:#06X} names the trade {:?}, which no system is", tool.trade);
+            };
+            assert_eq!(
+                system.skill, tool.skill,
+                "{graphic:#06X} is a {} tool and claims {:?}",
+                system.trade, tool.skill
             );
         }
     }

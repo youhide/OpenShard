@@ -763,9 +763,19 @@ fn wear_tool(state: &mut WorldState, crafter: EntityId, tool: EntityId) {
 #[must_use]
 pub fn tool_system(graphic: Graphic) -> Option<SystemId> {
     let tool = openshard_state::craft::craft_tool(graphic)?;
+    system_named(tool.trade)
+}
+
+/// The system a trade name refers to.
+///
+/// By name rather than by skill, and that is the whole point of the name: two
+/// systems can share a skill — a mortar and a blowpipe are both Alchemy — so
+/// asking "which system practises this skill" would answer the first of them
+/// whichever tool was clicked.
+fn system_named(trade: &str) -> Option<SystemId> {
     SYSTEMS
         .iter()
-        .position(|def| def.skill == tool.skill)
+        .position(|def| def.trade == trade)
         .and_then(SystemId::from_index)
 }
 
@@ -776,10 +786,7 @@ pub fn tool_system(graphic: Graphic) -> Option<SystemId> {
 #[must_use]
 pub fn tool_system_for_kind(kind: ItemKindId) -> Option<SystemId> {
     let tool = openshard_state::craft::craft_tool_for_kind(kind)?;
-    SYSTEMS
-        .iter()
-        .position(|def| def.skill == tool.skill)
-        .and_then(SystemId::from_index)
+    system_named(tool.trade)
 }
 
 #[cfg(test)]

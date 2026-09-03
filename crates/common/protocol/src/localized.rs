@@ -1878,6 +1878,22 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "You must be near an anvil and a forge to smith items.",
     },
     Message {
+        id:       ClilocId(1044622),
+        fallback: "<CENTER>Glassblowing MENU</CENTER>",
+    },
+    Message {
+        id:       ClilocId(1044625),
+        fallback: "sand",
+    },
+    Message {
+        id:       ClilocId(1044627),
+        fallback: "You do not have enough sand to make that.",
+    },
+    Message {
+        id:       ClilocId(1044628),
+        fallback: "You must be near a forge to blow glass.",
+    },
+    Message {
         id:       ClilocId(1044629),
         fallback: "There is no sand here to mine.",
     },

@@ -86,6 +86,17 @@
       "chance_at_min": 0,
       "eca": "ChanceMinusSixty",
       "craft_sound": "0x0249"
+    },
+    {
+      "trade": "glassblowing",
+      "note": "The second system to name Alchemy, and the reason a craft tool names a trade rather than a skill: a mortar and a blowpipe are one skill and two windows. Appended rather than filed beside alchemy, because the index is the SystemId. Upstream also gates it on a `Glassblowing` flag taught by a book sold in Ter Mur; this shard has no Ter Mur, so what ships is the other half of the same condition — the hundred points of Alchemy every row needs anyway.",
+      "skill": "Alchemy",
+      "title": 1044622,
+      "chance_at_min": 0,
+      "eca": "ChanceMinusSixty",
+      "craft_sound": "0x002B",
+      "needs": { "forge": true },
+      "needs_message": 1044628
     }
   ]
 }

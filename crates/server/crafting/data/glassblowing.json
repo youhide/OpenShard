@@ -1,0 +1,98 @@
+{
+  "groups": [1044050],
+  "recipes": [
+    {
+      "graphic": "0x0F0E",
+      "name": 1023854,
+      "group": 0,
+      "use_all_res": true,
+      "skills": [{ "skill": "Alchemy", "min": 525, "max": 1025 }],
+      "resources": [{ "graphic": "0x423A", "amount": 1, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x182E",
+      "name": 1044610,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 525, "max": 1025 }],
+      "resources": [{ "graphic": "0x423A", "amount": 2, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x182A",
+      "name": 1044611,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 525, "max": 1025 }],
+      "resources": [{ "graphic": "0x423A", "amount": 3, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x1832",
+      "name": 1044612,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 550, "max": 1050 }],
+      "resources": [{ "graphic": "0x423A", "amount": 2, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x1838",
+      "name": 1044613,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 575, "max": 1075 }],
+      "resources": [{ "graphic": "0x423A", "amount": 4, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x183B",
+      "name": 1044623,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 600, "max": 1100 }],
+      "resources": [{ "graphic": "0x423A", "amount": 5, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x1844",
+      "name": 1044614,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 600, "max": 1100 }],
+      "resources": [{ "graphic": "0x423A", "amount": 5, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x1841",
+      "name": 1044615,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 600, "max": 1100 }],
+      "resources": [{ "graphic": "0x423A", "amount": 5, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x183E",
+      "name": 1044624,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 600, "max": 1100 }],
+      "resources": [{ "graphic": "0x423A", "amount": 7, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x185B",
+      "name": 1044616,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 650, "max": 1150 }],
+      "resources": [{ "graphic": "0x423A", "amount": 8, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x185D",
+      "name": 1044617,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 650, "max": 1150 }],
+      "resources": [{ "graphic": "0x423A", "amount": 9, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x1810",
+      "name": 1044618,
+      "group": 0,
+      "skills": [{ "skill": "Alchemy", "min": 750, "max": 1250 }],
+      "resources": [{ "graphic": "0x423A", "amount": 10, "name": 1044625, "message": 1044627 }]
+    },
+    {
+      "graphic": "0x2F5D",
+      "name": 1072895,
+      "group": 0,
+      "min_chance": 500,
+      "skills": [{ "skill": "Alchemy", "min": 1000, "max": 1500 }],
+      "resources": [{ "graphic": "0x423A", "amount": 8, "name": 1044625, "message": 1044627 }]
+    }
+  ]
+}

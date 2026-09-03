@@ -2239,3 +2239,88 @@ fn an_ordinary_player_cannot_forge_the_immediate_recipe_button() {
         "authority is checked on the shard, not trusted from the hidden button"
     );
 }
+
+/// A blowpipe, and the one tool whose trade cannot be told from its skill.
+const BLOWPIPE: Graphic = Graphic(0x0E8A);
+/// A pile of sand — what a miner is paid and, until glassblowing, what nothing
+/// spent.
+const SAND: Graphic = openshard_state::harvest::SAND_GRAPHIC;
+/// An empty bottle, the first row of the glassblowing table.
+const BOTTLE: Graphic = Graphic(0x0F0E);
+
+/// The glassblowing system, by the trade its tool names.
+fn glassblowing() -> SystemId {
+    openshard_crafting::tool_system(BLOWPIPE).expect("a blowpipe opens a trade")
+}
+
+#[test]
+fn a_blowpipe_and_a_mortar_are_one_skill_and_two_windows() {
+    // The reason a craft tool names a trade rather than a skill. Both are
+    // Alchemy — ServUO's `DefGlassblowing.MainSkill` — and a mapping that asked
+    // which system practises Alchemy would answer the same one for both, so half
+    // the trades a shard could have would be unreachable by their own tools.
+    let mortar = openshard_crafting::tool_system(Graphic(0x0E9B)).expect("a mortar opens a trade");
+    assert_ne!(glassblowing(), mortar, "one tool, two windows");
+    let (glass, alchemy) = (
+        openshard_crafting::system(glassblowing()).expect("glassblowing"),
+        openshard_crafting::system(mortar).expect("alchemy"),
+    );
+    assert_eq!(glass.skill, alchemy.skill, "and both are Alchemy");
+    assert_eq!(glass.trade, "glassblowing");
+    assert_eq!(alchemy.trade, "alchemy");
+}
+
+#[test]
+fn a_glassblower_at_a_forge_turns_sand_into_bottles() {
+    // The trade the sand harvest shipped ahead of, end to end: the pile a miner
+    // digs, the tool an alchemist buys, and the forge upstream's `CanCraft`
+    // insists on. Until this, `--bin economy` reported sand as a raw material
+    // nothing on the shard consumed.
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[(FORGE.0, 0)]);
+    let pipe = give(&mut world, connection, BLOWPIPE, Hue(0), 1);
+    give(&mut world, connection, SAND, Hue(0), 4);
+    train(&mut world, connection, Skill::Alchemy, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    craft_in_system(&mut world, connection, pipe, glassblowing(), 0, 0, now);
+    finish(&mut world, connection, now);
+
+    // The bottle is upstream's one `SetUseAllRes` row, so the whole pile goes at
+    // one bottle to the pile of sand.
+    assert_eq!(carried(&world, connection, BOTTLE, Hue(0)), 4, "four bottles");
+    assert_eq!(carried(&world, connection, SAND, Hue(0)), 0, "and no sand left");
+}
+
+#[test]
+fn a_glassblower_away_from_a_forge_is_told_so() {
+    // The system's `needs`, which is the whole of upstream's `CanCraft` that this
+    // shard can check: the learned `Glassblowing` flag is taught by a book sold
+    // in Ter Mur, and there is no Ter Mur here.
+    let mut now = Instant::now();
+    let mut world = world();
+    let connection = enter(&mut world, now);
+    shop(&mut world, &[]);
+    let pipe = give(&mut world, connection, BLOWPIPE, Hue(0), 1);
+    give(&mut world, connection, SAND, Hue(0), 4);
+    train(&mut world, connection, Skill::Alchemy, 1000);
+    now += TICK_INTERVAL;
+    world.tick(now);
+
+    craft_in_system(&mut world, connection, pipe, glassblowing(), 0, 0, now);
+    finish(&mut world, connection, now);
+
+    assert_eq!(
+        carried(&world, connection, BOTTLE, Hue(0)),
+        0,
+        "no forge, no glass"
+    );
+    assert_eq!(
+        carried(&world, connection, SAND, Hue(0)),
+        4,
+        "and the sand is still there"
+    );
+}
