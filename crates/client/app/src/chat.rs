@@ -43,8 +43,8 @@ use crate::{
 ///
 /// A guild line is not a command with a `/` in front of it — it is ordinary
 /// speech with a different **mode byte**, which is a property of the line rather
-/// than of its first character (`docs/roadmap/06-gameplay/chat.md`, guild
-/// chat). A reference
+/// than of its first character (`docs/npc/design_speech.md`, § three lines that
+/// go to a set of people). A reference
 /// client puts a dropdown above the entry field for exactly that reason, and
 /// this is that dropdown: [`channel_button`] draws it at the left end of the
 /// input line, a click turns it, and it is drawn whether or not the line is

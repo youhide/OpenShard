@@ -29,7 +29,7 @@ AI consumer yet — chase remains its short-range bounded A*. `cargo run -p open
      leaf) is already correct and `find_long_path` should preserve it exactly, not invent a
      second one.
    - A **server-side AI walker** (`ai::step_toward` and friends) already has
-     `through_doors`/`body_opens_doors` — per [`roadmap/06-gameplay/ai.md`](../../roadmap/06-gameplay/ai.md), humanoids open unlocked doors
+     `through_doors`/`body_opens_doors` — per [`npc/design_brain.md`](../../npc/design_brain.md), humanoids open unlocked doors
      in their way as part of normal movement. Whatever eventually calls `find_long_path`
      server-side needs to route through this existing capability rather than stopping like the
      client does — "if it can open it, it opens it" is a caller-side fact, not something the

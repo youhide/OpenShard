@@ -1,6 +1,15 @@
-# Chat and world administration
+# The chat and world-administration phase
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of the widest of the gameplay phases: speech and who
+hears it, the staff command layer, the `.admin` gump and the pack behind it, and
+the townsfolk that turned a populated facet from props into people. A record, not
+a status — and a record of more than one domain, because the slice that gave a
+town its shopkeepers also gave a backpack its ceiling, a trade window its escrow
+and a chase its A\*. What is built and what is open today is
+[`README.md`](../README.md); the model is
+[`design_speech.md`](../design_speech.md) and
+[`design_townsfolk.md`](../design_townsfolk.md), and the rows that belong to
+another domain are ranked in that domain's own README.*
 
 - [x] `chat` — speech, journal routing
   - [x] **Speech, heard and answered.** A player says something (`0x03`), and the

@@ -1,6 +1,13 @@
-# Regions, guards, and the world clock
+# The regions, guards and world-clock phase
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of the slice that gave the world places and an hour: a
+named area with rules that hold inside it, a crossing found by diffing rather
+than announced, the light curve, and the guard that is a sentence rather than a
+fight. A record, not a status. The region and the clock are the `world` domain's
+machinery and the guard is this one's — which is why the record is here and half
+of what it describes is documented elsewhere. What is built and what is open
+today is [`README.md`](../README.md), and the guard's model is
+[`design_townsfolk.md`](../design_townsfolk.md).*
 
 - [x] **Regions, guards and the world clock.** Two of the "never written down"
   gaps below, which turned out to be one slice: a place has to exist before

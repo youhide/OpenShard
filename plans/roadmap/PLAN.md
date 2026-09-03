@@ -25,41 +25,50 @@ so migrating a domain is also what empties its section below.
 | Items and crafting | ranked, [`docs/items/README.md`](../../docs/items/README.md) § what is open, with [`plans/items/item_identity/PLAN.md`](../items/item_identity/PLAN.md) for what is not built |
 | Combat, skills and magic | ranked, [`docs/combat/README.md`](../../docs/combat/README.md) § what is open, with [`plans/combat/`](../combat/actions/PLAN.md) for what is not built |
 | Housing and boats | ranked, [`docs/housing/README.md`](../../docs/housing/README.md) § what is open, with [`plans/housing/`](../housing/customisation/PLAN.md) for what is not built |
-| npc | the section below, until it is migrated |
+| People and creatures | ranked, [`docs/npc/README.md`](../../docs/npc/README.md) § what is open, with [`plans/npc/`](../npc/creature_casting/PLAN.md) for what is not built |
 
 ## Next
 
-**Migrate the last domain.** One area still has its phase records under
-`docs/roadmap/`: `npc`. It is one batch — decisions into `design_*`, phase
-records and "amendments forced by" into `evidence/`, what is open into a domain
-README — and it is the batch that takes
-[`docs/roadmap/06-gameplay/`](../../docs/roadmap/06-gameplay/README.md) with it,
-because the five files left there are all its own: AI, chat, regions, guilds,
-and parties-and-quests.
+**The migration is done, and this page is now only an order.** Every area in the
+table above keeps its own ranked "what is open", and `docs/roadmap/` holds no
+phase record at all: `npc` was the last batch, on 2026-09-03, and it took
+`docs/roadmap/06-gameplay/` with it — the five files left there were all its own,
+and [`docs/roadmap/README.md`](../../docs/roadmap/README.md) is now an index of
+where every phase record went.
 
-`combat` went on 2026-09-03 and took Combat, Skills and Magic; `housing` went the
-same day and took Housing and Boats-and-customisation. What stays behind either
-way is `backlog/gameplay.md`, one record whose rows belong to four domains at
-once: each batch lifts its own rows into its README's "what is open" without
-cutting the record itself.
+What comes next is a choice between areas rather than another migration, and the
+first of them is **a creature that casts**: `crates/server/ai` has no notion of a
+spell, so the whole of magic is one-directional — the player casts at the world
+and the world never casts back. The cast path below the client seam is already
+reusable, so what is missing is the decision layer.
+[`plans/npc/creature_casting/PLAN.md`](../npc/creature_casting/PLAN.md).
 
 ## Gameplay
 
-Combat, skills and magic left this section on 2026-09-03: the animation,
-skill-presentation and deferred-spell rows are ranked in
-[`docs/combat/README.md`](../../docs/combat/README.md) now, and the ordered work
-is [`plans/combat/actions/PLAN.md`](../combat/actions/PLAN.md) and
-[`plans/combat/spells/PLAN.md`](../combat/spells/PLAN.md).
+Every subject of the old gameplay phase has a domain now. Combat, skills and
+magic are [`docs/combat/README.md`](../../docs/combat/README.md), with
+[`plans/combat/actions/PLAN.md`](../combat/actions/PLAN.md) and
+[`plans/combat/spells/PLAN.md`](../combat/spells/PLAN.md). Housing and boats are
+[`docs/housing/README.md`](../../docs/housing/README.md), with
+[`plans/housing/boats/PLAN.md`](../housing/boats/PLAN.md),
+[`plans/housing/customisation/PLAN.md`](../housing/customisation/PLAN.md) and
+[`plans/housing/house_region/PLAN.md`](../housing/house_region/PLAN.md). AI,
+chat, regions' guards, guilds, parties and quests are
+[`docs/npc/README.md`](../../docs/npc/README.md), with
+[`plans/npc/creature_casting/PLAN.md`](../npc/creature_casting/PLAN.md),
+[`plans/npc/pets/PLAN.md`](../npc/pets/PLAN.md) and
+[`plans/npc/quests/PLAN.md`](../npc/quests/PLAN.md).
 
-Housing and boats left it the same day. Boats B3–B4 are
-[`plans/housing/boats/PLAN.md`](../housing/boats/PLAN.md), house customisation
-C3–C4 is [`plans/housing/customisation/PLAN.md`](../housing/customisation/PLAN.md),
-and the house-as-a-region decision that blocked five phases ago is
-[`plans/housing/house_region/PLAN.md`](../housing/house_region/PLAN.md).
+What stayed behind is `backlog/gameplay.md`, one record whose rows belong to four
+domains at once: each batch lifted its own rows into its README's "what is open"
+without cutting the record itself.
 
-- [ ] Adjacent-tile quarry pathing (`npc`).
-- [ ] Resolve the data-table and Felucca-converter findings in
-      [`backlog/gameplay.md`](../../docs/roadmap/backlog/gameplay.md).
+- [ ] Resolve what is left of the data-table and Felucca-converter findings in
+      [`backlog/gameplay.md`](../../docs/roadmap/backlog/gameplay.md). The rows
+      about creatures, vendors and notoriety are ranked in
+      [`docs/npc/README.md`](../../docs/npc/README.md) now — including
+      adjacent-tile quarry pathing, which used to be this list's own line — and
+      what remains there belongs to `world`, `items` and `server`.
 
 ## Operations
 

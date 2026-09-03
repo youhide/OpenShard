@@ -1,6 +1,7 @@
 # Items
 
-[Gameplay index](../../roadmap/06-gameplay/README.md) · [Roadmap](../../roadmap/README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of the items phase. A record, not a status: what is
+built and what is open today is [`README.md`](../README.md).*
 
 - [x] `items` — containers, stacking, equipment layers, decay
   - [x] **On the ground and visible.** A script drops an item

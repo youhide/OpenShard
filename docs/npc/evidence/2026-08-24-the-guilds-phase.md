@@ -1,6 +1,11 @@
-# Guilds
+# The guilds phase
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of guilds and the alliance that used to be mistaken for
+one: the five ranks, the war that takes two declarations, the pairwise alliance
+that had no answer to "who is in mine", and the notoriety byte that stopped being
+a property of a mobile. A record, not a status: what is built and what is open
+today is [`README.md`](../README.md), and the model is
+[`design_groups.md`](../design_groups.md).*
 
 - [x] `guilds` — **built, with ServUO's five ranks.** Founding, invitations,
   leaving, dismissal, titles, promotion, leadership, disbanding, and the war and

@@ -1,6 +1,8 @@
 # Housing
 
-[Gameplay index](../../roadmap/06-gameplay/README.md) · [Roadmap](../../roadmap/README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of the housing phase. A record, not a status: what is
+built and what is open today is [`README.md`](../README.md), and the model is
+[`design_house.md`](../design_house.md).*
 
 - [x] `housing` — **built, H1–H5.** A multi placed from a deed, walls
   that stop you, a door and secures that know you, a sign that says who owns it

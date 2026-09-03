@@ -1,6 +1,12 @@
-# Parties and quests
+# The parties and quests phase
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of two systems that share one idea — a line, or a
+progression, belonging to a set of people rather than to a place. The party's two
+numberings under one subcommand and the router it was built to be; the quest
+model that was written pack-first and did not survive a client. A record, not a
+status: what is built and what is open today is [`README.md`](../README.md), and
+the model is [`design_groups.md`](../design_groups.md) and
+[`design_quests.md`](../design_quests.md).*
 
 - [x] `parties` — **built.** Inviting, accepting, leaving, kicking, the chat and
   the loot flag, all on `0xBF` subcommand `0x06`. Ported from ServUO's

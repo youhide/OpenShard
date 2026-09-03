@@ -1,6 +1,10 @@
 # Boats and house customisation
 
-[Gameplay index](../../roadmap/06-gameplay/README.md) · [Roadmap](../../roadmap/README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of the boats and house-customisation phase. A record,
+not a status: what is built and what is open today is
+[`README.md`](../README.md), and the model is
+[`design_boats.md`](../design_boats.md) and
+[`design_customisation.md`](../design_customisation.md).*
 
 - `boats` — a multi that moves: a hull that blocks, a deck you can stand on,
   and everyone aboard arriving with it. **B1 and B2 built; B3–B4 and the tiller

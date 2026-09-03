@@ -1,6 +1,11 @@
-# AI
+# The AI phase
 
-[Gameplay index](README.md) · [Roadmap](../README.md) · [Backlog](../../../plans/roadmap/PLAN.md)
+*The roadmap's own record of how a creature came to decide things for itself —
+the brain and its beat, line of sight, the cached route, the postures, and the
+level of detail that lets a whole facet be simulated at all, with the numbers
+each was taken on. A record, not a status: what is built and what is open today
+is [`README.md`](../README.md), and the model is
+[`design_brain.md`](../design_brain.md).*
 
 - [x] `ai` — brains, aggro, wandering
   - [x] **A built-in brain, and room for scripted ones.** A creature spawned with

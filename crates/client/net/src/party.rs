@@ -3,7 +3,7 @@
 //! Five of the seven the protocol defines. The two left out are deliberate:
 //! `0x03` (say this to one member) has no UI to name a recipient from yet, and
 //! `0x06` (may the party loot my corpse) has no consumer on the shard — see
-//! `docs/roadmap/06-gameplay/parties-and-quests.md`. Both are one function each
+//! `docs/npc/README.md`, row 7. Both are one function each
 //! the day something wants
 //! them.
 //!
