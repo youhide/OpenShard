@@ -103,6 +103,38 @@ pub struct HarvestResource {
     pub material:       Option<MaterialId>,
 }
 
+/// A bonus a successful swing may pay **besides** its resource — ServUO's
+/// `BonusHarvestResource`, and the reason a lumberjack sometimes finds a bark
+/// fragment and a miner sometimes finds a gem.
+///
+/// Mondain's Legacy content, and upstream guards every one of these tables with
+/// `Core.ML`; the pre-ML definitions carry an empty list rather than a `None`,
+/// because "no bonus" is the same thing as "a table with nothing in it" and one
+/// spelling is enough.
+///
+/// **The chances are absolute, not shares.** Upstream's first row is a `null`
+/// type holding the slack — 82% nothing for lumberjacking, 99.2% for mining —
+/// and what the real rows claim is their own probability whatever order they sit
+/// in. So this table simply leaves the slack out: a roll that falls past every
+/// row is the nothing, and each row keeps exactly the chance upstream gives it.
+#[derive(Clone, Copy, Debug)]
+pub struct BonusResource {
+    /// The skill it takes to find one at all, in tenths.
+    ///
+    /// Checked **after** the pick rather than before, which is upstream's own
+    /// order (`skillBase >= bonus.ReqSkill` on the row already drawn): rolling a
+    /// gem you are not skilled enough to recognise pays nothing rather than
+    /// falling through to the next row.
+    pub req_skill:      i32,
+    /// How likely, in hundredths of a percent — the unit every other chance in
+    /// this module uses, so ServUO's `0.1` is `10` and its `10.0` is `1000`.
+    pub chance:         u32,
+    /// What the harvester is told when it pays.
+    pub success_cliloc: ClilocId,
+    /// The art it pays. One apiece: every upstream row constructs a single item.
+    pub graphic:        Graphic,
+}
+
 /// Which of a definition's `resources` a vein points at.
 ///
 /// Its own index space, never a [`VeinIdx`] — a definition's `resources` and
@@ -206,6 +238,33 @@ pub struct HarvestDef {
     /// `RandomizeVeins`, which is `Core.ML`. Off, the vein is a fixed property of
     /// the ground.
     pub randomize_veins:  bool,
+    /// What a swing may turn up *besides* its resource. Empty before Mondain's
+    /// Legacy, where upstream's `Core.ML` guard leaves the table unset.
+    pub bonus:            &'static [BonusResource],
+}
+
+impl HarvestDef {
+    /// Which bonus a successful swing pays, if any.
+    ///
+    /// `roll` is a draw in hundredths of a percent (`0..10_000`) and `skill` the
+    /// harvester's value in tenths. **The roll comes in rather than being taken
+    /// here**: the tick owns the one seeded generator, and a table that reached
+    /// for its own randomness would be the one thing in the harvest that a replay
+    /// could not reproduce.
+    #[must_use]
+    pub fn bonus_for(&self, roll: u32, skill: i32) -> Option<&'static BonusResource> {
+        let mut left = roll;
+        for row in self.bonus {
+            if left < row.chance {
+                // Upstream's order: the row is drawn first and the skill checked
+                // second, so being under the bar pays nothing rather than the
+                // next row down.
+                return (skill >= row.req_skill).then_some(row);
+            }
+            left -= row.chance;
+        }
+        None
+    }
 }
 
 /// The gesture a harvest beat plays. A semantic, resolved to wire ids by
@@ -551,12 +610,14 @@ const MINUTE: u64 = TICKS_PER_SECOND * 60;
 /// ServUO tables, and ServUO's own `GetDefinition` returns the first definition
 /// that validates — with `OreAndStone` added first. Reproducing the order is
 /// reproducing the behaviour.
-static DEFINITIONS_ML: &[HarvestDef] = &[ORE, SAND, LUMBER_ML, FISHING];
-/// The same, with the pre-ML lumber table: one wood, and a vein that does not move.
-static DEFINITIONS_PRE_ML: &[HarvestDef] = &[ORE, SAND, LUMBER_PRE_ML, FISHING];
+static DEFINITIONS_ML: &[HarvestDef] = &[ORE_ML, SAND, LUMBER_ML, FISHING_ML];
+/// The same before Mondain's Legacy: one wood, a vein that does not move, and
+/// none of the three bonus tables, every one of which upstream guards with
+/// `Core.ML`.
+static DEFINITIONS_PRE_ML: &[HarvestDef] = &[ORE_PRE_ML, SAND, LUMBER_PRE_ML, FISHING_PRE_ML];
 
 /// Mining, for ore and stone.
-const ORE: HarvestDef = HarvestDef {
+const ORE_ML: HarvestDef = HarvestDef {
     kind:             HarvestKind::Ore,
     skill:            Skill::Mining,
     bank_w:           8,
@@ -587,7 +648,11 @@ const ORE: HarvestDef = HarvestDef {
     resources:        ORES,
     veins:            ORE_VEINS,
     randomize_veins:  false,
+    bonus:            ORE_BONUS,
 };
+
+/// The same before Mondain's Legacy, where a swing turns up ore and nothing else.
+const ORE_PRE_ML: HarvestDef = HarvestDef { bonus: &[], ..ORE_ML };
 
 /// Mining, for sand.
 const SAND: HarvestDef = HarvestDef {
@@ -621,6 +686,9 @@ const SAND: HarvestDef = HarvestDef {
     resources:        SANDS,
     veins:            ONE_VEIN,
     randomize_veins:  false,
+    // Sand has no bonus table upstream in any era: the gems belong to the ore
+    // definition, and a beach pays sand and sand only.
+    bonus:            &[],
 };
 
 /// Lumberjacking, from Mondain's Legacy on: seven woods, and a vein that re-rolls
@@ -663,22 +731,25 @@ const LUMBER_ML: HarvestDef = HarvestDef {
     resources:        WOODS,
     veins:            WOOD_VEINS,
     randomize_veins:  true,
+    bonus:            LUMBER_BONUS,
 };
 
 /// Lumberjacking before Mondain's Legacy: a tree is a tree, and a log is a log.
 ///
 /// ServUO writes this as an `if (Core.ML)` around the resource and vein tables,
-/// with `RaceBonus` and `RandomizeVeins` both `Core.ML` as well — so the older
-/// form is the same definition with one wood and a fixed vein.
+/// with `RaceBonus`, `RandomizeVeins` and the bonus table all `Core.ML` as well —
+/// so the older form is the same definition with one wood, a fixed vein and
+/// nothing to find in the branches.
 const LUMBER_PRE_ML: HarvestDef = HarvestDef {
     resources: PLAIN_WOOD,
     veins: ONE_VEIN,
     randomize_veins: false,
+    bonus: &[],
     ..LUMBER_ML
 };
 
 /// Fishing.
-const FISHING: HarvestDef = HarvestDef {
+const FISHING_ML: HarvestDef = HarvestDef {
     kind:             HarvestKind::Fish,
     skill:            Skill::Fishing,
     bank_w:           8,
@@ -715,6 +786,13 @@ const FISHING: HarvestDef = HarvestDef {
     resources:        FISHES,
     veins:            ONE_VEIN,
     randomize_veins:  false,
+    bonus:            FISH_BONUS,
+};
+
+/// The same before Mondain's Legacy: a line catches fish and nothing else.
+const FISHING_PRE_ML: HarvestDef = HarvestDef {
+    bonus: &[],
+    ..FISHING_ML
 };
 
 /// The nine ores, from ServUO's `Mining` resource table with
@@ -862,6 +940,57 @@ static FISHES: &[HarvestResource] = &[HarvestResource {
     item_kind:      None,
     material:       None,
 }];
+
+/// One row of a bonus table, so the tables below read as data.
+const fn bonus(req: i32, chance: u32, cliloc: u32, art: u16) -> BonusResource {
+    BonusResource {
+        req_skill: req,
+        chance,
+        success_cliloc: ClilocId(cliloc),
+        graphic: Graphic(art),
+    }
+}
+
+/// What else a tree gives up — ServUO's `Lumberjacking.BonusResources`, and the
+/// only source of a bark fragment on any shard.
+///
+/// **Two of upstream's five rows are deliberately absent**, and the arithmetic
+/// survives them: the chances are absolute, so leaving a row out turns exactly
+/// that outcome into the 82% nothing and moves no other row. Left out are
+/// luminescent fungi (`0x3191`, 3%), a switch (`0x2F5F`, 2%) and a parasitic
+/// plant (`0x3190`, 1%) — three items nothing in this tree spends, which the
+/// reachability audit would report as dead ends the moment they existed. They
+/// belong here the day imbuing or a Heartwood quest gives them a use.
+#[rustfmt::skip]
+static LUMBER_BONUS: &[BonusResource] = &[
+    bonus(1000, 1000, 1_072_548, 0x318F), // You also chop off a bark fragment.
+    bonus(1000,  100, 1_072_551, 0x3199), // A brilliant amber is found in the bark.
+];
+
+/// And a rock face — ServUO's `Mining.BonusResources`, six gems at a tenth of a
+/// percent each.
+///
+/// The blackrock rows are left out for [`LUMBER_BONUS`]' reason: a small piece of
+/// blackrock is spent by nothing here, and the crystalline one is Ter Mur's,
+/// which is a facet this shard does not have.
+#[rustfmt::skip]
+static ORE_BONUS: &[BonusResource] = &[
+    bonus(1000, 10, 1_072_562, 0x3198), // blue diamond
+    bonus(1000, 10, 1_072_567, 0x3192), // dark sapphire
+    bonus(1000, 10, 1_072_570, 0x3195), // ecru citrine
+    bonus(1000, 10, 1_072_564, 0x3197), // fire ruby
+    bonus(1000, 10, 1_072_566, 0x3194), // perfect emerald
+    bonus(1000, 10, 1_072_568, 0x3193), // turquoise
+];
+
+/// And the sea — ServUO's `Fishing.BonusResources`, which asks for 80 skill
+/// rather than 100.
+///
+/// Delicate scales (`0x573A`, 2%) are left out for [`LUMBER_BONUS`]' reason.
+#[rustfmt::skip]
+static FISH_BONUS: &[BonusResource] = &[
+    bonus(800, 100, 1_072_597, 0x3196), // white pearl
+];
 
 /// The single vein the one-resource definitions have.
 static ONE_VEIN: &[HarvestVein] = &[HarvestVein {
@@ -1046,6 +1175,46 @@ mod tests {
         // Iron is common, not universal: within a few points of its 49.6%.
         let iron = seen[0] as f64 / 4096.0;
         assert!((0.40..0.60).contains(&iron), "iron is {iron} of the ground");
+    }
+
+    #[test]
+    fn every_bonus_table_leaves_most_of_the_roll_as_nothing() {
+        // The invariant that makes an absolute-chance table safe to write with
+        // its slack row left out: the rows must not add up to the whole roll, or
+        // the "nothing" upstream spends 82% to 99.2% of its table on would have
+        // disappeared and every swing would pay a gem.
+        for kind in [
+            HarvestKind::Ore,
+            HarvestKind::Sand,
+            HarvestKind::Lumber,
+            HarvestKind::Fish,
+        ] {
+            let def = definition(kind, true);
+            let claimed: u32 = def.bonus.iter().map(|row| row.chance).sum();
+            assert!(claimed < 10_000, "{kind:?} claims {claimed} of the roll");
+            assert!(
+                definition(kind, false).bonus.is_empty(),
+                "{kind:?} pays a Mondain's Legacy bonus before Mondain's Legacy"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bonus_is_drawn_in_order_and_then_gated_on_skill() {
+        // Both halves of `bonus_for`, on the lumber table: the first row owns the
+        // bottom of the roll, the second the slice above it, and everything past
+        // the sum is the nothing. And the skill check comes *after* the draw —
+        // upstream's order — so a novice who rolls the amber gets nothing at all
+        // rather than the row below it.
+        let def = definition(HarvestKind::Lumber, true);
+        let bark = def.bonus[0].graphic;
+        let amber = def.bonus[1].graphic;
+        assert_eq!(def.bonus_for(0, 1000).map(|row| row.graphic), Some(bark));
+        assert_eq!(def.bonus_for(999, 1000).map(|row| row.graphic), Some(bark));
+        assert_eq!(def.bonus_for(1000, 1000).map(|row| row.graphic), Some(amber));
+        assert_eq!(def.bonus_for(1099, 1000).map(|row| row.graphic), Some(amber));
+        assert!(def.bonus_for(1100, 1000).is_none(), "past the table is nothing");
+        assert!(def.bonus_for(0, 999).is_none(), "bark wants a hundred points");
     }
 
     #[test]

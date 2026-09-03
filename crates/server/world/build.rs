@@ -522,6 +522,7 @@ struct CropFieldDef {
 fn crop_kind(name: &str, field: &str) -> String {
     match name {
         "cotton" => "openshard_state::components::CropKind::Cotton".to_owned(),
+        "wheat" => "openshard_state::components::CropKind::Wheat".to_owned(),
         other => panic!("{field} grows {other:?}, which is not a crop this engine knows"),
     }
 }

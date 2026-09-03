@@ -247,8 +247,8 @@ pub enum Side {
 
 /// A bridge that is code rather than data.
 ///
-/// The three of them, and no more: everything else in the graph is walked out of
-/// a table. Each row names the module that implements it so a reader can check
+/// The handful of them, and no more: everything else in the graph is walked out
+/// of a table. Each row names the module that implements it so a reader can check
 /// the claim, and is built from that module's own public constants so that a
 /// renamed kind is a compile error here rather than a silently wrong edge.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -296,6 +296,19 @@ pub const CONVERSIONS: &[Conversion] = &[
         name: "scissors on a bolt (openshard_items::cut)",
         from: Side::Art(openshard_items::BOLT_GRAPHIC),
         to:   Side::Art(openshard_items::CLOTH_GRAPHIC),
+    },
+    // A fisherman lands fish and the cook's rows eat steaks.
+    Conversion {
+        name: "a blade on a fish (openshard_items::carve)",
+        from: Side::Art(openshard_state::harvest::FISH_GRAPHIC),
+        to:   Side::Art(openshard_items::RAW_FISH_STEAK),
+    },
+    // The mill's craft makes a closed sack of flour and every dough row eats an
+    // open one.
+    Conversion {
+        name: "opening a sack of flour (openshard_items::flour)",
+        from: Side::Art(openshard_items::SACK_OF_FLOUR),
+        to:   Side::Art(openshard_items::OPEN_SACK_OF_FLOUR),
     },
 ];
 
@@ -513,6 +526,22 @@ fn harvest_steps(steps: &mut Vec<Step>, ml: bool) {
                 outputs: vec![harvest_resource(row)],
             });
         }
+        // And what a swing turns up *besides* its resource — the Mondain's
+        // Legacy bonus tables, which are the only source of a bark fragment or a
+        // special gem on any shard. A separate step from the resource rather than
+        // a second output on it: the two are rolled independently, and a graph
+        // that paired them would claim a miner cannot find a diamond without also
+        // finding ore that swing.
+        for row in def.bonus {
+            steps.push(Step {
+                via:     Origin::Harvest(kind),
+                inputs:  Vec::new(),
+                outputs: vec![Resource::of_art(Drawn {
+                    id:  row.graphic,
+                    hue: Hue(0),
+                })],
+            });
+        }
     }
 }
 
@@ -544,6 +573,14 @@ fn butchery_steps(steps: &mut Vec<Step>) {
         if yielded.feathers != 0 {
             outputs.push(Resource::of_art(Drawn {
                 id:  openshard_items::FEATHERS,
+                hue: Hue(0),
+            }));
+        }
+        if yielded.wool != 0 {
+            // Tainted rather than the fleece, which is [`Origin::Shearing`]'s:
+            // the two are different items and the wheel spins both.
+            outputs.push(Resource::of_art(Drawn {
+                id:  openshard_items::TAINTED_WOOL,
                 hue: Hue(0),
             }));
         }
@@ -810,20 +847,53 @@ mod tests {
     ///   Heartwood quest turn-ins and champion drops. This shard has neither, so
     ///   every ML recipe that wants one is dead on arrival — twenty-two arts, and
     ///   by a wide margin the largest group.
-    /// - The **cooking chain** — a sheaf of wheat (`0x1EBD`) that no field grows,
-    ///   and behind it flour (`0x103A`), dough (`0x103D`) and the rest of
-    ///   `DefCooking`'s intermediates, each wanted by the next. A flour mill is a
-    ///   [`Needs`](openshard_crafting::system::Needs) the recipes already declare
-    ///   and nothing fills.
-    /// - `0x0F7E`, a **bone**: the tailor's bone armour rows spend them, and
-    ///   nothing carves an undead corpse.
-    /// - `0x101F`, **tainted wool**: [`Fibre`] spins it, and only a lich's flock
-    ///   grows it. Not a bug so much as content that was never placed.
+    /// - `0x3183`–`0x318E` are what is **left** of that run: the twelve peerless
+    ///   ingredients — blight, corruption, scourge, putrefaction, taint,
+    ///   muculent, the lard of Paroxysmus, a dread horn's mane, diseased bark,
+    ///   grizzled bones, the eye of the Travesty and a captured essence. Every
+    ///   one of them is a peerless boss's drop, and this shard has no peerless.
+    ///   `0x315A` (a pristine dread horn) and `0x4005` (a toxic venom sac) are
+    ///   the same fact under other names.
+    /// - **Quest and faction content**: `0x0EF0` silver, `0x1879` copper wire,
+    ///   `0x14F8` a rope and `0x1374` a bridle, `0x2F57` a runed prism and
+    ///   `0x2F5C` an enchanted switch, `0x1E25` a shelf of academic books. None
+    ///   of them is bought, crafted or dropped upstream either — they are
+    ///   Heartwood turn-ins, faction stores and Mad Scientist statics.
+    /// - **Upstream cannot build these two either.** `0x15F8`, an empty wooden
+    ///   bowl, appears in exactly two places in the whole of ServUO: its own
+    ///   class and the fruit-bowl recipe that eats it. Nothing sells it, crafts
+    ///   it or drops it, so `DefCooking`'s fruit bowl is unbuildable on OSI's own
+    ///   shards. `0x0F7C`, cocoa pulp, comes off a Time of Legends cocoa tree,
+    ///   and behind it `0x1044` cocoa butter.
+    /// - `0x171F`, a **banana**: sold by the innkeeper alone, and this shard's
+    ///   twenty-two innkeepers were placed without a shelf.
+    /// - `0x573B`, **crushed glass**: alchemy makes it out of a blue diamond, and
+    ///   the recipe is not in `alchemy.json`.
+    ///
+    /// **Rows leave this list as their sources land, and eleven have.** For the
+    /// record of what each fix was shaped like: `0x0F7E` a bone, loot off the
+    /// undead rather than butchery; `0x101F` tainted wool, which comes off a
+    /// woolly *corpse* where the shear pays the fleece; `0x1EBD` a sheaf of
+    /// wheat, which wanted a field; `0x103A` an open sack of flour, which wanted
+    /// the double-click that opens the closed one; `0x1F9D` a pitcher of water
+    /// and `0x0F8A`/`0x0F8F` two necromancer reagents, all three of them vendor
+    /// lines the converter dropped because they were not `GenericBuyInfo` rows;
+    /// and `0x103D`, `0x103F`, `0x1042`, `0x1083`, which were only ever waiting
+    /// on the water.
     const UNSOURCED_ART: &[u16] = &[
-        0x0EF0, 0x0F7C, 0x0F7E, 0x0F8A, 0x0F8F, 0x101F, 0x103A, 0x103D, 0x103F, 0x1042, 0x1044, 0x1083,
-        0x1374, 0x14F8, 0x15F8, 0x171F, 0x1879, 0x1E25, 0x1EBD, 0x1F9D, 0x2F57, 0x2F5C, 0x315A, 0x3183,
-        0x3184, 0x3185, 0x3186, 0x3187, 0x3188, 0x3189, 0x318A, 0x318B, 0x318C, 0x318D, 0x318E, 0x318F,
-        0x3192, 0x3193, 0x3194, 0x3195, 0x3196, 0x3197, 0x3198, 0x3199, 0x4005, 0x573B,
+        0x0EF0, 0x0F7C, 0x1044, 0x1374, 0x14F8, 0x15F8, 0x171F, 0x1879, 0x1E25, 0x2F57, 0x2F5C, 0x315A,
+        0x3183, 0x3184, 0x3185, 0x3186, 0x3187, 0x3188, 0x3189, 0x318A, 0x318B, 0x318C, 0x318D, 0x318E,
+        0x4005, 0x573B,
+    ];
+
+    /// What only Mondain's Legacy pays out — the three harvest bonus tables.
+    ///
+    /// Upstream guards every one of them with `Core.ML`, so before that
+    /// expansion a bark fragment, the six mining gems, the amber in a tree and
+    /// the pearl in the sea have no source at all. Unreachable for an era rather
+    /// than for a hole, which is the same shape as the six special logs below.
+    const ML_ONLY_ART: &[u16] = &[
+        0x318F, 0x3192, 0x3193, 0x3194, 0x3195, 0x3196, 0x3197, 0x3198, 0x3199,
     ];
 
     /// The holes the shard ships with, as of 2026-09-03.
@@ -833,23 +903,20 @@ mod tests {
     /// only grew would rot into the stale queue entry `gameplay.md` already has a
     /// lesson about.
     ///
-    /// Every row is a resource some step wants and nothing can produce. Two
-    /// groups:
+    /// Every row is a resource some step wants and nothing can produce, and what
+    /// is left of them is [`UNSOURCED_ART`] — unmigrated rows, each wanting a
+    /// verdict of its own.
     ///
-    /// - **Horned and barbed hides, and the leather they cut into.** The grades
-    ///   exist and tailoring spends them, but no carvable body wears them — every
-    ///   ServUO creature that does is a dragon, drake, wyrm or serpent, and none of
-    ///   those bodies is carvable here. `openshard_items::carved_yield`'s own doc
-    ///   says as much; this is that sentence turned into a check.
-    /// - [`UNSOURCED_ART`], the unmigrated rows.
-    ///
-    /// **The six special boards were the third group, and they are gone**: an axe
-    /// on a log makes boards of its grade ([`openshard_crafting::chop`], and its
-    /// row in [`CONVERSIONS`]), so the carpenter's axis is reachable in all seven
-    /// grades — in Mondain's Legacy. Before it, a tree gives one wood and the
-    /// other six logs do not exist, so the axe has nothing to cut and the six
-    /// boards stay out of reach: that is the era having one wood, not the shard
-    /// having a hole, and it is why this list takes `ml`.
+    /// **Two groups have left this list.** The six special boards went when an
+    /// axe learned to cut a log ([`openshard_crafting::chop`], and its row in
+    /// [`CONVERSIONS`]) — in Mondain's Legacy, at least: before it a tree gives
+    /// one wood, so the other six logs do not exist, the axe has nothing to cut
+    /// and the six boards stay out of reach. That is the era having one wood
+    /// rather than the shard having a hole, and it is why this list takes `ml`.
+    /// The horned and barbed hides went when the dragon family became carvable —
+    /// `carved_yield`'s own doc used to say no body on the shard wore them, and
+    /// dragons, wyrms, drakes, wyverns and sea serpents had been spawning all
+    /// along.
     fn known_gaps(ml: bool) -> Vec<Resource> {
         let mut gaps: Vec<Resource> = Vec::new();
         if !ml {
@@ -861,12 +928,7 @@ mod tests {
                 gaps.push(Resource::graded(openshard_crafting::chop::LOG_KIND, material));
                 gaps.push(Resource::graded(openshard_crafting::chop::BOARD_KIND, material));
             }
-        }
-        // Horned and barbed, at both ends of the scissors: the hide has no body to
-        // come off, so the leather it would cut into is out of reach as well.
-        for grade in [MaterialId(42), MaterialId(43)] {
-            gaps.push(Resource::graded(openshard_items::LEATHER_KIND, grade));
-            gaps.push(Resource::graded(openshard_items::HIDES_KIND, grade));
+            gaps.extend(ML_ONLY_ART.iter().map(|art| Resource::Art(Graphic(*art), Hue(0))));
         }
         gaps.extend(
             UNSOURCED_ART
@@ -893,23 +955,18 @@ mod tests {
     #[test]
     fn the_only_raw_materials_with_no_sink_are_the_ones_we_know_about() {
         // The other direction, and the one that catches a trade paying in an item
-        // with no use. Two findings left, each a different missing system:
+        // with no use. **One finding left**: sand (`0x423A`), whose harvest
+        // definition shipped ahead of glassblowing — the trade that spends it is
+        // not implemented at all, so a miner can still fill a pack with something
+        // no recipe wants.
         //
-        // - **Fish** (`0x09CC`). Fishing lands them and no cooking row eats one:
-        //   `DefCooking`'s fish steaks are cut off a fish with a knife upstream,
-        //   which is an item action this engine does not have.
-        // - **Sand** (`0x423A`). Glassblowing, which is not implemented at all —
-        //   the harvest definition shipped ahead of the trade that spends it.
-        //
-        // **Logs were the third and are gone**: the axe eats every grade of them
-        // in both eras, so a lumberjack is no longer paid in something with no
-        // use. See [`CONVERSIONS`].
+        // Two have gone. Logs, which the axe now eats in every grade and in both
+        // eras; and fish, which a blade cuts into the steaks `DefCooking` already
+        // had rows for. Both are in [`CONVERSIONS`].
         let sand = Resource::Art(Graphic(0x423A), Hue(0));
-        let fish = Resource::Art(Graphic(0x09CC), Hue(0));
         for ml in [true, false] {
             let report = Economy::of(ml).report();
-            let mut expected: Vec<Resource> = vec![fish, sand];
-            expected.sort_unstable();
+            let expected: Vec<Resource> = vec![sand];
             let found: Vec<Resource> = report.dead_ends.keys().copied().collect();
             assert_eq!(found, expected, "ml={ml}: the dead ends moved.\n{report}");
         }
@@ -988,9 +1045,16 @@ mod tests {
 
     #[test]
     fn the_report_names_the_recipes_a_gap_costs() {
-        // A resource list alone does not say what is lost. Carpentry is the trade
-        // the board gap empties, so its stalled rows are the check that `stalled`
-        // is populated and pointed at the right trade.
+        // A resource list alone does not say what is lost. Carpentry is still the
+        // trade the remaining gap empties — it was the board bridge and it is now
+        // the peerless ingredients, which its Mondain's Legacy rows spend by the
+        // dozen — so its stalled rows are the check that `stalled` is populated
+        // and pointed at the right trade.
+        //
+        // The bound is deliberately loose. It was `> 100` when the boards were
+        // missing and 1,213 rows were stalled; a number that tracked the true
+        // count would have to be edited by every commit on this page, which is
+        // the ratchet's job and not this test's.
         let report = Economy::of(true).report();
         let carpentry = SYSTEMS
             .iter()
@@ -1001,6 +1065,6 @@ mod tests {
             .iter()
             .filter(|(via, _)| matches!(via, Origin::Craft { system, .. } if system.index() == carpentry))
             .count();
-        assert!(stalled > 100, "only {stalled} carpentry rows are blocked");
+        assert!(stalled > 10, "only {stalled} carpentry rows are blocked");
     }
 }

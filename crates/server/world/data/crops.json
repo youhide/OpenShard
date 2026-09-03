@@ -9,6 +9,42 @@
 
     { "name": "A Cotton Field in Skara Brae", "crop": "cotton",
       "x": 816, "y": 2344, "width": 16, "height": 24,
+      "max_count": 6, "respawn_secs": 20 },
+
+    { "name": "A Wheatfield in Britain 1", "crop": "wheat",
+      "x": 1120, "y": 1776, "width": 32, "height": 32,
+      "max_count": 8, "respawn_secs": 20 },
+
+    { "name": "A Wheatfield in Britain 2", "crop": "wheat",
+      "x": 1184, "y": 1808, "width": 32, "height": 32,
+      "max_count": 8, "respawn_secs": 20 },
+
+    { "name": "A Wheatfield in Britain 3", "crop": "wheat",
+      "x": 1216, "y": 1872, "width": 32, "height": 32,
+      "max_count": 8, "respawn_secs": 20 },
+
+    { "name": "A Wheatfield in Britain 4", "crop": "wheat",
+      "x": 1104, "y": 1608, "width": 32, "height": 32,
+      "max_count": 8, "respawn_secs": 20 },
+
+    { "name": "A Wheatfield in Britain 5", "crop": "wheat",
+      "x": 1136, "y": 1560, "width": 32, "height": 32,
+      "max_count": 8, "respawn_secs": 20 },
+
+    { "name": "A Wheatfield in Yew 1", "crop": "wheat",
+      "x": 560, "y": 1232, "width": 16, "height": 16,
+      "max_count": 5, "respawn_secs": 20 },
+
+    { "name": "A Wheatfield in Yew 2", "crop": "wheat",
+      "x": 368, "y": 1176, "width": 14, "height": 32,
+      "max_count": 6, "respawn_secs": 20 },
+
+    { "name": "A Wheatfield in Skara Brae 1", "crop": "wheat",
+      "x": 796, "y": 2152, "width": 36, "height": 24,
+      "max_count": 6, "respawn_secs": 20 },
+
+    { "name": "A Wheatfield in Skara Brae 2", "crop": "wheat",
+      "x": 835, "y": 2344, "width": 16, "height": 16,
       "max_count": 6, "respawn_secs": 20 }
   ]
 }

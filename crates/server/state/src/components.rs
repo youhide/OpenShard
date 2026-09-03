@@ -3570,17 +3570,23 @@ pub struct LoomPhase(pub u8);
 /// answers beside each other, which is the shape [`Fibre`] has one step further
 /// down the same chain.
 ///
-/// **Cotton is the only variant, and that is upstream's content rather than a
-/// simplification here.** `Regions.xml` spawns `FarmableCotton` in two Felucca
-/// fields and `FarmableFlax` in none at all — the class exists, and only the
-/// staff `[add` menu ever reaches it. A flax variant would therefore be a crop
-/// nothing plants, which is the same dead content `world`'s `build.rs` already
-/// refuses of a creature no region spawns.
+/// **Two variants, and the pair is upstream's content rather than a choice
+/// here.** `Regions.xml` spawns `FarmableCotton` in two Felucca fields and
+/// `FarmableWheat` in nine, and it spawns `FarmableFlax` in none at all — the
+/// flax class exists and only the staff `[add` menu ever reaches it. A flax
+/// variant would therefore be a crop nothing plants, which is the same dead
+/// content `world`'s `build.rs` already refuses of a creature no region spawns.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CropKind {
     /// Cotton: four plant arts, picked into the pile of cotton that
     /// [`Fibre::Cotton`] spins into thread.
     Cotton,
+    /// Wheat: four plant arts, picked into the sheaf a flour mill grinds.
+    ///
+    /// The head of the cooking chain, and until this the chain had no head at
+    /// all: every `DefCooking` row behind flour was unreachable because no field
+    /// grew the sheaf the mill wants.
+    Wheat,
 }
 
 impl CropKind {
@@ -3591,15 +3597,24 @@ impl CropKind {
     pub const fn standing_arts(self) -> &'static [Graphic] {
         match self {
             Self::Cotton => &[Graphic(0x0C51), Graphic(0x0C52), Graphic(0x0C53), Graphic(0x0C54)],
+            // `FarmableWheat.GetCropID`, which is `Utility.Random(3157, 4)` —
+            // the four arts immediately after cotton's four.
+            Self::Wheat => &[Graphic(0x0C55), Graphic(0x0C56), Graphic(0x0C57), Graphic(0x0C58)],
         }
     }
 
-    /// The art a picked stub wears: ServUO's `GetPickedID`, the same bare furrow
-    /// for every crop it grows.
+    /// The arts a picked stub may wear: ServUO's `GetPickedID`.
+    ///
+    /// A list rather than one art, because upstream rolls for it on some crops
+    /// and not others — cotton leaves one bare furrow and wheat leaves either of
+    /// two stubbles (`Utility.Random(3502, 2)`). Rolled from the world's seeded
+    /// rng exactly as [`standing_arts`](Self::standing_arts) is, so a replay
+    /// leaves the same field behind.
     #[must_use]
-    pub const fn picked_art(self) -> Graphic {
+    pub const fn picked_arts(self) -> &'static [Graphic] {
         match self {
-            Self::Cotton => Graphic(0x0CB6),
+            Self::Cotton => &[Graphic(0x0CB6)],
+            Self::Wheat => &[Graphic(0x0DAE), Graphic(0x0DAF)],
         }
     }
 
@@ -3609,6 +3624,8 @@ impl CropKind {
     pub const fn yield_of(self) -> (Graphic, u16) {
         match self {
             Self::Cotton => (Graphic(0x0DF9), 1),
+            // A sheaf of wheat, `WheatSheaf`'s own `base(7869)`.
+            Self::Wheat => (Graphic(0x1EBD), 1),
         }
     }
 }

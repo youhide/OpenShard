@@ -137,6 +137,7 @@ mod defaults;
 mod doors;
 mod drag;
 mod equip;
+mod flour;
 mod mounts;
 mod seating;
 mod shear;
@@ -164,6 +165,7 @@ pub use defaults::{
 pub use doors::*;
 pub use drag::*;
 pub use equip::*;
+pub use flour::*;
 pub use mounts::*;
 pub use seating::*;
 pub use shear::*;

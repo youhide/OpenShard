@@ -73,8 +73,12 @@ pub fn pick(state: &mut WorldState, picker: EntityId, plant: EntityId) -> bool {
         return true;
     };
     // The stub before the yield, so a shard out of item serials leaves a picked
-    // field rather than a plant that can be picked again for ever.
-    redraw_item(state, plant, kind.picked_art());
+    // field rather than a plant that can be picked again for ever. Its art is
+    // drawn from the same seeded rng the standing plant's was: wheat leaves
+    // either of two stubbles behind, cotton the one furrow.
+    let stubs = kind.picked_arts();
+    let stub = stubs[state.rng.below(stubs.len() as u32) as usize];
+    redraw_item(state, plant, stub);
     state.registry.insert(
         plant,
         Crop::Picked {
@@ -117,12 +121,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_cotton_plant_is_drawn_as_one_of_its_four_arts() {
-        // The picked furrow must not be among them, or a field would grow
-        // plants that already look harvested.
-        let arts = CropKind::Cotton.standing_arts();
-        assert_eq!(arts.len(), 4);
-        assert!(!arts.contains(&CropKind::Cotton.picked_art()));
+    fn a_plant_is_drawn_as_one_of_its_four_arts() {
+        // A picked stub must not be among them, or a field would grow plants
+        // that already look harvested.
+        for kind in [CropKind::Cotton, CropKind::Wheat] {
+            let arts = kind.standing_arts();
+            assert_eq!(arts.len(), 4, "{kind:?}");
+            for stub in kind.picked_arts() {
+                assert!(!arts.contains(stub), "{kind:?} grows a picked stub");
+            }
+        }
+    }
+
+    #[test]
+    fn wheat_is_picked_as_the_sheaf_a_mill_grinds() {
+        // Cotton's test one chain over: a yield the mill does not recognise is a
+        // field that pays a player in scenery. The cooking system's own row is
+        // the other end — `cooking.json` spends `0x1EBD` two at a time.
+        assert_eq!(CropKind::Wheat.yield_of(), (Graphic(0x1EBD), 1));
     }
 
     #[test]

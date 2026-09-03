@@ -2098,6 +2098,42 @@ pub const SERVER_MESSAGES: &[Message] = &[
         fallback: "You chop some frostwood logs and put them into your backpack.",
     },
     Message {
+        id:       ClilocId(1072548),
+        fallback: "You also chop off a bark fragment and put it in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1072551),
+        fallback: "You also find a brilliant amber and put it in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1072562),
+        fallback: "You dig up a blue diamond and put it in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1072564),
+        fallback: "You dig up a fire ruby and put it in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1072566),
+        fallback: "You dig up a perfect emerald and put it in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1072567),
+        fallback: "You dig up a dark sapphire and put it in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1072568),
+        fallback: "You dig up a turquoise and put it in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1072570),
+        fallback: "You dig up an ecru citrine and put it in your backpack.",
+    },
+    Message {
+        id:       ClilocId(1072597),
+        fallback: "You reel in a white pearl and put it in your backpack.",
+    },
+    Message {
         id:       ClilocId(1072652),
         fallback: "You cannot work this strange and unusual wood.",
     },

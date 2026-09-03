@@ -440,6 +440,7 @@ fn deliver(
     if !state.is_staff(harvester) {
         consume_bank(state, harvester, def, work.at, amount);
     }
+    pay_bonus(state, harvester, def, value);
     state.bus.send(Harvested {
         harvester,
         kind: def.kind,
@@ -450,6 +451,39 @@ fn deliver(
         amount,
     });
     wear_tool(state, harvester, work.tool, def)
+}
+
+/// Roll the definition's bonus table and pay what it turns up.
+///
+/// ServUO rolls this on every *successful* swing, after the resource has landed,
+/// and pays the bonus **at the harvester's feet when the pack is full whatever
+/// the definition says** — `Give(from, bonusItem, true)`, with a comment saying
+/// as much. A gem is too rare to lose to a full pack.
+fn pay_bonus(state: &mut WorldState, harvester: EntityId, def: &'static HarvestDef, skill: u16) {
+    if def.bonus.is_empty() {
+        return;
+    }
+    // In hundredths of a percent, which is the unit the table is written in.
+    let roll = state.rng.below(10_000);
+    let Some(bonus) = def.bonus_for(roll, i32::from(skill)) else {
+        return;
+    };
+    let Some(serial) = state.registry.serial_of(harvester) else {
+        return;
+    };
+    if openshard_items::give_to_backpack(state, serial, bonus.graphic, Hue(0), 1, true) {
+        state.localized_message(harvester, bonus.success_cliloc, "");
+        return;
+    }
+    let (Some(&Position(at)), facet) = (
+        state.registry.get::<Position>(harvester),
+        state.facet_of(harvester),
+    ) else {
+        return;
+    };
+    if openshard_items::spawn_item(state, bonus.graphic, Hue(0), 1, true, at, facet).is_some() {
+        state.localized_message(harvester, bonus.success_cliloc, "");
+    }
 }
 
 /// Put the yield in the pack, or at the harvester's feet where the definition

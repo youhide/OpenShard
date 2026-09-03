@@ -1,5 +1,20 @@
 [
   {
+    "body": 3,
+    "creature": "a zombie",
+    "drops": [
+      { "graphic": 3966, "chance": 0.125 }
+    ]
+  },
+  {
+    "body": 26,
+    "creature": "a spectre",
+    "drops": [
+      { "graphic": 3821, "amount": [10, 40], "stackable": true },
+      { "graphic": 3962, "amount": [1, 4], "stackable": true, "chance": 0.6 }
+    ]
+  },
+  {
     "body": 50,
     "creature": "an orc",
     "drops": [
@@ -10,11 +25,17 @@
     ]
   },
   {
-    "body": 26,
-    "creature": "a spectre",
+    "body": 89,
+    "creature": "an ice serpent",
     "drops": [
-      { "graphic": 3821, "amount": [10, 40], "stackable": true },
-      { "graphic": 3962, "amount": [1, 4], "stackable": true, "chance": 0.6 }
+      { "graphic": 3966, "chance": 0.125 }
+    ]
+  },
+  {
+    "body": 165,
+    "creature": "a shadow wisp",
+    "drops": [
+      { "graphic": 3966, "chance": 0.167 }
     ]
   }
 ]
