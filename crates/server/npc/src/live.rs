@@ -88,15 +88,20 @@ pub const BEAT_JITTER_FRACTION: u64 = 4;
 pub(crate) const GREET_RANGE: u32 = 4;
 /// How long a townsperson waits between greetings — long enough not to natter at
 /// someone standing at the counter.
-const GREET_COOLDOWN: u64 = 15 * 20;
+///
+/// In seconds times [`TICKS_PER_SECOND`](openshard_state::TICKS_PER_SECOND)
+/// rather than as a tick count, for the same reason as [`BEAT_TICKS`]: a bare
+/// `15 * 20` was fifteen seconds at the tick rate this used to assume and is
+/// half that now.
+const GREET_COOLDOWN: u64 = 15 * openshard_state::TICKS_PER_SECOND;
 /// And how far that wait is spread. The beats themselves are staggered, so two
 /// NPCs greet on different ticks to begin with; without this they would still come
 /// off cooldown together and re-converge every fifteen seconds.
-const GREET_COOLDOWN_JITTER: u32 = 5 * 20;
+const GREET_COOLDOWN_JITTER: u32 = 5 * openshard_state::TICKS_PER_SECOND as u32;
 /// How long between two of an NPC's own idle remarks. Much longer than a greeting:
 /// a bark is atmosphere, and a street of shopkeepers each shouting every fifteen
 /// seconds is worse than silence.
-const BARK_COOLDOWN: u64 = 60 * 20;
+const BARK_COOLDOWN: u64 = 60 * openshard_state::TICKS_PER_SECOND;
 /// The chance, in a hundred, that an idle NPC with nobody near says something to
 /// itself this beat.
 const BARK_CHANCE: u32 = 6;
@@ -394,5 +399,22 @@ mod tests {
     fn chebyshev_is_the_square_uo_measures() {
         assert_eq!(chebyshev(Point::new(0, 0, 0), Point::new(3, 1, 0)), 3);
         assert_eq!(chebyshev(Point::new(5, 5, 0), Point::new(5, 5, 0)), 0);
+    }
+
+    /// Regression guard for the `seconds * 20` mixup: these three cooldowns
+    /// were written against a tick rate this crate has not run at since the
+    /// tick was halved to 25ms, so each one landed at half its documented
+    /// span. Pinning to `seconds * TICKS_PER_SECOND` rather than a bare tick
+    /// count means the assertion tracks the doc comment even if the tick
+    /// rate ever moves again; pinning to a literal tick count would not have
+    /// caught the original bug at all.
+    #[test]
+    fn greet_and_bark_cooldowns_match_their_documented_span() {
+        assert_eq!(GREET_COOLDOWN, 15 * openshard_state::TICKS_PER_SECOND);
+        assert_eq!(
+            GREET_COOLDOWN_JITTER,
+            5 * openshard_state::TICKS_PER_SECOND as u32
+        );
+        assert_eq!(BARK_COOLDOWN, 60 * openshard_state::TICKS_PER_SECOND);
     }
 }
