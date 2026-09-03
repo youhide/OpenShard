@@ -701,7 +701,8 @@ struct PendingAction {
 /// **Two facts side by side and not two states**, which is a correction of the
 /// obvious design and the reason is measurable. A fighter's next gesture opens
 /// on the very tick the last one lands — `Combat::next_swing` is still the
-/// impact, see `docs/combat_actions.md`'s Ф1 backlog — so an outcome that were
+/// impact, see `docs/combat/evidence/2026-08-27-the-action-phases.md`'s Ф1 backlog
+/// — so an outcome that were
 /// merely *replaced* by the next commit would be on screen for one frame at
 /// most, and the word "hit" would be legible only for the last blow of a fight.
 /// The two are therefore remembered independently, and an exchange reads as a
@@ -1595,7 +1596,8 @@ impl Crowd {
     /// arrives more than once for one action by design: an armed action
     /// announces again when it looses, and a `Slow` rule re-announces a
     /// running one with its impact pushed further out
-    /// (`docs/combat_actions.md`'s Ф3). Both are the same action handing this
+    /// (`docs/combat/evidence/2026-08-27-the-action-phases.md`'s Ф3). Both are the
+    /// same action handing this
     /// client a *new* interval to measure, so both restart the picture from now
     /// — a bar still filling towards the old impact would be the desync the
     /// re-announcement exists to prevent.
@@ -1960,7 +1962,7 @@ impl Crowd {
     /// end. An outcome fades at [`OUTCOME_HOLD`] because it is a message and not
     /// a state. A *running* action that outlives its own interval **by
     /// [`RUNNING_GRACE`]** is the bound on a leak: every action ends and every
-    /// end crosses the wire (`docs/combat_actions.md`'s D2), so in the ordinary
+    /// end crosses the wire (`docs/combat/design_actions.md`'s D2), so in the ordinary
     /// run [`Crowd::end_action`] has already replaced it — what this stops is a
     /// body that walked out of range mid-swing holding a full bar for as long as
     /// the client is connected.

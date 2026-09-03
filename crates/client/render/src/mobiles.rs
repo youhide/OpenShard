@@ -926,7 +926,7 @@ fn opaque_under(placement: &Placement, atlas: &AnimAtlas, in_view: ViewPixel) ->
 ///
 /// `cutaway::hides_foliage_over` reads this for the player's own body: a
 /// tree's leaves fading nobody's screen but this crate has no fade yet, so
-/// `docs/combat.md`'s D9 neighbour is a hard cut instead — see
+/// `docs/combat/design_fight_loop.md`'s D9 neighbour is a hard cut instead — see
 /// [`crate::cutaway`]'s module doc on why foliage was absent until now.
 #[must_use]
 pub fn screen_rect(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Option<Rect> {

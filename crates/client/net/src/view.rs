@@ -213,7 +213,7 @@ pub struct Player {
     /// Whether this character is a ghost.
     ///
     /// The `0x2C` this end never had a decoder for until now — see
-    /// `docs/combat.md`'s D9 and P4. It gates more than the tonemap's grey:
+    /// `docs/combat/design_fight_loop.md`'s D9 and P4. It gates more than the tonemap's grey:
     /// no attack goes out from a ghost, and a ghost stands with no war stance
     /// even with [`war`](Self::war) still set, the same
     /// `!InWarMode || IsDead` the reference draws by.
@@ -1958,7 +1958,7 @@ impl WorldView {
                 changed
             }
             ServerPacket::StatLocks(_) => false,
-            // `0x2C`: this end just died, or came back. `docs/combat.md`'s
+            // `0x2C`: this end just died, or came back. `docs/combat/design_fight_loop.md`'s
             // D9 — the one packet that greys the whole screen, gates an
             // attack off a ghost's own click, and drops the war stance even
             // if `war` is still set.
@@ -2985,7 +2985,7 @@ mod tests {
         );
     }
 
-    /// `0x2C` — `docs/combat.md` D9/P4. The one packet that puts a ghost on
+    /// `0x2C` — `docs/combat/design_fight_loop.md` D9/P4. The one packet that puts a ghost on
     /// screen; before this arm existed the byte decoded fine and `apply` had
     /// nowhere to put it.
     #[test]

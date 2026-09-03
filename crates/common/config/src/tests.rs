@@ -787,7 +787,7 @@ fn free_movement_defaults_to_saying_nothing() {
 }
 
 /// The condition rules as an operator writes them — the exact shape documented
-/// in `openshard.toml` and in `docs/combat_actions.md`'s D4, parsed rather than
+/// in `openshard.toml` and in `docs/combat/design_actions.md`'s D4, parsed rather than
 /// described.
 #[test]
 fn the_action_rules_table_reads_as_its_effects_own_names() {

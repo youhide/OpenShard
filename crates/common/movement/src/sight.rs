@@ -17,8 +17,8 @@
 //! The two layers it reads, in the order it reads them, are documented on
 //! [`MapTerrain::sight_stop`](crate::MapTerrain::sight_stop) (the map: ground,
 //! walls, platforms, the window hole) and on [`trace`] itself (the live world's
-//! shut doors). `docs/sight.md` is the plan this came from and carries the list
-//! of properties the picture exposes.
+//! shut doors). `docs/combat/design_sight.md` is the model, and carries the list
+//! of properties the picture exposes but does not change.
 
 use openshard_map::grid::Tile;
 use openshard_protocol::wire::Graphic;
@@ -31,7 +31,8 @@ use crate::walk::line_tiles;
 ///
 /// Head height, and everybody's: a dragon, a rabbit and a mounted knight all
 /// look from nine units above their own `z`. That is the rule as it stands
-/// rather than a rule this module chose — see `docs/sight.md`'s closing list.
+/// rather than a rule this module chose — see `docs/combat/design_sight.md`'s
+/// list of what the rule cannot do.
 pub const EYE: i32 = 9;
 
 /// Why a look stopped at one tile.
@@ -63,7 +64,7 @@ pub enum Stop {
     ///
     /// It carries no span, because the question asked of the live layer has no
     /// height in it: `Overlay::blocker_anywhere` is asked about a tile, and a
-    /// shut door is opaque at every height of it. See `docs/sight.md`.
+    /// shut door is opaque at every height of it. See `docs/combat/design_sight.md`.
     Door,
     /// A structural wall the live world put there, such as a house component.
     LiveWall {

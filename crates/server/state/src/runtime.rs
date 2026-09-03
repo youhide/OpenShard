@@ -294,7 +294,7 @@ pub struct Gameplay {
     /// The swing formula's numerator (Sphere's `SpeedScaleFactor`).
     pub speed_scale_factor: u64,
     /// What the world does to an action that is already running — a run that
-    /// sways a shot, a wound that spoils it. `docs/combat_actions.md`'s D4, and
+    /// sways a shot, a wound that spoils it. `docs/combat/design_actions.md`'s D4, and
     /// the reason it is a table rather than a branch: *"an archer may fire at a
     /// walk, sways at a run, and steadies on horseback"* is a shard's choice,
     /// and a boolean on the weapon cannot say it.
@@ -1635,7 +1635,7 @@ pub enum TargetPurpose {
     ///
     /// A diagnostic and nothing else: it changes no state, and exists so the
     /// shard's own verdict can be laid beside the client's overlay of it. See
-    /// `docs/sight.md`'s Ф4.
+    /// `docs/combat/evidence/2026-08-27-the-sight-overlay.md`'s Ф4.
     Sight,
     /// A targeted spell waiting for its aim — the cursor a spell puts up once
     /// the cast resolves. `success` is the skill roll already made, carried here

@@ -547,7 +547,7 @@ pub(super) fn walk(sequence: u8, direction: Direction) -> WalkRequest {
 }
 
 /// The same step, taken at a run — the bit the condition rules of
-/// `docs/combat_actions.md`'s D4 key on.
+/// `docs/combat/design_actions.md`'s D4 key on.
 pub(super) fn run(sequence: u8, direction: Direction) -> WalkRequest {
     use openshard_protocol::world::RawFastwalkKey;
 
@@ -6765,10 +6765,11 @@ fn a_swing_whose_target_leaves_the_committed_reach_says_so() {
     );
 }
 
-/// Nothing arms yet — that is the last phase of `docs/combat_actions.md` — but
-/// the endurance is not decoration: an arm that is never released has to give
-/// out, or a couched lance becomes a permanent property of a rider. Constructed
-/// by hand here for exactly that reason.
+/// Only the target-in-sight watch arms from a live shard — the other two are
+/// `plans/combat/actions/PLAN.md`'s Ф7 — but the endurance is not decoration: an
+/// arm that is never released has to give out, or a couched lance becomes a
+/// permanent property of a rider. Constructed by hand here for exactly that
+/// reason.
 #[test]
 fn an_armed_action_that_is_never_released_expires() {
     let now = Instant::now();

@@ -151,7 +151,7 @@ pub struct Request {
     ///
     /// Sent on the change like the others, though this one is the cheapest of
     /// them: one Bresenham walk of the line a shot would fly along. See
-    /// `docs/sight.md`.
+    /// `docs/combat/design_sight.md`.
     pub show_sight: Option<bool>,
     /// Name the reach the sight overlay draws its limit at, on the frame the
     /// number was changed. See
@@ -4984,7 +4984,8 @@ fn draw_health_bars(
 
 /// The preparation bars, and beside each one the state it is in.
 ///
-/// `docs/combat_actions.md`'s Ф4. Three marks and not one, and the two extra
+/// `docs/combat/evidence/2026-08-27-the-action-phases.md`'s Ф4. Three marks and not
+/// one, and the two extra
 /// ones are the point: a bar answers *how far along*, and it cannot answer
 /// *what of* — a blow and a drawn bow fill the same rectangle — nor *and then
 /// what happened*, which is the question a fight actually leaves behind. So the
@@ -6322,7 +6323,7 @@ const BLOCKED: egui::Color32 = egui::Color32::from_rgb(255, 40, 40);
 /// A third colour rather than the red above, because it is a different refusal:
 /// red is the world in the way and this is the arm too short, and a person
 /// reading the overlay has to be able to tell "move" from "get closer". See
-/// `docs/sight.md`.
+/// `docs/combat/design_sight.md`.
 const OUT_OF_REACH: egui::Color32 = egui::Color32::from_rgb(255, 190, 60);
 
 /// The same colour at a chosen alpha — a wash and an outline of one hue.

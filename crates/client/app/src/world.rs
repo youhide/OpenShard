@@ -438,7 +438,7 @@ impl PresentationWorld {
     /// without porting that client's skewed offset arithmetic wholesale.
     ///
     /// A fixed or lightning effect is dropped rather than mis-drawn as a
-    /// flight it is not — nothing sends either yet (`docs/archery.md`'s
+    /// flight it is not — nothing sends either yet (`docs/combat/evidence/2026-08-27-the-ranged-shot.md`'s
     /// backlog), and a wrong picture is worse than none.
     pub(crate) fn fire(&mut self, effect: GraphicalEffect) {
         if effect.kind != openshard_protocol::feedback::EffectKind::Moving {

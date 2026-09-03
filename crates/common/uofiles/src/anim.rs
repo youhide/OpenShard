@@ -349,7 +349,7 @@ impl BodyKind {
     /// in this crate does: an `AnimID` reaches the renderer and the item's wire
     /// graphic — which is what the reference branches on — is thrown away on the
     /// way (`crowd::worn` in the client). One missing field, and it is the same
-    /// one `MobileView.IsCovered` wants; see `docs/combat.md` D2.
+    /// one `MobileView.IsCovered` wants; see `docs/combat/design_fight_loop.md` D2.
     pub const fn standing_at_war(self) -> Option<AnimationGroup> {
         match self {
             Self::Monster | Self::Animal => None,

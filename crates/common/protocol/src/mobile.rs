@@ -63,7 +63,7 @@ use crate::world::Point;
 ///
 /// [`WARMODE`](Self::WARMODE), because a body's stance is the one of the eight
 /// that has a picture at this end: a client draws a human at war standing in a
-/// different animation group (`docs/combat.md`, D1 and D2).
+/// different animation group (`docs/combat/design_fight_loop.md`, D1 and D2).
 ///
 /// [`IGNORE_MOBILES`](Self::IGNORE_MOBILES), because the shard now has a rule
 /// the client would otherwise contradict. A body in the way stops a step

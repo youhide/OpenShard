@@ -822,7 +822,7 @@ impl App {
     /// - **At peace, nothing is sent.** Not a refusal — a click at peace is a
     ///   selection, which the caller has already made.
     /// - **A ghost sends nothing.** `Player::dead` is `0x2C`'s own answer
-    ///   (`docs/combat.md`, D9/P4) — a ghost that somehow still carries the war
+    ///   (`docs/combat/design_fight_loop.md`, D9/P4) — a ghost that somehow still carries the war
     ///   flag still sends no attack, the same `!InWarMode || IsDead` the
     ///   reference gates a swing by.
     /// - **A body with no serial is the offline viewer's placeholder** and

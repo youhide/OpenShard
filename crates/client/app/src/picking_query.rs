@@ -832,7 +832,7 @@ impl App {
     /// is aimed at — or `None` while nobody has asked for the picture.
     ///
     /// **The shard's own rule, run here.** `openshard_movement::sight::trace` is
-    /// what `sight_clear` *is* (`docs/sight.md`'s D1), and this client already
+    /// what `sight_clear` *is* (`docs/combat/design_sight.md`'s D1), and this client already
     /// holds both halves it reads: the same map files and the live overlay it
     /// builds out of ground items. So the overlay costs no packet and follows
     /// the cursor, which a wire round trip could not — D3, which also names the
@@ -889,7 +889,7 @@ impl App {
 
     /// What the sight overlay is aimed at, and whether that is the fight.
     ///
-    /// Takes no `self` because it is the whole of `docs/sight.md`'s D5 and none
+    /// Takes no `self` because it is the whole of `docs/combat/design_sight.md`'s D5 and none
     /// of the frame around it — the quarry wins, the hovered tile stands in, and
     /// with neither there is nothing to draw — which is also what makes it the
     /// one part of the overlay a test can hold in its hand.
@@ -1781,7 +1781,7 @@ mod sight_tests {
         }
     }
 
-    /// `docs/sight.md`'s D5, in the three cases it has.
+    /// `docs/combat/design_sight.md`'s D5, in the three cases it has.
     #[test]
     fn the_look_is_aimed_at_the_quarry_first_and_the_cursor_after() {
         let quarry = Point::new(20, 30, 5);

@@ -251,7 +251,7 @@ pub struct Inputs<'a> {
     /// Whether the player's own character is a ghost — `view::Player::dead`,
     /// `0x2C`. Set on the way out beside [`view`](Self::view) for the same
     /// reason: a fact about the person looking, not about the tiles walked to
-    /// light them. `docs/combat.md`'s D9.
+    /// light them. `docs/combat/design_fight_loop.md`'s D9.
     pub dead:        bool,
     /// Where the player's own picture lands on screen this frame —
     /// [`crate::mobiles::screen_rect`] — so a tree standing over it can be cut

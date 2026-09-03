@@ -380,7 +380,7 @@ impl DecodePacket for HarvestCompleted {
     }
 }
 
-/// What a combat action's impact does — the axis `docs/combat_actions.md` calls
+/// What a combat action's impact does — the axis `docs/combat/design_actions.md` calls
 /// *kind*.
 ///
 /// It is on the wire because a watcher draws a drawn bow differently from a
@@ -424,7 +424,7 @@ impl CombatActionKind {
 /// The duration means a different thing in each, which is why they are one enum
 /// and not a flag beside a number: an arming action is preparing, an armed
 /// action is waiting, and a releasing one is landing. A zero-length timed action would be the lie
-/// `docs/combat_actions.md`'s wire section refuses.
+/// `docs/combat/design_actions.md`'s wire section refuses.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ActionPhase {
     /// Preparing the action before it can be held: a bow is being raised and
@@ -473,7 +473,7 @@ impl ActionPhase {
 ///
 /// A closed list, and each entry is a fact the server tests at a seam it already
 /// runs. The player is owed the reason: a swing that vanished with no word is
-/// the defect `docs/combat_actions.md` opens with.
+/// the defect `docs/combat/design_actions.md` opens with.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum InterruptReason {
     /// The committed target died, logged out, or left the facet.
@@ -814,7 +814,7 @@ impl ActionStage {
 
 /// Whether a fighter can begin an action at all, and if not, why not.
 ///
-/// The state `docs/combat_actions.md`'s D1 left with no name. An action that
+/// The state `docs/combat/design_actions.md`'s D1 left with no name. An action that
 /// fails at the *impact* ends with a reason and the reason crosses the wire; an
 /// action that never began because the target is round a corner produced
 /// nothing at all — the commit pass simply declined, every tick, in silence.

@@ -832,7 +832,7 @@ pub fn arrival_z(footing: &Footing<'_>, tile: Tile, near_z: i32, height: i32) ->
 /// **A reading of [`sight::trace`](crate::sight::trace), not a second walk.**
 /// The rule — the line, the eye height, which layer is asked in what order —
 /// lives there, once, so the picture a person debugs a refusal with is drawn
-/// from the same ray this fires along. See `docs/sight.md`.
+/// from the same ray this fires along. See `docs/combat/design_sight.md`.
 #[must_use]
 pub fn sight_clear(footing: &Footing<'_>, from: Point, to: Point) -> bool {
     crate::sight::trace(footing, from, to, crate::sight::Extent::ToFirstBlock).clear()

@@ -236,7 +236,7 @@ pub struct GraphicsSettings {
     /// looking at.
     pub show_terrain: bool,
     /// Whether the HUD draws the sight line the shard decides a shot by — the
-    /// ray, the tiles it crosses, and what stopped it. See `docs/sight.md`.
+    /// ray, the tiles it crosses, and what stopped it. See `docs/combat/design_sight.md`.
     ///
     /// Off by default and paid for only while it is on, exactly as
     /// [`show_terrain`](Self::show_terrain) is: the trace is one Bresenham walk
@@ -250,7 +250,7 @@ pub struct GraphicsSettings {
     /// — and only the second is a thing this client can compute: the reach lives
     /// in the shard's weapon table, keyed by graphic, and nothing on the wire
     /// carries it. Reading it off the graphic in our own hands would be a second
-    /// copy of a rule the shard owns, which is the very thing `docs/sight.md`'s
+    /// copy of a rule the shard owns, which is the very thing `docs/combat/design_sight.md`'s
     /// D1 refused for the ray itself.
     ///
     /// So a person names it: `1` is arm's length — the shard's own `MELEE_REACH`,

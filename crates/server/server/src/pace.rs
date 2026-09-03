@@ -307,7 +307,7 @@ impl Pace {
     /// A shard that cannot keep its rate is a **standing state**, not an event:
     /// saying it once a second for as long as it lasts buries the log, and saying
     /// it once and never again hides the recovery. So it is announced on its
-    /// edges — the same shape `docs/combat_actions.md`'s D11 settled on for a
+    /// edges — the same shape `docs/combat/design_actions.md`'s D11 settled on for a
     /// refusal, and for the same reason: what a reader needs is when it started
     /// and when it stopped.
     pub(crate) fn verdict(&mut self, window: Window) -> Option<Verdict> {

@@ -373,7 +373,7 @@ pub struct GameplayConfig {
     #[serde(default = "default_npc_home_hour")]
     pub npc_home_hour: u8,
     /// What the world does to a combat action that is already running — the
-    /// condition/effect table of `docs/combat_actions.md`'s D4.
+    /// condition/effect table of `docs/combat/design_actions.md`'s D4.
     #[serde(default = "default_action_rules")]
     pub action_rules: ActionRulesConfig,
     /// How a running action's interval divides into the named stretches a

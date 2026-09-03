@@ -451,7 +451,7 @@ pub(crate) fn assemble_geometry(
         // checking the place channel wants to see, without having to make it
         // night first.
         view: graphics.light_view,
-        // `docs/combat.md`'s D9: the screen greys for the character this
+        // `docs/combat/design_fight_loop.md`'s D9: the screen greys for the character this
         // client is, not for the offline placeholder — which has no view
         // and so is never a ghost.
         dead: world.dead(),

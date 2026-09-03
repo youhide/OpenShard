@@ -616,7 +616,7 @@ pub struct Lighting {
     /// answers rather than two sample counts.
     pub shadow_rays:  ShadowRays,
     /// Whether the player's own character is a ghost — `view::Player::dead`,
-    /// `0x2C`. `docs/combat.md`'s D9: one uniform, one branch, and the whole
+    /// `0x2C`. `docs/combat/design_fight_loop.md`'s D9: one uniform, one branch, and the whole
     /// lit frame desaturates rather than every quad carrying its own hue.
     pub dead:         bool,
 }

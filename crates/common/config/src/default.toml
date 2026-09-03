@@ -264,7 +264,7 @@ guards = true
 # npc_home_hour = 21
 
 # What the world does to a blow or a draw that is already under way —
-# docs/combat_actions.md's D4. A rule is a pair: a condition the shard already
+# docs/combat/design_actions.md's D4. A rule is a pair: a condition the shard already
 # knows, and an effect on the action running when it becomes true.
 #
 # The conditions are `running`, `walking` and `mounted` (all three charged at a
@@ -322,7 +322,7 @@ guards = true
 # breath = 100
 
 # How a running action's interval divides into the stretches a watcher is told
-# about, as percentages — docs/combat_actions.md's D12. The RELEASE is whatever
+# about, as percentages — docs/combat/design_actions.md's D12. The RELEASE is whatever
 # is left over, so these must not add up past 100.
 #
 # Two and not three: there is no `aim` share, and that is a decision rather than

@@ -27,7 +27,7 @@
 //! *end*: every one of them finishes as a hit, a miss or a named interruption,
 //! and the end crosses the wire, so a telegraph that was cancelled stops being
 //! drawn instead of running out its promised duration over an empty tile. See
-//! `docs/combat_actions.md`.
+//! `docs/combat/design_actions.md`.
 
 use std::collections::HashSet;
 
@@ -1429,7 +1429,7 @@ const fn debug_assert_accounted_for(_state: &WorldState) {
 /// long. Neither is a promise anybody made.
 ///
 /// A fresh action is a fresh promise, so it costs a fresh interval. What that
-/// makes true is the sentence `docs/combat_actions.md`'s Ф1 backlog already
+/// makes true is the sentence `docs/combat/evidence/2026-08-27-the-action-phases.md`'s Ф1 backlog already
 /// claimed — *"the next commit opens a full fresh interval"* — which until now
 /// held only when the spoiled action's impact had already gone by.
 ///
@@ -1523,7 +1523,7 @@ fn balk(state: &mut WorldState, balked: &mut HashSet<EntityId>, attacker: Entity
 /// reason crosses the wire — the silent `continue` at the impact is what made a
 /// player watch a full swing and get neither a blow nor a word.
 ///
-/// The condition rules of `docs/combat_actions.md`'s D4 — a run that sways a
+/// The condition rules of `docs/combat/design_actions.md`'s D4 — a run that sways a
 /// shot, a wound that spoils it — are a later phase. What is applied today is
 /// only what the world does: the fighter's own life, a bard's calm, and the
 /// three ways a committed target stops being strikeable.

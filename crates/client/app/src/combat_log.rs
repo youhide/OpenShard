@@ -21,7 +21,7 @@
 //! # What it is not
 //!
 //! Not a substitute for the shard saying why. Every refusal the commit pass makes
-//! already crosses the wire with a reason (`docs/combat_actions.md`'s D11), and
+//! already crosses the wire with a reason (`docs/combat/design_actions.md`'s D11), and
 //! this records those rather than inferring them. What it adds is *time*: the gap
 //! between two edges, which is the only place a stall can live once every edge
 //! has a name.

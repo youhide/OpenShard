@@ -1,5 +1,5 @@
 //! What the world does to a combat action while it runs — D4 and D5 of
-//! `docs/combat_actions.md`.
+//! `docs/combat/design_actions.md`.
 //!
 //! A rule is a **pair**: a condition the server already knows, and an effect on
 //! the action running at the moment it becomes true. A boolean *"movement breaks

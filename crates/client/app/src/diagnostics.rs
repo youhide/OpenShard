@@ -189,7 +189,7 @@ pub struct Route {
 /// **The shard's rule, not a picture of it.** The trace comes out of
 /// `openshard_movement::sight::trace` — the same call `sight_clear` is, and the
 /// same call a shot flies along — over this client's own map and its own
-/// live overlay. See `docs/sight.md`'s D1 and D3, and the limit D3 names: the
+/// live overlay. See `docs/combat/design_sight.md`'s D1 and D3, and the limit D3 names: the
 /// live half is what the shard has told this client about.
 pub struct SightLine {
     /// The walk itself: every tile crossed, the ray's height over each, and
@@ -279,7 +279,8 @@ pub struct HealthBar {
 
 /// One overhead preparation bar, anchored in world-viewport pixels.
 ///
-/// `docs/combat_actions.md`'s Ф4. The pair of packets Ф1 put on the wire finally
+/// `docs/combat/evidence/2026-08-27-the-action-phases.md`'s Ф4. The pair of packets
+/// Ф1 put on the wire finally
 /// reaches a screen here: what a fighter is committed to, how far into it they
 /// are, and — for a moment after it is over — how it ended. The colour and the
 /// glyph stay presentation decisions, the same division [`HealthBar`] makes with

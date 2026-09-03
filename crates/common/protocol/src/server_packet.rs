@@ -3027,7 +3027,7 @@ mod tests {
         );
     }
 
-    /// `docs/combat.md` P4/D9: the client never had a decoder for `0x2C`, so a
+    /// `docs/combat/design_fight_loop.md` P4/D9: the client never had a decoder for `0x2C`, so a
     /// death that arrived over the wire dropped silently and the world never
     /// greyed. Round-tripped like [`the_answers_a_paperdoll_waits_for_are_decoded`]
     /// above.

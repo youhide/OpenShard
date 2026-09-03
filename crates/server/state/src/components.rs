@@ -2505,7 +2505,7 @@ pub struct SwingSpeed {
 /// the commit and are never re-derived at the impact. That is the
 /// difference between this and the scalar deadline it replaced — a deadline can
 /// only arrive, while an action can be sustained, spoiled, and *ended with a
-/// reason the player is told*. `docs/combat/design_actions.md` is the plan.
+/// reason the player is told*. `docs/combat/design_actions.md` is the model.
 ///
 /// The three axes it separates are `kind` (what the impact does), the `watch`
 /// inside [`Phase::Armed`] (what releases it) and the condition rules applied to
