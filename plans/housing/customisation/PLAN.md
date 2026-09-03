@@ -151,6 +151,23 @@ and are recorded here rather than left to be re-found.
   which leaves the list half a rule. Either it is finished or it goes; a list
   that holds `HouseDesign` and not the component beside it is the worst of the
   two, since a reader cannot tell whether an absence is a decision.
+- **`Designer_Stairs` (`0x0D`) belongs to no step of this plan.** The six steps
+  above name build, erase, select-floor, commit, revert, roofs, backup, restore
+  and validation, and the reference registers *ten* verbs. The stair one is the
+  gap: it lays a whole stair multi's components rather than one tile, expanding
+  `MultiData.GetComponents(itemID)` into the working design, and its erase half
+  is already there in ServUO's `DeleteStairs` — the branch `Designer_Delete`
+  takes before it removes anything. It is closest in kind to step 5's roofs,
+  and it should be adopted by that step rather than left as the one editor
+  button that does nothing.
+- **Nothing says which art ids are house pieces.** ServUO gates every build
+  against a shipped `ComponentVerification` table; this engine has no copy of it,
+  so `build` refuses a roof (the tiledata flag is free) and accepts everything
+  else — a player's editor can lay a mountain, a corpse or a shopkeeper's sign
+  into their own walls. That is not a hole in the shard, since the design only
+  ever draws and blocks, but it is the difference between "a house" and "any
+  hundred statics", and it is worth deciding deliberately rather than by
+  omission. Step 4 is where a decision about it would sit.
 
 ## Not in this plan
 
