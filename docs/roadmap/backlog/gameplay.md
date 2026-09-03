@@ -83,9 +83,11 @@ started.
   in the world is the twenty a vendor stocks
   (`crates/server/world/data/townsfolk.json:203`), plain wood at that, so the
   six special woods are unreachable by any crafter and chopping pays in an item
-  with no use. ServUO's own bridge is `BaseLog.OnDoubleClick` — a
-  Lumberjacking-gated craft that yields boards of the log's own resource — so
-  the missing piece is one recipe-shaped conversion, not a system.
+  with no use. ServUO's own bridge is `IAxe`, not a double click: an axe swung at
+  a `BaseLog` calls `TryCreateBoards`, gated on Lumberjacking — 0 for plain wood,
+  65 oak, 80 ash, 95 yew, 100 for heartwood, bloodwood and frostwood
+  (`Scripts/Items/Resource/Log.cs`) — and pays boards of the log's own resource.
+  So the missing piece is one recipe-shaped conversion, not a system.
 
   **Now checked rather than remembered.** `openshard_world::economy` builds the
   whole production graph — harvest tables, vendor shelves, loot tables, crop
@@ -94,8 +96,23 @@ started.
   material axis — and runs reachability from the sources. `cargo run -p
   openshard-world --bin economy` prints it; a `#[test]` beside it pins today's
   holes both ways, so a new one is a red test and closing one is a red test
-  until its row is deleted. The board gap is 1,213 stalled recipe rows in that
-  report.
+  until its row is deleted.
+
+  **What the board gap actually costs, counted rather than estimated.** The
+  report's 1,213 stalled steps are not all the boards': 780 of them name a board
+  and nothing else, 108 name a board and an art, 197 name only art, and 128 are
+  the horned and barbed leather below. So the bridge alone frees 780 steps and
+  unblocks 888 in total, evenly split at 260 per special wood — plain wood is
+  already reachable off the vendor's shelf, which is why this cost stayed
+  invisible. By trade the stall is overwhelmingly one trade's: 876 Carpentry,
+  129 Tinkering, 126 Tailoring, 33 Cooking, 30 Fletching, 9 Blacksmith,
+  7 Alchemy.
+
+  One decision the bridge forces, worth settling before it is written:
+  `known_gaps()` is one list for both eras today. After the bridge the six
+  special boards stay unreachable before Mondain's Legacy — no tree gives those
+  logs — so the list has to split by era, or the pre-ML assertion goes red for
+  the right reason.
 - **The audit found five more holes, and only two of them were written down.**
   Everything below is `--bin economy` output, ranked by how much of the
   catalogue it costs:
@@ -105,11 +122,26 @@ started.
     one is unbuildable. The largest single group in the report, and the one that
     most wants a decision rather than an implementation: a quest chain, a loot
     line, or the rows deleted as unshippable.
-  - **The cooking chain never starts.** No field grows wheat (`0x1EBD`), so
-    flour (`0x103A`), dough (`0x103D`) and everything behind them are out of
-    reach. The recipes already declare a `Needs { mill: true }` that nothing
-    fills. `crops.json` grows cotton and only cotton, which is upstream's own
-    content — a wheat field is data, not a system.
+  - **The cooking chain never starts**, and it is short three roots rather than
+    the dozen arts the report lists. Most of those arts are cascade: dough
+    (`0x103D`), `0x103F`, `0x1042`, `0x1044` and `0x1083` all have recipes in
+    `cooking.json` (two, three, six, one and two rows), and they are dead only
+    because their inputs are. The roots are three.
+
+    First, no field grows wheat (`0x1EBD`): `CropKind`
+    (`crates/server/state/src/components.rs`) has exactly one variant, `Cotton`,
+    which is upstream's own content — a wheat field is data, not a system. The
+    recipes also declare a `Needs { mill: true }` that nothing fills.
+
+    Second, and not previously written down: the flour sack is never opened.
+    `cooking.json`'s first row mills wheat into `0x1039`, the **closed** sack,
+    while all four of its consumers spend `0x103A`, the **open** one. Upstream
+    opens it on double click. That is the same shape as the log bridge — a
+    conversion between two arts of one item — so it belongs beside it in
+    `CONVERSIONS`, and wheat alone would not close the chain without it.
+
+    Third, a pitcher of water (`0x1F9D`) is spent by the dough row and no vendor
+    stocks it and nothing fills it.
   - **Fish are caught and eaten by nothing.** `harvest::FISHES` pays `0x09CC`
     and no cooking row consumes it: upstream cuts steaks off a fish with a
     knife, an item action beside `items::cut` that does not exist here.

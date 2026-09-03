@@ -263,11 +263,14 @@ pub struct Conversion {
 /// The hand-written bridges, and the whole of them.
 ///
 /// **The absence of a wood row here is the finding this module was written to
-/// state.** ServUO bridges lumberjacking to carpentry in `BaseLog.OnDoubleClick`
-/// — a Lumberjacking-gated craft turning logs into boards of the log's own
-/// resource — and this engine has no counterpart, so seven grades of log are paid
-/// out with nothing that eats them and seven grades of board are spent by
-/// recipes with nothing that makes them. See `docs/roadmap/backlog/gameplay.md`.
+/// state.** ServUO bridges lumberjacking to carpentry through `IAxe` rather than
+/// a double click: an axe swung at a `BaseLog` calls `TryCreateBoards`, which
+/// gates on Lumberjacking — 0 for plain wood, 65 oak, 80 ash, 95 yew, 100 for
+/// heartwood, bloodwood and frostwood (`Scripts/Items/Resource/Log.cs`) — and
+/// pays boards of the log's own resource. This engine has no counterpart, so
+/// seven grades of log are paid out with nothing that eats them and seven grades
+/// of board are spent by recipes with nothing that makes them. See
+/// `docs/roadmap/backlog/gameplay.md`.
 pub const CONVERSIONS: &[Conversion] = &[
     // A miner is paid in ore and every smithing row eats ingots.
     Conversion {
