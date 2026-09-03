@@ -135,6 +135,7 @@ use crate::components::{
     HearsGhosts,
     Hidden,
     Hitpoints,
+    House,
     HouseDesign,
     InRegion,
     ItemAffix,
@@ -3493,13 +3494,16 @@ impl WorldState {
             .map(|(id, _)| id)
             .filter(|id| *id != entity)
             .collect();
-        // A custom house is one anchor item on the sector grid, but its visible
-        // design can extend well away from that anchor. Its live doors are
-        // indexed at their own cells, so treating only the anchor as visible
-        // made a tower vanish while its two doors remained in the world. Keep
-        // the parent on screen whenever any part of its drawn design reaches
-        // the player's view square.
-        neighbours.extend(self.designed_houses_near(centre, facet));
+        // A house is one anchor item on the sector grid, but its visible shape
+        // can extend well away from that anchor — a classic multi's own
+        // footprint, same as a custom design's. Its live doors are indexed at
+        // their own cells, so treating only the anchor as visible made a
+        // tower vanish (and, walked up to from the far side, flicker in and
+        // out as the anchor's own distance crossed the view boundary while
+        // the door stood well inside it) with its two doors remaining in the
+        // world throughout. Keep the parent on screen whenever any part of
+        // its drawn shape reaches the player's view square.
+        neighbours.extend(self.houses_near(centre, facet));
         neighbours.remove(&entity);
 
         // A client rebuilds a custom multi when it receives its D8 design
@@ -3545,17 +3549,27 @@ impl WorldState {
         self.broadcast_move(entity);
     }
 
-    /// Designed houses whose drawn rectangle reaches the ordinary sight square.
+    /// Houses whose drawn rectangle reaches the ordinary sight square.
     ///
     /// The sector index deliberately files one item at one point; adding every
     /// component of a several-thousand-piece house to it would turn a sight
-    /// query into decoration-scale work. The few custom houses instead pay one
-    /// rectangle check when a player moves.
-    fn designed_houses_near(&self, centre: Point, facet: Facet) -> HashSet<EntityId> {
+    /// query into decoration-scale work. Every house instead pays one
+    /// rectangle check when a player moves, its shape read from wherever a
+    /// house's shape is read from everywhere else: the design it is under, or
+    /// — the common case, a classic house that was never customised — the
+    /// shard's fixed multi table. See [`House`]'s own doc for why that shape
+    /// does not live on the component.
+    fn houses_near(&self, centre: Point, facet: Facet) -> HashSet<EntityId> {
         self.registry
-            .query2::<Position, HouseDesign>()
-            .filter(|(house, position, design)| {
-                self.facet_of(*house) == facet && design_reaches_view(centre, position.0, &design.components)
+            .query2::<Position, House>()
+            .filter(|(house, position, data)| {
+                self.facet_of(*house) == facet && {
+                    let components = match self.registry.get::<HouseDesign>(*house) {
+                        Some(design) => design.components.as_slice(),
+                        None => self.multis.components(data.multi.0),
+                    };
+                    design_reaches_view(centre, position.0, components)
+                }
             })
             .map(|(house, _, _)| house)
             .collect()
@@ -5059,6 +5073,47 @@ mod tests {
         assert!(
             !design_reaches_view(Point::new(99, 100, 0), origin, &design),
             "one tile beyond the wall's sight boundary must still be forgotten"
+        );
+    }
+
+    #[test]
+    fn a_classic_house_stays_visible_when_its_shape_reaches_the_view() {
+        // Same geometry as the custom-house case above: an anchor twenty
+        // tiles out with one drawn piece reaching two tiles back into the
+        // eighteen-tile view. The only difference is that this house was
+        // never customised, so `houses_near` has to fall back to the shard's
+        // fixed multi table instead of reading a `HouseDesign`.
+        let mut state = a_shard();
+        let foundation = MultiId(0x13EC);
+        let piece = Component {
+            graphic: Graphic(0x0001),
+            dx:      -2,
+            dy:      0,
+            dz:      0,
+            flags:   1,
+        };
+        state.multis = openshard_uofiles::multi::Multis::of([Multi::new(foundation.0, vec![piece])]);
+        let (_, owner) = state.registry.spawn_with_serial(SerialKind::Mobile).unwrap();
+        let (house, _) = state.registry.spawn_with_serial(SerialKind::Item).unwrap();
+        state.registry.insert(
+            house,
+            crate::components::House {
+                multi: foundation,
+                owner,
+                co_owners: std::collections::BTreeSet::new(),
+                friends: std::collections::BTreeSet::new(),
+                bans: std::collections::BTreeSet::new(),
+                age: 0,
+                lockdowns: 0,
+            },
+        );
+        state.registry.insert(house, Position(Point::new(120, 100, 0)));
+
+        let seen = state.houses_near(Point::new(100, 100, 0), Facet(0));
+
+        assert!(
+            seen.contains(&house),
+            "the classic house's own far wall must keep it on screen, the same as a custom design's would"
         );
     }
 
