@@ -208,18 +208,22 @@ the same audited projection with none of it asserted. It is the same
 missing-CI-server shape as [`server/`](../server/README.md) row 5 and is worth
 doing in that session.
 
-**12. A vendor's display art is not the item, and our shelves cannot tell.** A
-`GenericBuyInfo` in ServUO carries a picture for the shop window and constructs
-the *item* separately; `townsfolk.json` has one graphic per line and hands over
-whatever it says. Two shelves were caught by the inscription slice — the mage and
-the real-estate broker sold a blank scroll drawn as `0x0E34` while `BlankScroll`
-is `0x0EF3`, so the scrolls a scribe buys where scribes shop could not be written
-on — and were fixed one line each. **Nobody has swept the rest.** The converter
-that built the file read the display art throughout, so any shelf line whose
-ServUO buy-info overrides the art is the same defect waiting for a consumer: it
-shows up only when something *else* asks what the item is, which is why this one
-survived until a recipe wanted it. The sweep is a comparison against ServUO's
-`SB*.cs` constructors, not a re-read of the art.
+**12. The display-art sweep is done once, by hand, and cannot be redone by the
+tree.** All 1,082 `GenericBuyInfo` rows were compared against their type's
+constructor, its `[FlipableAttribute]` and `tiledata`'s own name for the tile:
+fourteen shelf lines carried the shop window's picture instead of the item, and
+they are fixed — the helms that had no armour rating, the bowl of carrots sold as
+corn, the four "uncut cloths" that were folded-cloth decor. Thirteen lines went
+away rather than change, because a shelf cannot hold two lines with one
+`(graphic, hue)` — `restock` matches on that pair and reaches only the first —
+and `build.rs` now refuses such a file. What is *not* solved is repeatability:
+ServUO is not in the tree, so nothing here can re-run the comparison against a
+newer upstream. The procedure is written down in
+[`evidence/2026-09-03-the-vendor-display-art-sweep.md`](evidence/2026-09-03-the-vendor-display-art-sweep.md);
+re-running it is a hand pass against a checkout. Only weapons and armour were
+also checked the other way — that a shipped art is one our tables can read — so
+food, containers and tools have had no such pass, and that one wants row 1's
+catalogue rather than another sweep.
 
 **13. Smaller, and each is written where it lives.** `environment::is_mill`
 lists `0x1295` and `0x129F`, which are almost certainly ServUO's own misprints
@@ -230,7 +234,11 @@ of the port. `MAX_CRAFT_RESOURCE_LINES` is written on both sides of codegen, in
 either is one measured budget change. `LightYarn` and `LightYarnUnraveled` have
 no producer here or upstream — a wheel makes dark yarn whichever wool went on —
 and both are vendor stock, so nothing is broken; it is noted so a later pass does
-not read it as a gap this engine opened.
+not read it as a gap this engine opened. **A weapon is written down twice**, in
+`state::weapon`'s table and in `protocol::items::is_classic_weapon`, because the
+client needs the second one to draw a paperdoll it will not be refused; the two
+are held together by a test that walks all 65,536 graphics, which is what caught
+the display-art sweep's three new arts the moment only one side had them.
 
 ## The documents
 
@@ -272,6 +280,12 @@ not read it as a gap this engine opened.
 - [`evidence/2026-09-03-the-chains-head.md`](evidence/2026-09-03-the-chains-head.md)
   — a crop field as a spawn region for items, why none of it is saved, and the
   reach check that refuses every living thing.
+- [`evidence/2026-09-03-the-inscription-trade.md`](evidence/2026-09-03-the-inscription-trade.md)
+  — the eighth trade, the two mechanisms no other trade has, and the scroll
+  rotation that had been teaching the wrong spell.
+- [`evidence/2026-09-03-the-vendor-display-art-sweep.md`](evidence/2026-09-03-the-vendor-display-art-sweep.md)
+  — the four oracles that tell a borrowed shop-window picture from a second
+  facing, the fourteen lines that were the former, and why thirteen went away.
 
 **Plans** — what is not built lives outside `docs/`:
 

@@ -42,6 +42,7 @@ pub const fn is_classic_weapon(graphic: Graphic) -> bool {
     matches!(
         graphic.0,
         0x0DF0
+            | 0x0DF1
             | 0x0E81
             | 0x0E86
             | 0x0E87
@@ -49,6 +50,7 @@ pub const fn is_classic_weapon(graphic: Graphic) -> bool {
             | 0x0EC3
             | 0x0EC4
             | 0x0F43
+            | 0x0F44
             | 0x0F45
             | 0x0F47
             | 0x0F49
@@ -64,6 +66,7 @@ pub const fn is_classic_weapon(graphic: Graphic) -> bool {
             | 0x13B2
             | 0x13B4
             | 0x13B6
+            | 0x13B8
             | 0x13B9
             | 0x13F6
             | 0x13F8

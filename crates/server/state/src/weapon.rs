@@ -317,6 +317,16 @@ pub const fn weapon_layer(weapon: &WeaponData, tiledata_layer: Layer) -> Layer {
 // Columns after the AoS block: `ml` ML-speed (hundredths of a second), `miss` the
 // weapon-class miss sound, `axe` the Lumberjacking flag. A trailing `.hands` is set
 // only on the six rows whose class overrides tiledata's layer byte.
+//
+// A row commented "its other facing" is the second graphic of the preceding row's
+// `[FlipableAttribute]` — one weapon the client draws two ways, and therefore two
+// arts this table has to answer for. The vendors sell both: `SBWeaponSmith` stocks
+// the hatchet at `0xF44` and three shelves stock the black staff at `0xDF1`, so a
+// table holding only the constructor's graphic hands a player a stick that deals no
+// damage. Kept as sibling rows rather than an alias column because the lookup is a
+// linear scan over a graphic either way, and a second column would be a second place
+// for the numbers to disagree. See `armor.rs`, which does the same for the bustier
+// sleeves.
 #[rustfmt::skip]
 static WEAPONS: &[WeaponData] = &[
     // ------------------------  skill kind   spd  min  max  aos speeds     ml  miss   axe
@@ -326,6 +336,7 @@ static WEAPONS: &[WeaponData] = &[
     with_item_kind(w(0x13B9, SWORDS, SLASHING, 30, 6, 34, 28, 15, 19, 375, SoundId(0x23A), false), ItemKindId(72)), // Viking sword
     with_item_kind(w(0x1441, SWORDS, SLASHING, 45, 6, 28, 44, 10, 14, 250, SoundId(0x23A), false), ItemKindId(67)), // Cutlass
     with_item_kind(w(0x13B6, SWORDS, SLASHING, 43, 4, 30, 37, 12, 16, 300, SoundId(0x23A), false), ItemKindId(71)), // Scimitar
+    w(0x13B8, SWORDS,  SLASHING, 35,  5, 33, 30, 15, 16, 350, SoundId(0x23A), false), // Thin longsword
     // -- Knives (BaseKnife; the dagger is the one that pierces) --------------------
     with_item_kind(w(0x0F52, SWORDS, PIERCING, 55, 3, 15, 56, 10, 12, 200, SoundId(0x238), false), ItemKindId(68)), // Dagger
     w(0x13F6, SWORDS,  SLASHING, 40,  2, 14, 49, 10, 13, 225, SoundId(0x238), false), // Butcher knife
@@ -333,6 +344,7 @@ static WEAPONS: &[WeaponData] = &[
     w(0x0EC4, SWORDS,  SLASHING, 40,  1, 10, 49, 10, 13, 225, SoundId(0x238), false), // Skinning knife
     // -- Axes (BaseAxe, Swords skill; the war axe bashes) -------------------------
     w(0x0F43, SWORDS,  AXE,      40,  2, 17, 41, 13, 16, 275, SoundId(0x23A), true ), // Hatchet
+    w(0x0F44, SWORDS,  AXE,      40,  2, 17, 41, 13, 16, 275, SoundId(0x23A), true ), //   its other facing
     with_item_kind(w(0x0F49, SWORDS, AXE, 37, 6, 33, 37, 14, 17, 300, SoundId(0x23A), true), ItemKindId(73)), // Axe
     with_item_kind(both_hands(w(0x0F47, SWORDS, AXE, 30, 6, 38, 31, 16, 19, 350, SoundId(0x23A), true)), ItemKindId(74)), // Battle axe
     with_item_kind(w(0x0F4B, SWORDS, AXE, 37, 5, 35, 33, 15, 18, 325, SoundId(0x23A), true), ItemKindId(75)), // Double axe
@@ -353,6 +365,7 @@ static WEAPONS: &[WeaponData] = &[
     with_item_kind(one_hand(w(0x143D, MACING, BASHING, 30, 6, 33, 28, 13, 17, 325, SoundId(0x239), false)), ItemKindId(85)), // Hammer pick
     w(0x0E89, MACING,  STAFF,    48,  8, 28, 48, 11, 14, 225, SoundId(0x239), false), // Quarter staff
     w(0x0DF0, MACING,  STAFF,    35,  8, 33, 39, 13, 16, 275, SoundId(0x239), false), // Black staff
+    w(0x0DF1, MACING,  STAFF,    35,  8, 33, 39, 13, 16, 275, SoundId(0x239), false), //   its other facing
     w(0x13F8, MACING,  STAFF,    33, 10, 30, 33, 15, 18, 325, SoundId(0x239), false), // Gnarled staff
     w(0x0E81, MACING,  STAFF,    30,  3, 12, 40, 13, 16, 275, SoundId(0x239), false), // Shepherd's crook
     // -- Fencing (BaseSpear, and the kryss) ---------------------------------------
@@ -484,6 +497,54 @@ mod tests {
         assert_eq!(sword.item_kind, Some(ItemKindId(4)));
         assert_eq!(sword.graphic, Graphic(0x0F61));
         assert!(weapon_data_for_kind(ItemKindId(5)).is_none()); // plate chest
+    }
+
+    /// Both facings of a flipped weapon fight the same, and the vendors sell the
+    /// second one: the weaponsmith's hatchet is `0x0F44` and three shelves stock the
+    /// black staff at `0x0DF1`. A table holding only the constructor's graphic
+    /// answers `None` for those and the buyer swings a stick.
+    ///
+    /// Compared field by field rather than by a pinned number, because the point is
+    /// that the pair agrees — a row edited on one side only is the failure this
+    /// guards, and pinning would let both drift together.
+    #[test]
+    fn a_flipped_weapon_fights_the_same_on_either_facing() {
+        for (canonical, flipped, what) in [(0x0F43, 0x0F44, "hatchet"), (0x0DF0, 0x0DF1, "black staff")] {
+            let a = weapon_data(Graphic(canonical)).expect(what);
+            let b = weapon_data(Graphic(flipped))
+                .unwrap_or_else(|| panic!("the {what}'s other facing is not a weapon"));
+            assert_eq!((a.skill, a.kind), (b.skill, b.kind), "{what}: class");
+            assert_eq!(
+                (a.old_speed, a.old_min, a.old_max),
+                (b.old_speed, b.old_min, b.old_max),
+                "{what}: pre-AoS damage"
+            );
+            assert_eq!(
+                (a.aos_speed, a.aos_min, a.aos_max, a.ml_speed),
+                (b.aos_speed, b.aos_min, b.aos_max, b.ml_speed),
+                "{what}: AoS damage"
+            );
+            assert_eq!(
+                (a.miss_sound, a.is_axe),
+                (b.miss_sound, b.is_axe),
+                "{what}: sound"
+            );
+        }
+    }
+
+    /// The blacksmith and the weaponsmith have always sold a thin longsword, and
+    /// nothing in this table described one — so it was a sword that dealt a fist's
+    /// damage. ServUO's `ThinLongsword : BaseSword`, `Old` block.
+    #[test]
+    fn the_thin_longsword_the_smiths_sell_is_a_sword() {
+        let sword = weapon_data(Graphic(0x13B8)).expect("thin longsword");
+        assert_eq!(
+            (sword.skill, sword.kind),
+            (WeaponSkill::Swords, WeaponKind::Slashing)
+        );
+        assert_eq!(sword.old_speed, 35);
+        assert_eq!((sword.old_min, sword.old_max), (5, 33));
+        assert_eq!((sword.aos_min, sword.aos_max), (15, 16));
     }
 
     #[test]

@@ -1128,12 +1128,28 @@ fn townsfolk(text: &str) -> String {
     for (name, lines) in &file.shelves {
         writeln!(out, "        // {name}").unwrap();
         out.push_str("        vec![\n");
+        // A restock finds the pile it is topping up by `(graphic, hue)` and takes the
+        // first match — `npc::vendor`'s `restock`. Two lines of one shelf sharing that
+        // pair are therefore not two listings: the second one's amount and price are
+        // never reached, and the shelf silently holds one pile instead of two. The
+        // pair is the shelf's key whether or not anybody wrote it down, so a colliding
+        // line is a line this engine cannot express and the file must not carry one.
+        // ServUO does carry them — its buy-info draws one item under two graphics —
+        // which is exactly how such a line gets here.
+        let mut seen: BTreeMap<(u16, u16), &str> = BTreeMap::new();
         for line in lines {
             assert!(
                 line.amount > 0,
                 "the {name} shelf stocks none of {:?}, so it is a listing nobody can buy",
                 line.name
             );
+            if let Some(first) = seen.insert((line.graphic, line.hue), line.name.as_str()) {
+                panic!(
+                    "the {name} shelf lists {:?} and {first:?} both as graphic {} hue {}, so a \
+                     restock cannot tell them apart and only the first is ever stocked",
+                    line.name, line.graphic, line.hue
+                );
+            }
             writeln!(
                 out,
                 "            openshard_npc::StockLine {{ graphic: openshard_protocol::wire::Graphic({}), \
