@@ -3,7 +3,7 @@
 Replacing `Graphic + Hue` as the server's item identity is built as a *model*
 and unfinished as a *catalogue*. The registry exists, the typed constructors
 exist, persistence round-trips semantic identity, and the data build refuses a
-recipe that names an unknown definition — but the catalogue covers 120 item
+recipe that names an unknown definition — but the catalogue covers 145 item
 definitions against a world drawn from thousands of client graphics, so every
 gameplay reader still carries a graphic-keyed adapter beside its kind-keyed one.
 
@@ -19,11 +19,21 @@ The steps are the unfinished halves of stages I2 through I5 in the record,
 They are listed by what unblocks the most, not by stage number: nothing after
 step 1 can be finished while the catalogue is a pilot.
 
-- [ ] **1. Grow the catalogue past the pilot.** `state/data/items.json` holds 120
-      definitions and `materials.json` 20, deliberately chosen to cover the
-      material-bearing chains — ore, ingot, board, leather, the blacksmith and
-      tailor suits, the tools of every trade, the addon deeds. Everything else a
-      player can hold is still an unregistered graphic on the compatibility seam.
+- [ ] **1. Grow the catalogue past the pilot.** `state/data/items.json` holds 145
+      definitions and `materials.json` 20. The four *role* tables are finished —
+      every art `weapon::WEAPONS`, `armor::ARMOR`, `craft::craft_tool` and
+      `harvest::tool_data` answer for is a registered kind, flipped facings
+      included, and a sweep per table says the art-keyed and kind-keyed halves
+      agree. What is left is everything with no role: 472 of the 599 shipped
+      recipes still name no kind, and they are decor, containers, food, scrolls
+      and expansion art rather than anything a gameplay reader asks about.
+
+      ```
+      alchemy      28 of 28 untyped     inscription  66 of 66
+      cooking      41 of 41             carpentry   128 of 144
+      tailoring   100 of 124            tinkering    64 of 94
+      blacksmithy  44 of 95             fletching     1 of 7
+      ```
 
       This is data work, not design work, and it is the step every one below is
       waiting for. The build already refuses a duplicate id, a raw-material kind
@@ -32,13 +42,25 @@ step 1 can be finished while the catalogue is a pilot.
       are append-only reservations: a removed definition keeps its id and a
       rename does not change it.
 
-- [ ] **2. Retire the graphic-keyed adapters, one reader at a time.** Fourteen
-      production call sites still read `weapon_data(graphic)`,
-      `armor_data(graphic)`, `tool_data(graphic)` or `craft_tool(graphic)`, and
-      almost every one of them is already written as `None => …(graphic)` behind
-      its kind-keyed sibling. That shape is what makes this step mechanical: a
-      reader whose items all carry an `ItemKind` loses its `None` arm, and the
-      day the last one does, the graphic-keyed function goes with it.
+      **A definition added moves live items; it does not only add a row.**
+      `spawn_item` installs the semantic identity of every art the registry
+      names, so the day a kind exists, every one of those items stops reaching
+      the graphic-keyed table and starts reaching the kind-keyed one. Write the
+      kind-keyed answer *before* the definition, or the definition is the bug —
+      [`docs/items/evidence/2026-09-03-the-role-tables-close.md`](../../../docs/items/evidence/2026-09-03-the-role-tables-close.md)
+      is what that cost the axes, which could not chop for as long as their
+      recipes had been typed.
+
+- [ ] **2. Retire the graphic-keyed adapters, one reader at a time.** The
+      production call sites read `weapon_data(graphic)`, `armor_data(graphic)`,
+      `tool_data(graphic)` or `craft_tool(graphic)`, and almost every one of them
+      is already written as `None => …(graphic)` behind its kind-keyed sibling.
+      That shape is what makes this step mechanical: a reader whose items all
+      carry an `ItemKind` loses its `None` arm, and the day the last one does,
+      the graphic-keyed function goes with it. Since step 1 closed the role
+      tables, the remaining `None` arms are reached only by a restored
+      pre-`ItemKind` row and by art no definition claims — so what gates this is
+      the rest of step 1, not these four tables.
 
       Measure with the command, not with this number:
 
@@ -48,8 +70,9 @@ step 1 can be finished while the catalogue is a pilot.
 
       The two hand-kept tool tables — `craft_tool` by graphic and
       `craft_tool_for_kind` by kind, in `state/src/craft.rs` — must agree until
-      the first goes; a `defs` test says so, and Cooking's tools are in only the
-      first because no cooking tool has a kind yet.
+      the first goes, and a sweep over all thirty-four tool arts now says so
+      rather than a spot check. The same pairing holds in `harvest.rs`,
+      `weapon.rs` and `armor.rs`, each with its own sweep.
 
 - [ ] **3. Give `SameAsInput` its input slot.** `MaterialRule::SameAsInput(u8)`
       is defined and deliberately unresolved: the build rejects a recipe that

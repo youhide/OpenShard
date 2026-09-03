@@ -47,7 +47,7 @@ fail runs after the point of no return.
 | Exact container membership: `ContainedItems` beside `Worn`, revalidated on read | ✅ shipping | — | [`design_transactions.md`](design_transactions.md) § `ContainedItems` |
 | Secure trade, doors and keys, mounts, chairs, ground decay | ✅ shipping | — | the crate's own module docs |
 | The item-trigger seam: the engine keeps no default behaviour for a bare item | ✅ shipping | — | [`evidence/2026-08-24-the-items-phase.md`](evidence/2026-08-24-the-items-phase.md) |
-| Semantic identity: an opaque `ItemKindId`/`MaterialId`, a generated registry, typed construction that writes `Drawn` from the projection | ✅ shipping | the catalogue is a pilot — row 1 | [`design_item_kind.md`](design_item_kind.md) |
+| Semantic identity: an opaque `ItemKindId`/`MaterialId`, a generated registry, typed construction that writes `Drawn` from the projection | ✅ shipping | the four role tables are closed; the rest of the catalogue is a pilot — row 1 | [`design_item_kind.md`](design_item_kind.md) |
 | Semantic identity across a save: records and both SQL stores carry it, restore falls back to the audited legacy mapping only for a pre-`ItemKind` row | ✅ shipping | only SQLite is asserted — row 11 | the same, and [`evidence/2026-08-30-the-item-kind-migration.md`](evidence/2026-08-30-the-item-kind-migration.md) |
 | Crafting: the trades of `crafting/data/craft_systems.json`, ServUO's odds, its gump encoding, a workshop scan that reads statics as well as items | ✅ shipping | the `Def*` tables not ported — row 8 | [`design_crafting.md`](design_crafting.md) |
 | Every gate checked twice, band failure distinguished from roll failure, the RNG staged so a refusal consumes no randomness | ✅ shipping | — | the same, § 3 |
@@ -96,7 +96,11 @@ go wrong here is a *table* being wrong rather than a function.
   twice, that the material axis substitutes into a line that actually wants it,
   that the metals are the same hues the ground yields, and that every craftable
   ranged weapon has combat rules. A table nobody opened would pass "no bad rows"
-  and fail these.
+  and fail these. Four sweeps in `state` ask the mirror question — for every art
+  in `WEAPONS`, `ARMOR`, `craft_tool` and `tool_data`, the registry must name a
+  kind whose row says the same thing — so a table keyed by art and its twin keyed
+  by identity cannot drift apart, which is the one way an item behaves
+  differently depending on where it came from.
 - **Two chains are pinned at the joint.** Every hide grade must be a leather
   grade, or the cut either panics or silently downgrades; the woolly and shorn
   sheep bodies must differ, or a sheep is an infinite fleece; the loom's four
@@ -122,15 +126,27 @@ it.
 ## What is open, ranked
 
 **1. 🚩 The identity catalogue is a pilot, and every gameplay reader still
-carries its graphic-keyed twin.** `state/data/items.json` holds 120 definitions
-and `materials.json` 20 — deliberately the material-bearing chains and the tools
-of every trade — while the world is drawn from thousands of client graphics.
-Fourteen production call sites still read `weapon_data(graphic)`,
+carries its graphic-keyed twin.** `state/data/items.json` holds 145 definitions
+and `materials.json` 20, while the world is drawn from thousands of client
+graphics; 472 of the 599 shipped recipes still name no kind, almost all of them
+decor, containers, food, scrolls and expansion art. What is *no longer* a pilot
+is the part with a gameplay role: every art the weapon, armour, craft-tool and
+harvest-tool tables answer for is a registered kind, four whole-table sweeps say
+the two halves agree, and the flipped facings are named beside their canonical
+art. Production call sites still read `weapon_data(graphic)`,
 `armor_data(graphic)`, `tool_data(graphic)` or `craft_tool(graphic)`, almost all
 as the `None` arm behind a kind-keyed sibling. That shape is the good news: the
 adapters retire one reader at a time. The order is
 [`plans/items/item_identity/PLAN.md`](../../plans/items/item_identity/PLAN.md).
 Measure with the grep, not with this paragraph.
+
+Growing this catalogue is not additive, which is the thing to know before adding
+the next row: `spawn_item` installs the semantic identity of every art the
+registry names, so a definition added *moves* live items off the graphic path
+onto the kind path. A gap in the kind-keyed twin becomes a live defect the day
+its definition lands —
+[`evidence/2026-09-03-the-role-tables-close.md`](evidence/2026-09-03-the-role-tables-close.md)
+is what that cost the axes.
 
 **2. 🚩 `in_reach` answers "too far away" for every living thing, whatever the
 distance.** It resolves an *item's* location and a mobile has none. That is
@@ -197,10 +213,13 @@ left out of the cloth chain rather than folded into it.
 
 **10. Two hand-kept tool tables must agree, and nothing but a test says so.**
 `craft_tool` by graphic and `craft_tool_for_kind` by kind, in
-`state/src/craft.rs`. Cooking was added to the first only, which is correct today
-because no cooking tool has a kind yet, and the `defs` test would catch the day
-one does. The pair disappears with row 1, so this is a note for whoever adds the
-next trade rather than a defect to fix on its own.
+`state/src/craft.rs`, and the same pairing in `harvest.rs`, `weapon.rs` and
+`armor.rs`. What says so is now a sweep per table rather than a spot check —
+every art the graphic-keyed half answers for must resolve through the registry
+to a kind whose row says the same thing — and the two tool sweeps count the arts
+they checked, because their loop body is conditional. Each pair disappears with
+row 1, so this is a note for whoever adds the next trade rather than a defect to
+fix on its own.
 
 **11. Only SQLite is asserted across a save.** Both directions of the semantic
 identity round trip have fixtures; PostgreSQL and the snapshot path go through
@@ -239,6 +258,17 @@ not read it as a gap this engine opened. **A weapon is written down twice**, in
 client needs the second one to draw a paperdoll it will not be refused; the two
 are held together by a test that walks all 65,536 graphics, which is what caught
 the display-art sweep's three new arts the moment only one side had them.
+**`equip`'s typed branch asks a tag where its legacy branch asks the table**:
+`has_tag(kind, Tool)` stands in for `harvest::tool_data_for_kind(kind).is_some()`
+when deciding that a double-click should raise a harvest cursor instead of
+wearing the thing. The two agree today only because the overlap — an item that is
+both a weapon and a tool — is exactly the axes and the pickaxe, and the axes had
+to be given the `tool` tag when they were registered for that reason alone.
+Asking the table would need no tag. **A mapmaker's pen and a scribe's pen are one
+kind here**, because ServUO tells its two classes apart only by the craft system
+they open and this engine has no Cartography; the day it has one, `0x0FBF` needs
+a tell that art cannot give it, and `shared_art` is not that tell — it removes
+*both* kinds from the reverse lookup rather than choosing between them.
 
 ## The documents
 
@@ -286,6 +316,10 @@ the display-art sweep's three new arts the moment only one side had them.
 - [`evidence/2026-09-03-the-vendor-display-art-sweep.md`](evidence/2026-09-03-the-vendor-display-art-sweep.md)
   — the four oracles that tell a borrowed shop-window picture from a second
   facing, the fourteen lines that were the former, and why thirteen went away.
+- [`evidence/2026-09-03-the-role-tables-close.md`](evidence/2026-09-03-the-role-tables-close.md)
+  — the twenty-five definitions that finish the weapon, armour and tool tables,
+  why adding one moves live items rather than only adding a row, and the axes
+  that could not chop because of it.
 
 **Plans** — what is not built lives outside `docs/`:
 
