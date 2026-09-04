@@ -45,6 +45,10 @@
 //! reason that is **not** distance — a roof is ten tiles away and a hundred
 //! steps of stairs — so the corridor answers them however near they are, and
 //! the detour is what the player watches. See [`houses`].
+//!
+//! `--handover` is a third and asks a different kind of question: not what the
+//! router costs, but what it would cost to ask it **somewhere else**. See
+//! [`handover`], and `plans/world/pathfinding/PLAN.md`'s P3.
 
 use std::path::PathBuf;
 use std::time::{
@@ -108,6 +112,14 @@ struct Cli {
     /// Also read the detour over ground somebody has built on — see [`houses`].
     #[arg(long, default_value_t = false)]
     houses:    bool,
+    /// Also read what one query's ground costs to hand to another thread — see
+    /// [`handover`].
+    ///
+    /// Over the same building `--houses` uses, because the query being handed
+    /// over is that one: a click on a roof is what makes a client pay for a
+    /// corridor on the frame thread in the first place.
+    #[arg(long, default_value_t = false)]
+    handover:  bool,
     /// The distance-band reading over the bare facet: what this example is
     /// unless it is told otherwise.
     ///
@@ -327,6 +339,117 @@ fn origin_at(text: &str) -> Result<Point, String> {
     ))
 }
 
+/// One design laid live over the bare facet, and the places a body outside it
+/// would click on and stand at.
+///
+/// **The scene both building readings are taken over**, so that what
+/// [`houses`] measures about the route and what [`handover`] measures about
+/// carrying that route's ground to another thread are about one building rather
+/// than two spellings of a castle.
+struct Building {
+    design:  openshard_movement::design::Design,
+    /// Where the design's origin was laid.
+    at:      Point,
+    /// Everything the design put on the map: the live layer of a client whose
+    /// view has this one building in it.
+    overlay: Overlay,
+    /// The tiles it covers, so a body is never stood inside it.
+    covered: std::collections::HashSet<(u16, u16)>,
+    /// The middle of its footprint, which the rings are measured from.
+    centre:  Point,
+    /// How many tiles it covers, for the line each reading prints.
+    tiles:   usize,
+}
+
+impl Building {
+    /// Lay the design `--design` names, or the castle that ships with this
+    /// crate's tests.
+    fn lay(cli: &Cli, tiles: &openshard_tiles::TileData) -> Result<Self, Box<dyn std::error::Error>> {
+        let text = match &cli.design {
+            Some(path) => std::fs::read_to_string(path)?,
+            None => CASTLE_DESIGN.to_owned(),
+        };
+        let design = openshard_movement::design::Design::parse(&text)?;
+        let at = cli.design_at;
+        let mut overlay = Overlay::default();
+        design.lay(&mut overlay, tiles, at);
+
+        let footprint = design.footprint(at);
+        let covered: std::collections::HashSet<(u16, u16)> =
+            footprint.iter().map(|tile| (tile.x, tile.y)).collect();
+        let centre = {
+            let (x, y) = footprint.iter().fold((0_u64, 0_u64), |(x, y), tile| {
+                (x + u64::from(tile.x), y + u64::from(tile.y))
+            });
+            let count = footprint.len().max(1) as u64;
+            Point::new((x / count) as u16, (y / count) as u16, at.z)
+        };
+        Ok(Self {
+            design,
+            at,
+            overlay,
+            covered,
+            centre,
+            tiles: footprint.len(),
+        })
+    }
+
+    /// The places on it a cursor could hit and a body could stand on.
+    ///
+    /// The highest thing each tile draws, which is what a cursor hits, resolved
+    /// to a place to stand the way the client resolves it.
+    ///
+    /// **Filtered to places a body actually stands**, and only then spread over
+    /// what is left. A castle is mostly wall and roof edge, and a click that
+    /// resolves into masonry is a refusal every router agrees about — sampling
+    /// those measures the sampler. Striding the raw footprint is worse still:
+    /// the tiles come in rows, and every stride that shares a factor with the
+    /// row width picks one column of the building.
+    fn clicks(&self, live: &Footing<'_>) -> Vec<Point> {
+        let standing: Vec<Point> = self
+            .design
+            .tops(self.at)
+            .into_iter()
+            .map(|top| destination_place(live, self.centre, top))
+            .filter(|place| openshard_movement::can_step(live, *place, *place).is_some())
+            .collect();
+        let stride = (standing.len() / HOUSE_CLICKS).max(1);
+        let clicks: Vec<Point> = standing
+            .iter()
+            .copied()
+            .step_by(stride)
+            .take(HOUSE_CLICKS)
+            .collect();
+        println!(
+            "  design at ({}, {}, {}): {} components, {} tiles, {} live tiles, centre ({}, {}); {} of them stood on, {} clicks sampled",
+            self.at.x,
+            self.at.y,
+            self.at.z,
+            self.design.components().len(),
+            self.tiles,
+            self.overlay.len(),
+            self.centre.x,
+            self.centre.y,
+            standing.len(),
+            clicks.len(),
+        );
+        for click in &clicks {
+            println!("    click ({}, {}, {})", click.x, click.y, click.z);
+        }
+        clicks
+    }
+
+    /// Where a body could have been standing at Chebyshev `ring` from the
+    /// building's centre when it clicked on it — on the bare terrain, and never
+    /// inside the building itself.
+    fn starts(&self, terrain: &MapTerrain<'_>, ring: u32, width: u32, height: u32) -> Vec<Point> {
+        sample_ring(terrain, self.centre, ring, width, height)
+            .into_iter()
+            .filter(|start| !self.covered.contains(&(start.x, start.y)))
+            .collect()
+    }
+}
+
 /// What the corner rule costs **on ground somebody has built on** — the reading
 /// `plans/world/pathfinding/PLAN.md`'s P1 is gated on.
 ///
@@ -350,77 +473,19 @@ fn houses(
     width: u32,
     height: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let text = match &cli.design {
-        Some(path) => std::fs::read_to_string(path)?,
-        None => CASTLE_DESIGN.to_owned(),
-    };
-    let design = openshard_movement::design::Design::parse(&text)?;
-    let at = cli.design_at;
-    let mut overlay = Overlay::default();
-    design.lay(&mut overlay, tiles, at);
+    let building = Building::lay(cli, tiles)?;
     // The two grounds the client's own query reads: the live world a body walks
     // and opens doors in, and the bare map the graph was baked over. Handing
     // `find_long_path` the live layer as its guide would measure a graph nobody
     // has.
-    let live = Footing::new(Some(*terrain), &overlay, Doors::AllOpen);
+    let live = Footing::new(Some(*terrain), &building.overlay, Doors::AllOpen);
     let nothing_placed = Overlay::default();
     let guide = Footing::new(Some(*terrain), &nothing_placed, Doors::AsTheyStand);
 
-    let footprint = design.footprint(at);
-    let covered: std::collections::HashSet<(u16, u16)> =
-        footprint.iter().map(|tile| (tile.x, tile.y)).collect();
-    let centre = {
-        let (x, y) = footprint.iter().fold((0_u64, 0_u64), |(x, y), tile| {
-            (x + u64::from(tile.x), y + u64::from(tile.y))
-        });
-        let count = footprint.len().max(1) as u64;
-        Point::new((x / count) as u16, (y / count) as u16, at.z)
-    };
-    // The clicks: the highest thing each tile draws, which is what a cursor
-    // hits, resolved to a place to stand the way the client resolves it.
-    //
-    // **Filtered to places a body actually stands**, and only then spread over
-    // what is left. A castle is mostly wall and roof edge, and a click that
-    // resolves into masonry is a refusal every router agrees about — sampling
-    // those measures the sampler. Striding the raw footprint is worse still:
-    // the tiles come in rows, and every stride that shares a factor with the
-    // row width picks one column of the building.
-    let standing: Vec<Point> = design
-        .tops(at)
-        .into_iter()
-        .map(|top| destination_place(&live, centre, top))
-        .filter(|place| openshard_movement::can_step(&live, *place, *place).is_some())
-        .collect();
-    let stride = (standing.len() / HOUSE_CLICKS).max(1);
-    let clicks: Vec<Point> = standing
-        .iter()
-        .copied()
-        .step_by(stride)
-        .take(HOUSE_CLICKS)
-        .collect();
-    println!(
-        "  design at ({}, {}, {}): {} components, {} tiles, centre ({}, {}); {} of them stood on, {} clicks sampled",
-        at.x,
-        at.y,
-        at.z,
-        design.components().len(),
-        footprint.len(),
-        centre.x,
-        centre.y,
-        standing.len(),
-        clicks.len(),
-    );
-    for click in &clicks {
-        println!("    click ({}, {}, {})", click.x, click.y, click.z);
-    }
+    let clicks = building.clicks(&live);
 
     for ring in HOUSE_RINGS {
-        // Standing places on the bare terrain, outside the building: a tile the
-        // design covers is not somewhere a body was standing when it clicked.
-        let starts: Vec<Point> = sample_ring(terrain, centre, ring, width, height)
-            .into_iter()
-            .filter(|start| !covered.contains(&(start.x, start.y)))
-            .collect();
+        let starts = building.starts(terrain, ring, width, height);
         let mut readings = Vec::with_capacity(starts.len() * clicks.len());
         let mut bounded_answered = 0_usize;
         let mut too_near = 0_usize;
@@ -531,6 +596,286 @@ fn houses(
     Ok(())
 }
 
+/// How far past the two endpoints a guessed window reaches, in tiles.
+///
+/// One navigation region (`navigation.rs`'s private `REGION_SIZE`, 32), because
+/// that is the smallest guess with an argument behind it: a corridor's first
+/// move is out to a crossing of the region the body stands in, so a window
+/// narrower than a region cannot even hold the first hop.
+const WINDOW_PAD: u16 = 32;
+
+/// One query, and what its ground costs to carry.
+struct Handover {
+    from:   Point,
+    to:     Point,
+    /// The corridor query itself: what the carrying would ride with.
+    plan:   Duration,
+    /// Cloning the whole live layer — the ground handed over entire.
+    whole:  Duration,
+    /// Cutting the window around the two endpoints out of it.
+    window: Duration,
+    /// How many tiles that window had to be asked about.
+    looked: u64,
+    /// How many tiles of the live layer it kept.
+    kept:   usize,
+    /// Whether the route the corridor actually returned stayed inside the
+    /// window — `None` for a query the corridor refused.
+    inside: Option<bool>,
+}
+
+/// What one query's ground costs to hand to a thread that is not the one
+/// drawing — the measurement `plans/world/pathfinding/PLAN.md`'s P3 waits on.
+///
+/// # The question, and why it is not "how fast is a thread"
+///
+/// A plan is ~25 ms on the frame thread and a body takes a step every ~200 ms,
+/// so planning is a permanent fraction of the frame while anybody is walking.
+/// Moving it off that thread is obvious; what is *not* obvious is what the
+/// worker is allowed to read. The search reads two grounds — the **guide**,
+/// which is the bare facet and the coarse graph over it and never changes while
+/// a body walks, and the **live overlay**, which the client rebuilds whole
+/// every time the shard sends it a new picture of the ground.
+///
+/// So the only half that has to travel is the live one, and the plan named two
+/// ways of sending it: the whole thing, or a cut of it around the query. This
+/// measures both against the plan they would ride with.
+///
+/// # What the two numbers mean
+///
+/// - **whole** is `Overlay::clone` — O(what the shard has placed in view).
+/// - **window** is the cut: every tile in the box the two endpoints span,
+///   padded by [`WINDOW_PAD`], asked of the overlay and copied when it holds
+///   anything — O(the *area* the query might reach), which is a different
+///   variable and grows with the square of the distance rather than with the
+///   furniture.
+///
+/// And the cut has a soundness column beside its duration, because a window is
+/// a *guess* about where the answer will go: `inside` is whether the route the
+/// corridor really returned stayed in the box. A route that leaves it is a
+/// route planned over a hole — the live layer simply absent for the tiles it
+/// crossed — which is not a slower answer but a wrong one.
+///
+/// The crowd is not measured. It is a `Vec<Point>` of the mobiles in the view
+/// (`clutter::crowd`), six bytes each and tens of them; a clone of it is a
+/// memcpy that does not reach a microsecond, and nothing about the shape of
+/// this decision turns on it.
+fn handover(
+    cli: &Cli,
+    terrain: &MapTerrain<'_>,
+    tiles: &openshard_tiles::TileData,
+    graph: &NavigationGraph,
+    width: u32,
+    height: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let building = Building::lay(cli, tiles)?;
+    let live = Footing::new(Some(*terrain), &building.overlay, Doors::AllOpen);
+    let nothing_placed = Overlay::default();
+    let guide = Footing::new(Some(*terrain), &nothing_placed, Doors::AsTheyStand);
+    let clicks = building.clicks(&live);
+
+    for ring in HOUSE_RINGS {
+        let starts = building.starts(terrain, ring, width, height);
+        let mut readings = Vec::with_capacity(starts.len() * clicks.len());
+        for from in &starts {
+            for to in &clicks {
+                let distance = u32::from(to.x.abs_diff(from.x)).max(u32::from(to.y.abs_diff(from.y)));
+                // The same two gates `houses` applies, and for the same reason:
+                // a pair the bounded search answers never reaches the graph, and
+                // one the client refuses without asking never reaches it either.
+                // Neither is a query anybody would hand to a worker.
+                if search_path(&live, *from, *to, cli.budget, Weight::PLANNING).arrived {
+                    continue;
+                }
+                if distance <= COARSE_MIN_DISTANCE {
+                    continue;
+                }
+                let mut plan = Duration::MAX;
+                let mut route = None;
+                for _ in 0..cli.repeat.max(1) {
+                    let started = Instant::now();
+                    let answer =
+                        find_long_path(&guide, &live, graph, *from, *to, cli.budget, Weight::PLANNING);
+                    plan = plan.min(started.elapsed());
+                    route = Some(answer);
+                }
+                let route = route.expect("at least one repeat");
+
+                let mut whole = Duration::MAX;
+                for _ in 0..cli.repeat.max(1) {
+                    let started = Instant::now();
+                    let copy = building.overlay.clone();
+                    whole = whole.min(started.elapsed());
+                    // Kept until the clock has been read, so the optimiser
+                    // cannot decide the clone was never needed.
+                    drop(copy);
+                }
+
+                let box_ = window_of(*from, *to, width, height);
+                let mut window = Duration::MAX;
+                let mut kept = 0;
+                for _ in 0..cli.repeat.max(1) {
+                    let started = Instant::now();
+                    let cut = cut_window(&building.overlay, box_);
+                    window = window.min(started.elapsed());
+                    kept = cut.len();
+                }
+
+                let inside = route
+                    .as_ref()
+                    .map(|steps| walked_inside(&live, *from, steps, box_));
+                readings.push(Handover {
+                    from: *from,
+                    to: *to,
+                    plan,
+                    whole,
+                    window,
+                    looked: box_.tiles(),
+                    kept,
+                    inside,
+                });
+            }
+        }
+        if readings.is_empty() {
+            println!("  ring {ring}: no pair reached the graph");
+            continue;
+        }
+        let escaped = readings
+            .iter()
+            .filter(|reading| reading.inside == Some(false))
+            .count();
+        let routed = readings.iter().filter(|r| r.inside.is_some()).count();
+        let looked: u64 = readings.iter().map(|reading| reading.looked).sum();
+        println!(
+            "  ring {ring}: pairs={} window={}x{} mean_tiles_looked_at={} kept={}",
+            readings.len(),
+            window_of(readings[0].from, readings[0].to, width, height).wide(),
+            window_of(readings[0].from, readings[0].to, width, height).high(),
+            looked / readings.len() as u64,
+            readings[0].kept,
+        );
+        spread(
+            "plan",
+            readings.iter().map(|reading| reading.plan).collect(),
+            routed,
+            readings.len(),
+        );
+        spread(
+            "whole",
+            readings.iter().map(|reading| reading.whole).collect(),
+            readings.len(),
+            readings.len(),
+        );
+        spread(
+            "window",
+            readings.iter().map(|reading| reading.window).collect(),
+            readings.len(),
+            readings.len(),
+        );
+        // The share of the plan each way of carrying the ground would add, at
+        // the medians — the number the decision is actually taken on.
+        let share = |pick: fn(&Handover) -> Duration| {
+            let mut costs: Vec<Duration> = readings.iter().map(pick).collect();
+            let mut plans: Vec<Duration> = readings.iter().map(|reading| reading.plan).collect();
+            costs.sort_unstable();
+            plans.sort_unstable();
+            100.0 * ms(percentile(&costs, 50)) / ms(percentile(&plans, 50))
+        };
+        println!(
+            "    share   whole={:.2}% of the plan, window={:.2}%; routes leaving the window: {escaped}/{routed}",
+            share(|reading| reading.whole),
+            share(|reading| reading.window),
+        );
+    }
+    Ok(())
+}
+
+/// A rectangle of tiles, as the window cut works over one.
+#[derive(Clone, Copy)]
+struct Window {
+    west:  u16,
+    north: u16,
+    east:  u16,
+    south: u16,
+}
+
+impl Window {
+    const fn wide(self) -> u32 {
+        (self.east - self.west) as u32 + 1
+    }
+
+    const fn high(self) -> u32 {
+        (self.south - self.north) as u32 + 1
+    }
+
+    const fn tiles(self) -> u64 {
+        self.wide() as u64 * self.high() as u64
+    }
+
+    const fn holds(self, point: Point) -> bool {
+        point.x >= self.west && point.x <= self.east && point.y >= self.north && point.y <= self.south
+    }
+}
+
+/// The box a cut would have to guess at for this query: the two endpoints,
+/// padded by [`WINDOW_PAD`] and clamped to the facet.
+fn window_of(from: Point, to: Point, width: u32, height: u32) -> Window {
+    let last_x = (width.saturating_sub(1)).min(u32::from(u16::MAX)) as u16;
+    let last_y = (height.saturating_sub(1)).min(u32::from(u16::MAX)) as u16;
+    Window {
+        west:  from.x.min(to.x).saturating_sub(WINDOW_PAD),
+        north: from.y.min(to.y).saturating_sub(WINDOW_PAD),
+        east:  from.x.max(to.x).saturating_add(WINDOW_PAD).min(last_x),
+        south: from.y.max(to.y).saturating_add(WINDOW_PAD).min(last_y),
+    }
+}
+
+/// Everything the live layer has inside `window`, as a layer of its own.
+///
+/// The overlay hands out one tile at a time and nothing else — it is a map from
+/// tile to covers with no ordering and no iterator, deliberately, because every
+/// caller of it is a step asking about a tile it has in hand. So a cut asks it
+/// once per tile of the window, which is what makes this O(area) rather than
+/// O(furniture).
+fn cut_window(live: &Overlay, window: Window) -> Overlay {
+    let mut cut = Overlay::default();
+    for y in window.north..=window.south {
+        for x in window.west..=window.east {
+            let tile = Tile::new(x, y);
+            let covers = live.at(tile);
+            if !covers.is_empty() {
+                cut.set(tile, covers.to_vec());
+            }
+        }
+    }
+    cut
+}
+
+/// Whether every place the route stands on is inside `window`.
+///
+/// Walked over the same ground the plan was made against, so what is tested is
+/// where the body would really go rather than where the directions look like
+/// they lead.
+fn walked_inside(
+    live: &Footing<'_>,
+    from: Point,
+    steps: &[openshard_protocol::direction::Direction],
+    window: Window,
+) -> bool {
+    let mut at = from;
+    for &direction in steps {
+        let Some(next) = openshard_movement::step_allowed(live, at, direction) else {
+            // The plan does not walk on this ground any more, which is a
+            // different finding and not this one's to report.
+            return true;
+        };
+        at = next;
+        if !window.holds(at) {
+            return false;
+        }
+    }
+    true
+}
+
 fn synthetic() {
     const WIDTH: u16 = 1024;
     const HEIGHT: u16 = 1024;
@@ -605,6 +950,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cli.houses {
         println!("houses: what the corner rule costs a click on a building");
         houses(&cli, &terrain, &ground.tiles, &graph, width, height)?;
+    }
+    if cli.handover {
+        println!("handover: what one query's ground costs to carry off the frame thread");
+        handover(&cli, &terrain, &ground.tiles, &graph, width, height)?;
     }
     if !cli.rings {
         return Ok(());

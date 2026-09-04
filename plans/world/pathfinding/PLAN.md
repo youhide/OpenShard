@@ -329,9 +329,75 @@ last plan while the next is asked for (that is what the plan cache is), and an
 answer that arrives a frame late is a plan from a tile the body has just left —
 the case every replan already handles.
 
+### The measurement, and it inverted the question
+
+`coarse_bench --handover` lays the same castle the rest of this plan is about,
+clicks it from the same four rings, and — beside the corridor query each pair
+actually costs — times the two ways of carrying that query's ground:
+
+| a body standing | pairs | the plan p50 | the whole live layer | a cut window | tiles the window looked at |
+|---|---|---|---|---|---|
+| 16 tiles out | 48 | 23.5 ms | **0.003 ms** | 0.015 ms | 6,061 |
+| 24 tiles out | 48 | 23.5 ms | 0.004 ms | 0.016 ms | 7,016 |
+| 32 tiles out | 48 | 23.9 ms | 0.004 ms | 0.017 ms | 8,034 |
+| 48 tiles out | 48 | 23.9 ms | 0.004 ms | 0.018 ms | 10,264 |
+
+```sh
+cargo run --release -p openshard-movement --example coarse_bench -- \
+  --client "$OPENSHARD_CLIENT" --handover --rings false --repeat 5
+```
+
+**Option 2 is refuted by its own number.** A castle in view is 311 tiles of
+live layer, and copying all of it is **four microseconds — 0.02% of the plan it
+would ride with**. The cut is four times dearer and gets dearer with distance,
+because the two are functions of different variables: the overlay is O(what the
+shard has placed in view) and a window is O(the area the query might reach).
+The overlay hands out one tile at a time and has no iterator, deliberately — every
+other caller of it is a step asking about a tile it already has — so a cut pays
+a lookup per tile of the box whether or not anything is there. Sixteen tiles out
+it asked about six thousand tiles to keep three hundred.
+
+And the cut has to be *sound* where the copy does not: a window is a guess about
+where the answer will go, and a route that leaves it is planned over a hole
+rather than answered slowly. None of the 192 routes left a box padded by one
+region, which is not the same as none ever would — it is one castle, and the
+padding was chosen to hold the first hop. A guess that must be checked, for four
+times the price of not guessing, is not a design.
+
+**Option 1's message vocabulary is empty.** `clutter::fill` clears the client's
+overlay and writes every tile in the view afresh on each fold — this end holds
+no identities to address a finer edit to. So "the network side pushes edits" has
+no edits to push: a long-lived worker fed changes is a long-lived worker handed
+a whole new overlay, which is the same four microseconds at a different cadence
+plus a mirror to keep in step.
+
+### The decision
+
+**The guide is shared and the live half is copied per query.**
+
+- **Shared, by `Arc`, and named as the exception it is.** The bare map
+  (117.4 MiB of land, 29.5 MiB of statics), the span bake over it, the tile
+  table and the coarse graph (10.2 MB) are what a query reads and what nothing
+  changes while a body walks. Nothing per-query can copy them and nothing can
+  move them, because the frame thread draws the same map every frame. This is
+  the case `docs/style.md`'s `Arc` rule leaves open — a real second thread, and
+  a structure large enough that a copy is absurd — and it is written down here
+  so that it is a decision rather than a habit.
+- **Copied whole, per query.** The live overlay and the crowd, at four
+  microseconds and a memcpy of tens of points. No mirror, no cut, no window to
+  keep sound.
+- **What changes the shared half is rare and is a rendezvous.** A facet
+  arriving, a publish's chunks, a late tile table. Each is already dearer than a
+  plan, so the frame thread waits for the worker to be idle before it writes —
+  bounded by one query, at a named seam, rather than a lock nobody can see in a
+  signature.
+- **Option 3 stays refused**, and now for a second reason: with the guide shared
+  read-only and the live half copied, there is nothing left for a lock to
+  protect.
+
 **Done when.** A decision is written down with the measurement behind it, and
 the walk path's per-step planning is off the frame thread with the frame time to
-show for it.
+show for it. — The decision and its measurement are above.
 
 ## P4 — The journal says `coarse: false` about a session that had one — ✅ done
 
