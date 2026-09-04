@@ -280,6 +280,17 @@ reads and `say_refusal` speaks. A tile nobody clicked on can set the sentence a
 player is told about the order they did give. It is the same shape as this
 finding and not the same bug, and nothing above moves it.
 
+And the structure that let one caller of four differ at all: `steer::Readings`
+is assembled by hand at each of them — `event_loop.rs`'s `advance_walk` and its
+held-arrow press, `ui_command.rs`'s `walk_toward_cursor`, and
+`picking_query.rs`'s `route_shown` — four copies of the same three fields, of
+which three read `App::walking_doors` and the fourth did not. One constructor
+taking the body's state rather than a `Doors` would make the divergence
+unspellable instead of untrue; what stands in the way is the borrow it wants,
+since the ground borrows `resources` and the crowd while the walk borrows
+`steer` mutably beside it — a free function over the fields rather than a method
+on `App`, and worth doing when something else opens that file.
+
 **Done when.** One order has one answer, and a test asks the same click twice in
 the two readings and gets one verdict. — Both, in
 [`steer.rs`](../../../crates/client/app/src/steer.rs)'s
