@@ -65,6 +65,7 @@ every answer taken so far is a row in [`design_layers.md`](design_layers.md).
 | The radar: one raster serving both windows, a view picking its own level, an evicting cache, the floor swept once | ✅ shipping | section 10 below — the page array at 2× HiDPI, the `floor`/`round` level rule, and a carry that is O(everything ready) | [`design_radar.md`](design_radar.md) |
 | Interiors: the building index, the floor a person is on, a sealed room as a black area | 🟡 in the tree, unrecorded | `Buildings::bake`, `InteriorFrame` and `FloorView` exist in `client/render`; **the document carries no status marks at all**, and R3 (walls at knee height) has nothing in the tree | [`design_interiors.md`](design_interiors.md) |
 | The map editor's first usable cut | 🟡 partial | continuous drag strokes, art-composited static preview, smooth, stamps, rebase | [`plans/world/map_editor/PLAN.md`](../../plans/world/map_editor/PLAN.md) |
+| A corridor sends a body where the graph lets it cross, and the crossings are corners | ⬜ | P1 to P4: the corner-only crossing, one click with two answers, planning off the frame thread, and the journal's own `coarse` flag | [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md) |
 | Every boot replays the whole log | ⬜ | S4 | [`plans/world/what_a_change_costs/PLAN.md`](../../plans/world/what_a_change_costs/PLAN.md) |
 | `revert` is a word no operator can type | ⬜ | S5 | the same |
 | `tiledata.mul` and the multis are still the player's install | ⬜ | S6 — a base set replaces `map` and `statics` and neither of those | the same |
@@ -422,6 +423,14 @@ one. The latency it adds is already survivable: a walk holds its last plan while
 the next is asked for, which is what the plan cache is, and an answer that
 arrives a frame late is a plan from a tile the body has just left, which is the
 case refinement already handles on every replan.
+
+Findings 25 to 28 are one track and are held as one:
+[`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md) is
+P1 to P4 — the corner-only crossing that causes 25, the two readings of one
+click in 26, the frame thread in 28, and 27 alongside them because a lying
+instrument is not a thing to leave lying about. The order there is argued;
+finding 22 stays where it is, because what it waits on is the client's memory of
+what it has been shown rather than anything about a search.
 
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change
