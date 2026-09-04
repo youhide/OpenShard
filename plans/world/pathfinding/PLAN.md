@@ -72,8 +72,36 @@ is bounded by the spacing chosen rather than by half a region.
    wherever the local cost to cross jumps. Fewest nodes for the most information,
    and the only one that needs a measurement before it can even be written.
 
-**What must be measured before picking.** All three move the same four numbers,
-and nothing here should be chosen by preference:
+**The first of those measurements is in, and it argues against doing this
+now.** `coarse_bench` grew the reading the defect actually is — the corridor's
+route against the shortest one the ground holds, `--exact` — and over the six
+distance bands from `(1363, 1600)` on the bare facet the corner rule costs
+almost nothing:
+
+| band | detour p50 | p95 | worst |
+|---|---|---|---|
+| 32 | 1% | 13% | 13% — 42 steps against 37 |
+| 64 | 0% | 3% | 3% |
+| 128 | 2% | 10% | 10% |
+| 256 | 2% | 5% | 5% |
+| 512 | 3% | 4% | 4% |
+| 1024 | 3% | 4% | 4% |
+
+A corner is up to sixteen tiles out of the way and a long route amortises it;
+what does not amortise it is a *short* route, which is the top row and still
+only 13%. And the click this track was opened by is now **1%** — 95 steps
+against 94 — because `without_folds` takes the detour back out.
+
+So the premise this section was written on is weaker than it looked: the corner
+rule is not costing the facet a route, it cost *one* route, on the day a castle
+stood on the only near crossing it had. **P1 is therefore gated on one more
+measurement rather than open for work**: the same detour reading over ground
+with houses on it, and over short destinations that fail the bounded search for
+a reason that is not distance — the case a player meets. If that stays inside a
+quarter, P1 closes as not needed and 71,545 nodes stay 71,545.
+
+**What must be measured before picking, if it does open.** All three options
+move the same four numbers, and nothing here should be chosen by preference:
 
 - node and edge count on facet 0 (today: 71,545 nodes, 416,122 edges over 28,672
   regions) — the artifact's size and `abstract_path`'s open list both scale with
@@ -160,11 +188,17 @@ it when the first line is written rather than when the journal is built.
 
 ## Order, and why
 
-**P1 first**: it is the cause, everything else about the corridor is downstream
-of where it may cross, and it is the one that produces new reports as players
-build houses. **P4 alongside it** — it is an hour, and it is the instrument
-every one of these findings was read with; an instrument that lies is not
-something to leave lying about. **P2 next**, because it is a decision more than
-a change and the answer is cheap once taken. **P3 last**, deliberately: it is
-the largest, none of the others is blocked on it, and P1 changes the very number
-that argues for it.
+**P1's own gate first, and it is a measurement rather than a change.** It was
+written to be taken first — it is the cause, and everything about where a
+corridor may cross is downstream of it — and then its first reading said the
+facet does not have the problem: 0–3% at the median and 13% at the worst, with
+the click that opened this track down to 1%. So what P1 gets next is the one
+reading that can still condemn the rule, over ground with houses on it. Adding
+nodes to a graph that is not costing routes would be paying the bake, the
+artifact and every abstract search for a number nobody can see.
+
+**P4 alongside it** — it is an hour, and it is the instrument every one of these
+findings was read with; an instrument that lies is not something to leave lying
+about. **P2 next**, because it is a decision more than a change and the answer
+is cheap once taken. **P3 last**, deliberately: it is the largest, none of the
+others is blocked on it, and it is the one whose number no repair above moves.

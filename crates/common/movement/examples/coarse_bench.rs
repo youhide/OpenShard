@@ -79,6 +79,16 @@ struct Cli {
     /// Also run the old open-world comparison this example used to be.
     #[arg(long, default_value_t = false)]
     synthetic: bool,
+    /// What an *unbounded* exact search may spend, so the corridor's route has
+    /// something to be long against. Zero leaves the detour unmeasured.
+    ///
+    /// Separate from `--budget`, which is what a *client* may spend and is
+    /// therefore the number that makes the corridor necessary in the first
+    /// place. This one is nobody's budget: it is the shortest route the ground
+    /// holds, which is the only honest denominator for "how much further did
+    /// the hierarchy send a body".
+    #[arg(long, default_value_t = 200_000, value_name = "NODES")]
+    exact:     usize,
     /// Flood the facet once from the origin, so a refusal can be read.
     ///
     /// Without it every `NoCorridor` is ambiguous: an island across a bay has
@@ -98,8 +108,26 @@ struct Reading {
     flat_arrived: bool,
     coarse: Duration,
     coarse_steps: Option<usize>,
+    /// The shortest route the ground holds, when `--exact` bought one.
+    exact_steps: Option<usize>,
     /// Whether the flood reached this tile — `None` when it was not run.
     walkable_from_origin: Option<bool>,
+}
+
+impl Reading {
+    /// How much further the corridor sends a body than the ground requires, as
+    /// a percentage — `0` for a route of the shortest length there is.
+    ///
+    /// `None` when either half is missing: a destination the corridor refused
+    /// has no detour, and one the exact search could not reach inside `--exact`
+    /// has nothing to be measured against.
+    fn detour(&self) -> Option<u32> {
+        let (coarse, exact) = (self.coarse_steps?, self.exact_steps?);
+        // A shortest route of no steps is a destination the body stands on.
+        let exact = u32::try_from(exact).ok().filter(|steps| *steps > 0)?;
+        let coarse = u32::try_from(coarse).ok()?;
+        Some(coarse.saturating_sub(exact) * 100 / exact)
+    }
 }
 
 fn ms(duration: Duration) -> f64 {
@@ -122,6 +150,38 @@ fn spread(label: &str, mut samples: Vec<Duration>, routed: usize, of: usize) {
         ms(percentile(&samples, 50)),
         ms(percentile(&samples, 95)),
         ms(*samples.last().expect("the band is non-empty")),
+    );
+}
+
+/// How far past the shortest route the corridor sent a body, over one band.
+///
+/// The distribution and not the mean: a hierarchy that is a few percent long
+/// everywhere is doing its job, and one that is exact on seven destinations and
+/// half as long again on the eighth is the report a player makes. Only the tail
+/// tells those apart.
+fn detours(readings: &[Reading]) {
+    let mut measured: Vec<u32> = readings.iter().filter_map(Reading::detour).collect();
+    if measured.is_empty() {
+        return;
+    }
+    measured.sort_unstable();
+    let worst = readings
+        .iter()
+        .filter(|reading| reading.detour().is_some())
+        .max_by_key(|reading| reading.detour().expect("filtered"))
+        .expect("the band has a measured reading");
+    let index = |percentile: usize| measured[(measured.len() * percentile).div_ceil(100).saturating_sub(1)];
+    println!(
+        "    detour  measured={}/{}  p50={:>4}% p95={:>4}% worst={:>4}% at ({}, {}) — {} steps against {}",
+        measured.len(),
+        readings.len(),
+        index(50),
+        index(95),
+        worst.detour().expect("filtered"),
+        worst.x,
+        worst.y,
+        worst.coarse_steps.expect("a detour has a corridor"),
+        worst.exact_steps.expect("a detour has a shortest route"),
     );
 }
 
@@ -295,6 +355,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 coarse = coarse.min(started.elapsed());
                 coarse_route = Some(route);
             }
+            // And the shortest route the ground holds, once: this is a length
+            // and not a duration, so repeating it would measure the host.
+            let exact = (cli.exact > 0)
+                .then(|| search_path(&footing, origin, to, cli.exact, Weight::EXACT))
+                .filter(|search| search.arrived)
+                .map(|search| search.route.len());
             readings.push(Reading {
                 x: to.x,
                 y: to.y,
@@ -304,6 +370,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 flat_arrived: search.arrived,
                 coarse,
                 coarse_steps: coarse_route.expect("at least one repeat").map(|r| r.len()),
+                exact_steps: exact,
                 walkable_from_origin: component.as_ref().map(|reached| reached.holds(to.x, to.y)),
             });
         }
@@ -341,6 +408,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             coarse_routed,
             readings.len(),
         );
+        detours(&readings);
         for reading in &readings {
             println!(
                 "      ({:5}, {:5}) d={:<5} walkable={:<5} flat {:8.3} ms nodes={:<5} arrived={:<5}  coarse {:8.3} ms steps={}",
@@ -358,6 +426,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .coarse_steps
                     .map_or_else(|| "-".to_owned(), |steps| steps.to_string()),
             );
+            if let (Some(exact), Some(detour)) = (reading.exact_steps, reading.detour()) {
+                println!("          shortest={exact} steps, detour={detour}%");
+            }
         }
     }
     Ok(())
