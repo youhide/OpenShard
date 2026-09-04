@@ -219,6 +219,15 @@ budgets for `LONG_PATH_EFFORT` were argued from numbers only the debug print
 inside it can see. The wallet already holds the figure; it is one field on the
 return.
 
+**21. Three readers of a real facet still open one by hand.** `bake::open_facet`
+took the seven that were, and three of the same shape are left, all of them
+still on `map::read_facet` and a bare `WorldMap`: the `real_install` fixtures in
+`terrain.rs` and `spans.rs` — two spellings of the same fixture, in one crate,
+one of which bakes a `SpanIndex` and the other does not — and
+`examples/span_index.rs`, which times `SpanIndex::build` on its own and would
+have to keep timing it. The two fixtures are a straight conversion; the example
+wants the open split into read-and-bake before it can use one.
+
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change
 the geometry, and not before) and **which validation blocks a publish**
