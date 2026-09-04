@@ -120,6 +120,11 @@ read; on the Felucca spawn set that is bodies 752 and 764–794 among others, te
 of spawn points, each of them a creature that hits a player from an empty tile.
 `Body.def` redirects *are* applied. This is a file-reader gap and not a renderer
 change; the UOP animations are the same gap on the install people actually have.
+Body 826, the Stygian Dragon, is a verified instance and not a guess:
+`Bodyconv.def:486` reads `826	-1	-1	-1	826	-1`, its fourth column is
+`anim5.mul`, and the stock `anim.idx`/`anim.mul` this reader does open has
+zero frames for body 826 across all 22 high groups and 5 directions —
+confirmed by opening the install directly, not inferred from the table alone.
 
 **4. Saying "buy" opens a shelf a player cannot buy from.** The shop draws as an
 ordinary container window over gump `0x0030` with the stock icons in it — no

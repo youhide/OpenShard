@@ -604,12 +604,39 @@ Three things this turned up. One is fixed, two are not:
   the file gives one, which is the rule `apply_body_def` already applies to a
   body — nobody has checked against the reference whether a *dyed* mount item
   is supposed to win over `Body.def`'s colour, and today it loses.
-- **Bodies 95 and 826 lose their pictures.** `mobtypes.txt` calls them animals
-  with no extended flag, which is the low layout applied to a body below its
-  own first id. The reference subtracts anyway and reads whatever it lands on
-  in another family's region; `IndexLayout::base` answers `None` instead, so
-  those two draw nothing rather than a stranger's frames. Worth a look at what
-  the client actually shows for them before deciding which is less wrong.
+- **Body 95 loses its picture, and it is not the same bug as 826's — checked
+  against the real install rather than guessed.** `mobtypes.txt` has a single
+  row for 95, `95\tANIMAL\t0` at `mobtypes.txt:96`, no extended flag, which is
+  the low layout applied to a body below its own first id (200). The reference
+  subtracts anyway (`CalculateLowGroupOffset`, `(95 - 200) * 65 + 22000 =
+  15175`, still positive) and reads block 15175 onward — inside body 137/138's
+  own *high*-numbered block, so a live client draws a slice of a stranger's
+  frames rather than nothing. `IndexLayout::base` answers `None` for any
+  `Low` body under 200 instead (`crates/common/uofiles/src/anim.rs:543-551`,
+  asserted at line 1084), so this engine draws nothing rather than the
+  stranger — confirmed live by opening the stock install's `anim.idx` and
+  scanning every group/direction body 95's resolved layout has: `has_frames`
+  is false throughout, not just for the groups this class of bug usually
+  hits. Less wrong than the reference's own mistake, but still a gap.
+
+  826 first looked like the same class (its symptom is identical — no
+  picture at all) but is not: the stock `mobtypes.txt` has no `ANIMAL` row for
+  it, only `826\tEQUIPMENT\t0` at line 541 and `826\tMONSTER\t\t10008\t0 #
+  Stygian Dragon` at line 1042, and duplicate-id resolution (last line wins,
+  in both `MobTypes::from_text`'s `BTreeMap::insert` and the reference's own
+  `_mobTypes[id] = ...` in `AnimationsLoader.cs`) lands it on `MONSTER`/`High`
+  — `IndexLayout::base(826) = Some(826 * 110)`, never `None`. Opening the
+  stock `anim.idx` and scanning all 22 high groups × 5 directions for body
+  826 confirms zero frames there too, but for a different reason:
+  `Bodyconv.def:486` reads `826\t-1\t-1\t-1\t826\t-1`, and the fourth column
+  is `anim5.mul` (`_files[4]` in `AnimationsLoader.cs`'s `Load`, filled from
+  `"anim" + (i + 1) + ".mul"`) — the Stygian Dragon's frames live in
+  `anim5.mul` at index 826, a file this reader does not open at all. That is
+  item 3 of [`docs/client/README.md`](../../client/README.md)'s "What is
+  open, ranked" (`Bodyconv.def` not read, every body that lives only in
+  `anim2`–`anim5` draws nothing), not this entry's bug — 826 is now that
+  item's concrete, verified example rather than a second instance of the
+  low-layout one.
 - **Equipment in the animal id range moved.** 55 bodies gain an index block
   they did not have — mostly `EQUIPMENT` rows between 318 and 340, which the
   range rule read at the animal stride and the table reads at the human one.
