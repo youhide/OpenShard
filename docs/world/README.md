@@ -348,14 +348,29 @@ over facet 0, `Doors::AllOpen` live and the bare map as the guide:
 | `(1350, 1890, 0)` → roof `(1342, 1893, 88)` | 123 steps, 48.8 ms | 94 steps, 7,037 nodes, 16.6 ms |
 | `(1350, 1890, 0)` → door `(1341, 1900, 7)` | 48 steps, 57.7 ms | 19 steps, 63 nodes, 0.1 ms |
 
-Two repairs, and they are independent. **Intermediate representatives on a wide
-run** bound the detour by the spacing chosen instead of by half a region, at the
-price of more nodes on open ground — the number wants measuring against the bake
-and against `abstract_path`, not picking. And **a near destination whose bounded
-search stopped on budget should buy a bigger search rather than a corridor**:
-`COARSE_MIN_DISTANCE` only short-circuits when that search *exhausted*, and here
-the exact answer is three times cheaper in milliseconds and 31% shorter than the
-hierarchy standing in for it — finding 24's crossover, met from the other side.
+**The cheap repair is a wider `without_loops`, and it is measured.** A route
+that comes back *within one tile* of a place it already stood on has the same
+nothing between the two visits that an exact revisit has, and the corridor's
+own steps are the proof it is walkable ground. Asked that way — one search
+between the two ends of the widest fold — this route's fold is steps 14..44,
+thirty steps between two places one tile apart, and re-asking it costs **2
+nodes** and returns **1** step: 123 steps become 94, which is exactly what the
+exact search answers. Asked the brute-force way instead — every pair of route
+places within sixteen tiles — the same 94 steps cost 1,571 searches and 415,271
+nodes, six times the corridor it is repairing. So the shortcut is free or
+ruinous depending entirely on where it is asked, and the fold is where. The
+search stays the oracle, not a heuristic: a switchback stair folds back the same
+way and simply fails to answer shorter, so nothing is spliced.
+
+That is a repair of the symptom. The cause is the two-representative rule, and
+**intermediate representatives on a wide run** bound the detour by the spacing
+chosen instead of by half a region, at the price of more nodes on open ground —
+a number to measure against the bake and against `abstract_path`, not to pick.
+
+What this is *not* is finding 24's crossover met from the other side: this
+destination is only near in a straight line. Ninety-four steps through four
+storeys is a long way, the exact search pays 7,037 nodes for it, and no budget
+a client can afford every step makes the hierarchy unnecessary here.
 
 **26. Every third plan answers a different question and calls the click
 barred.** The plans of that episode run in a fixed rhythm of two and one: two
