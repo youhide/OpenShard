@@ -655,7 +655,7 @@ fn recharge_runebook(
     owned.charges += taken as u8;
     state.registry.insert(book, owned);
     if taken >= held_amount {
-        despawn_item(state, held.entity);
+        despawn_held_item(state, connection, held.entity);
     } else {
         // Put the remainder back where it came from, still a pile.
         let left = u16::try_from(held_amount - taken).unwrap_or(u16::MAX);
@@ -705,7 +705,7 @@ fn bind_rune_into_runebook(
         owned.default_entry = Some(0);
     }
     state.registry.insert(book, owned);
-    despawn_item(state, held.entity);
+    despawn_held_item(state, connection, held.entity);
     state.system_message(player, "You bind the rune into the book.");
     tell_watchers_updated(state, book_serial, book);
 }
@@ -741,7 +741,7 @@ fn drop_scroll_on_book(state: &mut WorldState, connection: ConnectionId, held: H
     }
     mask.learn(spell);
     state.registry.insert(book, mask);
-    despawn_item(state, held.entity);
+    despawn_held_item(state, connection, held.entity);
     // Refresh the open book so the new spell appears at once.
     state.send_packet(
         connection,
@@ -788,6 +788,27 @@ pub fn restore(state: &mut WorldState, held: HeldItem) {
                 broadcast_equip(state, held.entity, mobile);
             }
         }
+    }
+}
+
+/// Despawn a held item that its own drop just consumed — merged into another
+/// pile, spent recharging a runebook, bound into one, or learned from a
+/// spellbook — and tell the connection that was holding it.
+///
+/// Nobody else needs telling: a held item is on nobody's screen but the
+/// holder's own cursor, so no window anywhere has drawn it. But that
+/// connection's own model of the world still names the serial until it hears
+/// otherwise — the ordinary despawn packet a *watcher* gets
+/// (`lift_equipped_item`'s `Remove`, or a container's own updated listing)
+/// never reaches a cursor no gump is open on, and nothing else about a
+/// consuming drop ever mentions this serial again. Skipping this door and
+/// calling `despawn_item` directly is what left a stale pile in a bag long
+/// after the shard had merged it away.
+pub(crate) fn despawn_held_item(state: &mut WorldState, connection: ConnectionId, item: EntityId) {
+    let serial = state.registry.serial_of(item);
+    despawn_item(state, item);
+    if let Some(serial) = serial {
+        state.send_packet(connection, &ServerPacket::Remove(Remove { serial }));
     }
 }
 

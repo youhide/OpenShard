@@ -255,6 +255,31 @@ to prevent: the argument is positional, so nothing at the call site says what an
 empty catalogue is. `cut.rs`'s world names `Multis::of([])` instead, and the
 rest are the same one-line change whenever a session is in those files anyway.
 
+**11. A merge that overflows and bounces leaves the wrong amount in the
+dragger's own view of the source pile.** `merge_amounts` (`items/src/stack.rs`)
+reduces a still-`Held` item's `Amount` before `merge_onto` calls `bounce` for
+the remainder that did not fit; `set_stack_amount` deliberately sends nothing
+while an item is `Held` (`items/src/stack.rs`, `write_stack_amount`'s callers),
+on the assumption that whoever changed it is about to relocate it and that
+relocation is what tells the connection. `restore` (`items/src/drag.rs`) is
+that relocation for a bounce, and it is component bookkeeping only —
+`relocate_item`/`commit_item_relocation` (`state/src/item_location.rs`) send no
+packet of their own, unlike `drop_into_container`, which explicitly confirms a
+*successful* placement. So a bounce after a partial fill puts the held item
+back with its true, reduced amount, and never tells the one connection that
+still thinks it is holding the pre-drag total — a wrong number sitting in a
+slot, not merely a lingering duplicate. Reproduced live over
+`crates/e2e/shard` (`openshard_client_net::view::WorldView`): merge a pile
+twenty deep onto one ten short of `MAX_STACK`; the target correctly reaches
+the cap and a `DragCancel` arrives, but the source's own entry in the
+backpack still reads its pre-drag amount, forever, until something else
+re-lists the container. `restore` has a second caller besides `bounce`
+(`world/src/tick.rs`'s disconnect cleanup, which has no live connection to
+tell), so the fix belongs in `bounce` itself — send the held item's landed
+state to `connection` once `restore` has placed it, mirroring
+`drop_into_container`'s own confirmation, rather than widening `restore`'s
+signature for a caller that cannot use it.
+
 ## The documents
 
 **Design** — the model as built, no status in them:

@@ -204,9 +204,16 @@ impl App {
     }
 
     /// Send one merge from the latest authoritative container snapshot.
-    /// A refresh follows every drag because a successful merge consumes the
-    /// source serial without echoing a Remove packet to the client that lifted
-    /// it. The next pass therefore never plans against a stale split remainder.
+    ///
+    /// A full re-list follows every drag rather than trusting the `Remove` a
+    /// successful merge now sends the lifter (`despawn_held_item`, on the
+    /// shard) on its own: this pass plans its *next* step off `view.contents`
+    /// between one merge landing and the next being sent, and a `0x3C` is the
+    /// one answer that is also authoritative about a split remainder from an
+    /// earlier pass, not only about the serial this step just consumed.
+    /// Belt and suspenders on purpose — dropping it is a candidate simplification
+    /// once the `Remove` alone has been trusted for a while, not a rule this
+    /// pass depends on being wrong.
     pub(crate) fn advance_stack_pass(&mut self) {
         const RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
         let Some(pass) = self.windows.stack_pass.as_ref() else {

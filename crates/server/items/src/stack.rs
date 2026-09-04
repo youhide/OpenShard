@@ -120,7 +120,7 @@ pub fn merge_onto(state: &mut WorldState, connection: ConnectionId, held: HeldIt
             bounce(state, connection, held, DragCancelReason::Other);
             return;
         }
-        despawn_item(state, held.entity);
+        crate::drag::despawn_held_item(state, connection, held.entity);
         let sound = drop_sound(
             state.registry.get::<Drawn>(target).expect("a stack has art").id,
             amount_of(state, target),
@@ -145,8 +145,10 @@ pub fn merge_onto(state: &mut WorldState, connection: ConnectionId, held: HeldIt
             return;
         }
         // The dragged stack was on a cursor, on no screen and in no gump, so
-        // despawning it needs no packet of its own.
-        despawn_item(state, held.entity);
+        // no *other* watcher needs a packet about it — but the dragger's own
+        // client still has to be told, or its model of this container keeps
+        // the merged-away pile forever. See `despawn_held_item`.
+        crate::drag::despawn_held_item(state, connection, held.entity);
         let sound = drop_sound(
             state.registry.get::<Drawn>(target).expect("a stack has art").id,
             amount_of(state, target),

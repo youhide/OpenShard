@@ -1,5 +1,5 @@
 (
-    tab: admin,
+    tab: tile,
     open: true,
     panel: Some((
         x: 0.0,
@@ -44,6 +44,7 @@
     font_face: classic,
     override_all_fonts: false,
     bitmap_font: 3,
+    status_frame: old,
     audio: (
         effects: 0.28,
         music: 0.0,
@@ -104,5 +105,6 @@
         rig_never_cut: false,
         body_ease_tau: 0.08,
         scope_seconds: 4.0,
+        path_journal: true,
     )),
 )

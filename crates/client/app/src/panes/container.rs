@@ -790,13 +790,12 @@ impl ContainerPane {
     /// The amount prompt has been answered, and the press it suspended is
     /// this pane's.
     ///
-    /// The split is finished here rather than left on the cursor, and that is
-    /// deliberate: the lift path suppresses the `Remove` for the client that
-    /// made it, so a part left hanging on the pointer after a modal can hide
-    /// the old serial indefinitely. Dropping it back beside its remainder
-    /// produces an `Add` for that serial, and asking for the container again
-    /// replaces the whole list — including the remainder the shard has just
-    /// made.
+    /// The chosen amount goes onto the cursor exactly like an ordinary lift —
+    /// [`Hand::Held`](crate::hand::Hand::Held) is documented to outlive the
+    /// window an item came out of, so there is nothing here for a closed bag
+    /// to strand. The remainder stays where it was; the shard's own partial-lift
+    /// handling makes the split, the same as it does for a drag that crosses
+    /// the slop without a prompt.
     fn answered(&mut self, answer: Answer) -> Response {
         let Some(press) = self.pressed.take() else {
             return Response::ignored();
@@ -809,16 +808,7 @@ impl ContainerPane {
         let Some(drag) = press.split(amount) else {
             return Response::changed();
         };
-        // Beside the pile it came out of, one icon down and along, so the two
-        // halves do not sit on top of each other while the shard decides.
-        let at = GumpPoint::new(press.item.at.x + SWEEP_STEP, press.item.at.y + SWEEP_STEP);
-        Response::changed()
-            .with(Effect::Lift(drag))
-            .with(Effect::Drop(PendingDrop::Container {
-                container: self.container,
-                at,
-            }))
-            .with(Effect::Net(Outgoing::Use(self.container)))
+        Response::changed().with(Effect::Lift(drag))
     }
 }
 
@@ -1530,6 +1520,75 @@ mod tests {
         assert!(
             pane.pressed.is_none(),
             "the press is spent once it becomes a lift"
+        );
+    }
+
+    /// **Part A regression.** Answering the amount prompt puts the chosen
+    /// amount on the cursor and nothing else. It used to also synthesize a
+    /// drop back into the same bag beside the remainder, so the split half
+    /// never reached the player's hand at all — this pins the fix: the only
+    /// effect is a [`Effect::Lift`] carrying exactly the amount asked for.
+    #[test]
+    fn answering_the_amount_prompt_lifts_the_chosen_amount_and_nothing_else() {
+        const BAG: Graphic = Graphic(0x003C);
+        // Deliberately not one of the three currency graphics
+        // `displayed_graphic` swaps in a fuller-pile art for past five —
+        // this test packs one icon and wants it drawn at every amount.
+        const ORE: Graphic = Graphic(0x19B9);
+        let files =
+            fixture::Install::shipping([(GumpArt::Gump(BAG), (140, 100)), (GumpArt::Item(ORE), (10, 10))]);
+        let bag = serial(0x4000_0100);
+        let mut view = bare_view();
+        view.containers.insert(bag, BAG);
+        view.contents.insert(
+            bag,
+            vec![ContainedItem {
+                at: GumpPoint::new(60, 80),
+                ..item(0x4000_0001, ORE, 20)
+            }],
+        );
+
+        let mut pane = ContainerPane::new(bag);
+        // Inside the pile's own icon, at (60, 80) sized 10x10.
+        let icon = GumpPixel::new(65, 85);
+        let laid_out = pane
+            .layout(&files.ctx(&view, None, icon, true).frame)
+            .expect("a bag with a gump in the view lays itself out");
+        let ctx = files.ctx(&view, Some(&laid_out), icon, true);
+        let press = pane.handle(Input::Press(Button::Left), &ctx);
+        assert!(press.taken);
+        assert!(pane.pressed.is_some(), "the press landed on the pile's own icon");
+
+        // Past the slop, with Shift held: a pile is asked for an amount
+        // rather than lifted whole.
+        let dragged = icon.offset(GumpPixel::new(4, 0));
+        let laid_out = pane
+            .layout(&files.ctx(&view, None, dragged, true).frame)
+            .expect("the bag still lays out the same way");
+        let mut ctx = files.ctx(&view, Some(&laid_out), dragged, true);
+        ctx.past_slop = true;
+        ctx.modifiers.shift = true;
+        let asked = pane.handle(Input::Move, &ctx);
+        assert!(
+            matches!(asked.out.as_slice(), [Effect::Prompt(_)]),
+            "a shift-drag on a pile asks for an amount rather than lifting it whole: {asked:?}"
+        );
+        assert!(
+            pane.pressed.is_some(),
+            "the press waits under the prompt rather than being spent"
+        );
+
+        let answer = pane.handle(Input::Answered(Answer::Split(6)), &ctx);
+        assert!(
+            matches!(
+                answer.out.as_slice(),
+                [Effect::Lift(drag)] if drag.item.amount.0 == 6
+            ),
+            "the chosen amount goes onto the cursor and nothing else is asked for: {answer:?}"
+        );
+        assert!(
+            pane.pressed.is_none(),
+            "the press is spent once the prompt is answered"
         );
     }
 
