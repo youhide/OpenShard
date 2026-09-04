@@ -59,12 +59,19 @@ const MAGIC: &[u8; 8] = b"OSNAV\0\r\n";
 const FORMAT_VERSION: u32 = 6;
 /// Increment whenever graph construction or static movement semantics change.
 ///
-/// 4 is `docs/world/evidence/2026-08-25-the-span-layer.md`'s N4: a node is a standing place rather
+/// 5 is `plans/world/pathfinding/PLAN.md`'s P1: a wide run of border crossings
+/// gets a representative every `PORTAL_SPACING` of them and not only its two
+/// ends, so the walk to a crossing is bounded by the spacing rather than by half
+/// a region. A version 4 file is a graph whose regions are crossed at their
+/// corners and nowhere else — it routes, and it routes a body around the outside
+/// of the building it was sent to, which is the report finding 29 measured.
+///
+/// 4 was `docs/world/evidence/2026-08-25-the-span-layer.md`'s N4: a node is a standing place rather
 /// than a tile, and a portal joins two of them in one direction. The bytes did
 /// not change shape — a node was always a `Point` and the walkable bitmap was
 /// always per tile — so nothing but this number would stop a shard from loading
 /// a one-storey graph and believing it.
-pub const ROUTING_VERSION: u32 = 4;
+pub const ROUTING_VERSION: u32 = 5;
 const MAX_COLLECTION: usize = 100_000_000;
 
 /// Metadata for one input selected by the client-file loader.

@@ -87,6 +87,28 @@ use crate::{
 const LONG_PATH_EFFORT: usize = 100_000;
 
 const WIDE_PORTAL: usize = 6;
+/// How far apart a wide run's representatives stand, in crossings.
+///
+/// **This is the bound on a detour, and it is the whole of P1.** A run of open
+/// border used to get exactly two representatives, its ends, so the only places
+/// to cross a 32-tile border were its corners and a body in the middle paid up
+/// to sixteen tiles to reach one. That is invisible while the bounded search
+/// answers — a short trip never asks the graph — and becomes a player's report
+/// the moment something makes the bounded search fail for a reason that is not
+/// distance: a roof, a cellar, a house with one door. Measured on the castle of
+/// `docs/world/README.md`'s finding 29, from sixteen tiles out, it was 32% at
+/// the p95 and 35% at the worst.
+///
+/// With representatives every `PORTAL_SPACING` crossings the walk to one is at
+/// most half that, so the detour is bounded by the spacing rather than by half a
+/// region. The ends are always kept: they are where a *perpendicular* border's
+/// run meets this one, and a corner nobody can cross is a region with a hole in
+/// its side.
+///
+/// What it costs is nodes, and nodes on exactly the ground that has the longest
+/// runs — open country, where the corner rule was already cheap. That trade is
+/// measured rather than argued: see the plan's four numbers.
+const PORTAL_SPACING: usize = 16;
 /// A region stays well inside the normal 600-cell refinement budget, while the
 /// whole facet has only a few thousand regions. Obstacles inside one are live
 /// terrain, not graph boundaries, so a forest does not emit a node per tree.
@@ -125,7 +147,7 @@ pub struct NavigationGraph {
     ///
     /// The garbage rule is the span layer's verbatim — never compacted during a
     /// session, until the dead outweigh the live — with one difference:
-    /// `SpanIndex` answers that by baking the facet whole, and 11.6 s is the
+    /// `SpanIndex` answers that by baking the facet whole, and 18 s is the
     /// thing this graph's own rebake exists to stop paying. See
     /// [`repack`](NavigationGraph::repack).
     pub(crate) dead_edges:        u32,
@@ -139,7 +161,7 @@ pub struct NavigationGraph {
 /// behind it. The span index's `BlockTable` and `WorldMap`'s `blocks` are the
 /// other two; `docs/world/design_navigation_graph.md`'s G1 is the argument in full, and
 /// what it buys here is that a publish rebuilds the regions around it instead of
-/// dropping a graph that costs 11.6 s to build.
+/// dropping a graph that costs 18 s to build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Run {
     pub(crate) base:  u32,
@@ -916,7 +938,7 @@ impl NavigationGraph {
     /// `docs/world/design_navigation_graph.md`'s **G1**, and the third artefact of
     /// `what_a_change_costs.md`'s S3: the span index and `WorldMap`'s statics
     /// already follow a publish locally, and this is the one that used to be
-    /// *dropped* instead — 11.6 s to build, on a tick an operator typed into.
+    /// *dropped* instead — 18 s to build, on a tick an operator typed into.
     ///
     /// **The area is two rings and a half**, and each of the three is a different
     /// claim:
@@ -1231,17 +1253,27 @@ impl NavigationGraph {
         }
     }
 
-    /// One logical entrance, as one or two directed edges.
+    /// One logical entrance, as one or two directed edges per representative.
     ///
-    /// The representatives are what they always were — the middle of a narrow
-    /// run, both ends of a wide one — and what changed is that a crossing buys
-    /// **one** edge. Its reverse, where the ground allows one, arrives as its own
-    /// entrance and its own edge over the same interned nodes.
+    /// A narrow run keeps its middle. A wide one gets its two ends **and one
+    /// every [`PORTAL_SPACING`] crossings between them**, which is what bounds
+    /// the walk to a crossing by the spacing instead of by half a region — see
+    /// the constant. A crossing buys **one** edge; its reverse, where the ground
+    /// allows one, arrives as its own entrance and its own edge over the same
+    /// interned nodes.
     fn add_portal(&mut self, build: &mut Rebuild, run: &[(Point, Point)]) {
-        let ids: Vec<_> = match run.len() {
+        let ids: Vec<usize> = match run.len() {
             0 => return,
             1..WIDE_PORTAL => vec![(run.len() - 1) / 2],
-            _ => vec![0, run.len() - 1],
+            _ => {
+                let last = run.len() - 1;
+                let mut ids: Vec<usize> = (0..last).step_by(PORTAL_SPACING).collect();
+                // The far end, always, and never twice: a run whose length is a
+                // multiple of the spacing would otherwise get its last
+                // representative one crossing short of the corner.
+                ids.push(last);
+                ids
+            }
         };
         for index in ids {
             let first_id = self.intern_node(build, run[index].0);
@@ -1420,7 +1452,7 @@ impl NavigationGraph {
     /// The garbage rule, and it is the span layer's verbatim — *never compact
     /// during a session, until the dead outweigh the live* — with one difference
     /// that matters: `SpanIndex` answers it by baking the facet whole, and
-    /// 11.6 s is the thing this file exists to stop paying. So the answer here is
+    /// 18 s is the thing this file exists to stop paying. So the answer here is
     /// a **repack**: one walk of what is live, at no point asking the ground
     /// anything.
     fn repack_if_mostly_dead(&mut self) {
@@ -2727,7 +2759,11 @@ mod tests {
         let terrain = Grid::open(704, 32);
         let graph = NavigationGraph::build(&terrain.footing(), 704, 32).unwrap();
         assert_eq!(graph.regions.len(), 22);
-        assert_eq!(graph.nodes.len(), 84);
+        // Twenty-one borders, each an open run of 32 crossings: representatives
+        // at 0, at 16, and at the far end 31, on both sides of the border. Two
+        // per border — its corners, with nothing between them — is what
+        // [`PORTAL_SPACING`] replaced, and it was 84.
+        assert_eq!(graph.nodes.len(), 126);
         let from = Point::new(1, 1, 0);
         let to = Point::new(702, 30, 0);
         let route = find_long_path(
@@ -2741,6 +2777,47 @@ mod tests {
         )
         .unwrap();
         assert_eq!(end(&terrain.footing(), from, &route), to);
+    }
+
+    /// P1 itself: an open border is crossed in its middle as well as at its
+    /// corners, and no two crossings are further apart than
+    /// [`PORTAL_SPACING`].
+    ///
+    /// This is the shape the whole repair is. Until it, a 32-tile border had
+    /// exactly two crossings — its ends — so a body standing in the middle of a
+    /// region walked up to sixteen tiles along the border to leave it, and on a
+    /// click at a building that was 32% of the route at the p95 (finding 29).
+    /// What the assertion pins is the *spacing* rather than the count: the
+    /// count follows from it, and the count alone would pass for representatives
+    /// bunched at one end.
+    #[test]
+    fn a_wide_border_is_crossed_every_spacing_and_not_only_at_its_corners() {
+        let terrain = Grid::open(64, 32);
+        let graph = NavigationGraph::build(&terrain.footing(), 64, 32).unwrap();
+        // The west side of the one border. Its partner at x = 32 is the same
+        // run read the other way, and carries the same crossings.
+        let mut crossings: Vec<u16> = graph
+            .nodes
+            .iter()
+            .filter(|node| node.point.x == 31)
+            .map(|node| node.point.y)
+            .collect();
+        crossings.sort_unstable();
+        assert_eq!(
+            crossings,
+            vec![0, 16, 31],
+            "an open border of 32 is crossed at its two ends and at one spacing in"
+        );
+        let widest = crossings
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .max()
+            .expect("three crossings make two gaps");
+        assert!(
+            usize::from(widest) <= PORTAL_SPACING,
+            "a body walks at most half of {widest} tiles to reach a crossing, and the spacing is \
+             {PORTAL_SPACING}"
+        );
     }
 
     /// A placed house is absent from the baked graph. Its upper floor crosses a
@@ -2921,8 +2998,11 @@ mod tests {
             terrain.block(32, y);
         }
         let graph = NavigationGraph::build(&terrain.footing(), 64, 32).unwrap();
-        // Two maximally separated representatives make four directed nodes;
-        // raw contiguous runs would have made 32.
+        // Sixteen crossings in one logical entrance, which is exactly
+        // [`PORTAL_SPACING`]: the ends are the only representatives, so this is
+        // the two-ends answer and four directed nodes. Raw contiguous runs
+        // would have made 32. A run *longer* than the spacing is where the
+        // middle representatives appear — see the open-facet test above.
         assert_eq!(graph.nodes.len(), 4);
         let from = Point::new(2, 2, 0);
         let to = Point::new(61, 29, 0);
@@ -2949,6 +3029,9 @@ mod tests {
             terrain.block(x, 16);
         }
         let graph = NavigationGraph::build(&terrain.footing(), 64, 32).unwrap();
+        // Two entrances of sixteen crossings each — one spacing apiece, so the
+        // ends and nothing more — and the wall is what keeps them two entrances
+        // rather than one.
         assert_eq!(graph.nodes.len(), 8);
     }
 

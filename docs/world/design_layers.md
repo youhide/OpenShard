@@ -116,7 +116,7 @@ the numbers are what keep this document from being a matter of taste.
 | `WorldMap::replace_blocks`, no block's item count changed | 0.1 ms |
 | `WorldMap::replace_blocks`, a count changed | 0.02 ms at the end of the statics run to 1.3 ms at its start, plus 7 ms once per world for the reallocation `from_parts`' `shrink_to_fit` makes unavoidable for the first *added* item |
 | `SpanIndex::build` — the rebake, paid at **both** ends | **55 ms** |
-| the coarse graph, after N4 | 11.7 s |
+| the coarse graph, after N4 and P1's crossing spacing | 19.8 s (11.7 s before the spacing) |
 
 **So the cost of a patch is the rebake, not the write.** Anyone reaching for a
 cheaper way to get statics into the base is optimising 0.1 ms next to a rebake

@@ -4062,7 +4062,7 @@ fn navigation_panel(ui: &mut egui::Ui, hud: &Hud, request: &mut Request) {
         .add_enabled(!building, egui::Button::new("rebake"))
         .on_hover_text(
             "Build the graph again from the world in hand and keep it beside that world. \
-             About eleven seconds on a facet; the client keeps playing while it runs.",
+             About twenty seconds on a facet; the client keeps playing while it runs.",
         )
         .clicked()
     {

@@ -126,7 +126,7 @@ let this be a table rather than a tiling problem.
 **There is no artifact.** The span layer is built at load, because building it
 costs a twentieth of a second where the census that sized it took 3.5 s. The
 baking that is actually expensive is the **region graph**, which is a separate
-artefact at 11.7 s. Machinery this layer does not need is machinery it does not
+artefact at 19.8 s. Machinery this layer does not need is machinery it does not
 mint; if a measurement ever asks for one, the rule is that the spans go in the
 graph's own file under a bumped version, never in a second file that could
 arrive at a different revision of one world.

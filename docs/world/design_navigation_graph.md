@@ -38,10 +38,22 @@ may open it or must stop at it.
    they do not create graph nodes. Thus an internal tree creates zero nodes,
    while a wall or shore affects only the real crossings at a region border.
 3. For each maximal contiguous run of valid crossings shared by two regions,
-   create one portal. A portal has one midpoint transition when narrow and two
-   endpoint transitions when wide. The transitions are vertices of the actual
-   indexed graph. An inter-edge crosses the portal; an intra-edge is an exact
-   low-level route through one navigation region.
+   create one portal. A portal has one midpoint transition when narrow, and when
+   wide it has its two ends **plus one every `PORTAL_SPACING` crossings between
+   them**. The transitions are vertices of the actual indexed graph. An
+   inter-edge crosses the portal; an intra-edge is an exact low-level route
+   through one navigation region.
+
+   **The spacing is a bound on a detour and it was measured.** Until
+   `ROUTING_VERSION` 5 a wide run had only its two ends, so a 32-tile border of
+   open ground was crossable at its corners and nowhere else and a body in the
+   middle of a region paid up to sixteen tiles to reach one. On open country
+   that costs almost nothing — a long route amortises it — and on a click at a
+   building it cost 32% at the p95, because a roof fails the bounded search for
+   a reason that is not distance and so reaches the graph however near it is.
+   See `docs/world/README.md`'s findings 25 and 29, and
+   [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md)'s
+   P1 for the four numbers the spacing was chosen on.
 
 The graph is sparse and its density is bounded by coarse borders, rather than
 by the number of corners in static art. It has one level.
@@ -72,7 +84,8 @@ existing doors-open attempt, which cuts the resulting route at the real refusal.
 > call it — the shard's `FacetState::publish` and `undo`, and the client's
 > `ground_moved`. Measured on Felucca, one chunk, in the profile a `cargo run`
 > builds: **28.0 s → 80 ms**, with the graph coming back node for node and edge
-> for edge the same as a whole bake (71,545 and 416,122, the counts N4 recorded).
+> for edge the same as a whole bake (71,545 and 416,122, the counts N4 recorded;
+> P1's spacing has since made them 95,672 and 740,339).
 > What follows is that plan, with what the doing of it added marked as such.
 
 **It is the same fix, for the third time.** The span index and the statics run

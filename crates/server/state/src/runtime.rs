@@ -949,7 +949,7 @@ impl FacetState {
     /// ground inside [`Ground`], which is that type's whole invariant, and the
     /// coarse graph follows it here — over the chunks the patch named and no
     /// others. It used to be **dropped**, on the honest argument that a
-    /// whole-facet rebuild is 11.6 s on a tick and a graph of the world as it
+    /// whole-facet rebuild is 18 s on a tick and a graph of the world as it
     /// stood is a router planning through a wall somebody just built; what
     /// changed is `docs/world/design_navigation_graph.md`'s G1, which makes the rebuild
     /// local — the regions the chunks cover, their neighbours, and the ring

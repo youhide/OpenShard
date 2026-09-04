@@ -49,7 +49,7 @@ one door.
 
 ---
 
-## P1 — A wide crossing needs more than its two ends
+## P1 — A wide crossing needs more than its two ends — ✅ done
 
 **What is wrong.** The detour above is not a splice artefact and not a live-layer
 accident: the corridor was a *single node*, both of its legs were optimal, and
@@ -124,6 +124,47 @@ without asking), so the reading is about the corridor and nothing else.
 player clicks from is 32%. What is still not settled is *which* of the three
 options below, and that is the four numbers named next — not a preference.
 
+**What was built: option 1, at a spacing of sixteen.** `PORTAL_SPACING` in
+[`navigation.rs`](../../../crates/common/movement/src/navigation.rs), and
+`ROUTING_VERSION` 5 because a version 4 artifact is a graph whose regions are
+crossed at their corners. Both spacings were baked and measured, on one host, so
+that the choice is a reading rather than an argument:
+
+| | corners only | every 16 | every 8 |
+|---|---|---|---|
+| nodes | 71,545 | 95,672 (+34%) | 144,417 (+102%) |
+| edges | 416,122 | 740,339 (+78%) | 1,819,968 (+337%) |
+| artifact | 7.84 MB | 10.20 MB | 17.50 MB |
+| whole-facet bake | 10.8 s | 19.8 s | 30.7 s |
+| publish rebake, two rings | 41.6 ms | 45.9 ms | 58.3 ms |
+| houses detour p95, 16 tiles out | **32%** | **7%** | **7%** |
+| houses detour p95, 24 tiles out | 18% | 6% | 5% |
+| houses detour p95, 32 / 48 out | 3% / 4% | 4% / 4% | 4% / 4% |
+| ring detour p95, six bands | 13/3/10/5/4/4% | 13/3/11/5/3/4% | 13/3/5/3/2/3% |
+| long-query p95, worst ring band | 3.1 ms | 6.0 ms | 13.2 ms |
+| walk-path corridor p95 (houses) | ~32 ms | ~42 ms | ~42 ms |
+
+**Eight buys nothing sixteen has not already bought.** The castle's region was
+crossable only at its corners, and one crossing in the middle of the border is
+the whole repair; halving the spacing again pays for it a second time — 4.4× the
+old edge count against 1.8×, and a long query twice as dear again — for the same
+7%. Sixteen shipped.
+
+**The done-when below is met on the detour and not on the price, and that is a
+decision rather than an oversight.** The near ring goes 32% → 7%, inside the
+quarter. Bake time and long-query p95 are *not* within noise: a whole-facet bake
+is 83% dearer and the worst ring band's p95 doubles. No option that adds a node
+can be, and the clause was written before any of these numbers existed. What the
+measurement does say is where the price lands: the path that runs during play
+barely moves — a publish rebakes its two rings in 45.9 ms against 41.6 — and the
+walk-path corridor's ~32 → ~42 ms is dominated by the live join, which is
+finding 28 and P3's problem rather than this one's.
+
+**What is not touched.** The bare facet's ring bands are the same reading with
+noise on it, which is the whole reason the houses case had to be measured
+separately. And band 32 stays at 13%: a 42-step route against 37 on open ground
+is not a region crossed at its corner, and no spacing moves it.
+
 **What this reading is one of.** One building, in one place, on one facet —
 `--design` and `--design-at` take another, and nobody has run one yet. What
 makes this castle worth gating on is that it is the building the report came
@@ -153,7 +194,12 @@ answer — the ratio
 `a_route_onto_a_castle_roof_does_not_walk_away_from_the_castle` already asserts
 for one click — **on the houses reading's near ring**, which is the 32% above
 and the only band that fails today, with bake time and long-query p95 no worse
-than today's by more than the measurement's own noise.
+than today's by more than the measurement's own noise. — Met on the detour (7%),
+knowingly not on the price; see the table above for what that price is and where
+it lands. The five `real_routes` scenes pass unchanged against the new graph:
+the originating click is 95 steps against the exact 94, its 9 neighbouring
+starts and 196 long routes loop nowhere, and the walked click still arrives in
+95 steps and 95 plans.
 
 ## P2 — One click, two standing answers
 
@@ -250,9 +296,10 @@ bare facet does not have the problem: 0–3% at the median and 13% at the worst,
 with the click that opened this track down to 1%. The one reading that could
 still condemn the rule was ground with houses on it, and it did: **32% at the
 p95 from sixteen tiles out**, which is where a body stands when it clicks on the
-building in front of it. So P1 is open, and what it now needs is the choice
-between its three options made on the four numbers above rather than on
-preference.
+building in front of it. So P1 opened, and the choice between its three options
+was then made on the four numbers rather than on preference: option 1 at a
+spacing of sixteen, which takes the near ring to 7% and costs a third of what
+halving the spacing again would. ✅ Done.
 
 **P4 alongside it** — it is an hour, and it is the instrument every one of these
 findings was read with; an instrument that lies is not something to leave lying

@@ -65,7 +65,8 @@ every answer taken so far is a row in [`design_layers.md`](design_layers.md).
 | The radar: one raster serving both windows, a view picking its own level, an evicting cache, the floor swept once | ✅ shipping | section 10 below — the page array at 2× HiDPI, the `floor`/`round` level rule, and a carry that is O(everything ready) | [`design_radar.md`](design_radar.md) |
 | Interiors: the building index, the floor a person is on, a sealed room as a black area | 🟡 in the tree, unrecorded | `Buildings::bake`, `InteriorFrame` and `FloorView` exist in `client/render`; **the document carries no status marks at all**, and R3 (walls at knee height) has nothing in the tree | [`design_interiors.md`](design_interiors.md) |
 | The map editor's first usable cut | 🟡 partial | continuous drag strokes, art-composited static preview, smooth, stamps, rebase | [`plans/world/map_editor/PLAN.md`](../../plans/world/map_editor/PLAN.md) |
-| A corridor sends a body where the graph lets it cross, and the crossings are corners | ⬜ | P1 to P4: the corner-only crossing, one click with two answers, planning off the frame thread, and the journal's own `coarse` flag | [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md) |
+| A corridor sends a body where the graph lets it cross — a wide border is crossed every 16 tiles, not at its corners | ✅ shipping | `ROUTING_VERSION` 5: 32% → 7% at the p95 on a click at a building, for 34% more nodes and an 83% dearer bake | [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md), P1 |
+| One click still has two standing answers, and the client plans on the thread that draws | ⬜ | P2 and P3; P1 and P4 are done | the same |
 | Every boot replays the whole log | ⬜ | S4 | [`plans/world/what_a_change_costs/PLAN.md`](../../plans/world/what_a_change_costs/PLAN.md) |
 | `revert` is a word no operator can type | ⬜ | S5 | the same |
 | `tiledata.mul` and the multis are still the player's install | ⬜ | S6 — a base set replaces `map` and `statics` and neither of those | the same |
@@ -461,11 +462,38 @@ the reason the bare facet is, that a long route amortises a corner. Every one of
 the 192 pairs failed the bounded search, none was refused by the corridor, and
 none was near enough for the client to refuse without asking.
 
-So P1 opens: the p95 the plan set as its gate is a quarter, and the ring a body
-clicks from is 32%. What is *not* settled by this is which of the three ways to
-give a wide run intermediate representatives to take — that is four more numbers
-(nodes, edges, bake time, long-query p95) against this one, and the plan holds
-them.
+So P1 opened, and **is now built**: a wide run gets a representative every
+`PORTAL_SPACING` crossings, 16, between its two ends — the simplest of the three
+options, and the one whose bound on the detour is the spacing itself. What that
+costs and buys, all of it measured on this facet on one host, `ROUTING_VERSION`
+4 against 5:
+
+| | corners only | every 16 | every 8 |
+|---|---|---|---|
+| nodes | 71,545 | 95,672 (+34%) | 144,417 (+102%) |
+| edges | 416,122 | 740,339 (+78%) | 1,819,968 (+337%) |
+| artifact | 7.84 MB | 10.20 MB | 17.50 MB |
+| whole-facet bake | 10.8 s | 19.8 s | 30.7 s |
+| publish rebake, two rings | 41.6 ms | 45.9 ms | 58.3 ms |
+| houses detour p95, 16 tiles out | **32%** | **7%** | **7%** |
+| houses detour p95, 24 tiles out | 18% | 6% | 5% |
+| long-query p95, worst ring band | 3.1 ms | 6.0 ms | 13.2 ms |
+
+**Eight buys nothing sixteen has not already bought.** The castle's region was
+crossable only at its corners; one crossing in the middle of the border is the
+whole repair, and halving the spacing again only pays for it twice — 4.4× the
+edges of the old graph against 1.8×, and a long query that is twice as dear
+again. Sixteen is what shipped.
+
+What it does not buy is the bare facet: the ring bands are 13/3/11/5/3/4% at the
+p95 against 13/3/10/5/4/4% before, which is the same reading with noise on it.
+That was the argument for measuring the houses case in the first place.
+
+**The price is real and is not noise.** A whole-facet bake is 83% dearer and a
+long query up to twice; what stays cheap is the path that runs during play — a
+publish rebakes two rings in 45.9 ms against 41.6 — and the walk-path corridor,
+which the live join dominates, moves from ~32 ms to ~42 ms. That last one is
+finding 28's number and P3's problem, not this one's.
 
 Findings 25 to 29 are one track and are held as one:
 [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md) is
@@ -485,15 +513,17 @@ the world it protects).
 
 ## Before running anything
 
-**Rebake first.** `ROUTING_VERSION` is 4 and a shard with an older artifact does
+**Rebake first.** `ROUTING_VERSION` is 5 and a shard with an older artifact does
 not boot — deliberately, because the alternative is a graph that answers with a
-one-storey world:
+one-storey world, or (version 4) one whose regions are crossed at their corners
+and nowhere else:
 
 ```sh
 cargo run --release -p openshard-movement --bin openshard-navigation-bake -- --facet 0
 ```
 
-It takes 11.7 s on Felucca. A shard that was *edited* and then restarted no
+It takes 19.8 s on Felucca — 11.7 s until P1 gave a wide border a crossing every
+sixteen tiles instead of two. A shard that was *edited* and then restarted no
 longer needs this: boot replays the log's missed chunks into the artifact and
 writes it back.
 
