@@ -170,6 +170,22 @@ impl<'a> Bodies<'a> {
     pub const fn is_empty(self) -> bool {
         self.standing.is_empty()
     }
+
+    /// Where they stand, to copy.
+    ///
+    /// **For a caller that has to hand this reading to another thread**, which a
+    /// borrow cannot cross: a client planning off the frame thread takes a copy
+    /// of the crowd the way it takes a copy of the live layer beside it, and the
+    /// worker builds its own [`Bodies::standing`] over what it owns. The sort
+    /// order travels with the slice, so the copy is as usable as the original.
+    ///
+    /// Nothing else wants it. Every reader inside a search asks
+    /// [`blocks`](Self::blocks) about a tile it has in hand, which is the whole
+    /// reason this type keeps its slice private.
+    #[must_use]
+    pub const fn feet(self) -> &'a [Point] {
+        self.standing
+    }
 }
 
 /// The map, the live world over it, how the doors are read, and who is standing
