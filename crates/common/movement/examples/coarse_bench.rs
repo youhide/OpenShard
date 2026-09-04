@@ -21,6 +21,19 @@
 //! Destinations are sampled off the map rather than named, so the run is
 //! reproducible without lore: at each distance band, the ring around the origin
 //! is walked and the first standable tiles on it are taken.
+//!
+//! # Two readings, and they answer different questions
+//!
+//! `--rings` (the default) is the one above: a bare facet, a spread of
+//! distances, and what the hierarchy costs against flat A\* on ground nobody
+//! has built on.
+//!
+//! `--houses` is the other one, and it is the case a player is in: a design
+//! laid live the way a client lays a house it is shown, and a click on it from
+//! a body standing outside. Those destinations fail the bounded search for a
+//! reason that is **not** distance — a roof is ten tiles away and a hundred
+//! steps of stairs — so the corridor answers them however near they are, and
+//! the detour is what the player watches. See [`houses`].
 
 use std::path::PathBuf;
 use std::time::{
@@ -36,11 +49,13 @@ use openshard_map::overlay::{
 };
 use openshard_movement::reach::Reach;
 use openshard_movement::{
+    COARSE_MIN_DISTANCE,
     Footing,
     MapTerrain,
     NavigationGraph,
     Weight,
     bake,
+    destination_place,
     find_long_path,
     find_path,
     search_path,
@@ -79,6 +94,31 @@ struct Cli {
     /// Also run the old open-world comparison this example used to be.
     #[arg(long, default_value_t = false)]
     synthetic: bool,
+    /// Also read the detour over ground somebody has built on — see [`houses`].
+    #[arg(long, default_value_t = false)]
+    houses:    bool,
+    /// The distance-band reading over the bare facet: what this example is
+    /// unless it is told otherwise.
+    ///
+    /// A knob rather than an implication of `--houses`, because the two answer
+    /// different questions and a run that wants both should not have to guess
+    /// which one it is getting.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    rings:     bool,
+    /// The design `--houses` lays, as `dx,dy,dz,graphic,flags` rows.
+    ///
+    /// Absent is the castle the route journal's session was walked at, which
+    /// ships with this crate's tests.
+    #[arg(long, value_name = "CSV")]
+    design:    Option<PathBuf>,
+    /// Where that design's origin goes, as `X,Y,Z`.
+    #[arg(
+        long,
+        value_name = "X,Y,Z",
+        default_value = "1333,1882,0",
+        value_parser = origin_at
+    )]
+    design_at: Point,
     /// What an *unbounded* exact search may spend, so the corridor's route has
     /// something to be long against. Zero leaves the detour unmeasured.
     ///
@@ -100,6 +140,10 @@ struct Cli {
 
 /// One destination, answered both ways.
 struct Reading {
+    /// Where the body stood. The ring reading asks every destination from one
+    /// origin; the houses reading asks each from wherever a body could stand
+    /// that far from the building, and a detour is a property of the pair.
+    from: Point,
     x: u16,
     y: u16,
     distance: u32,
@@ -172,12 +216,14 @@ fn detours(readings: &[Reading]) {
         .expect("the band has a measured reading");
     let index = |percentile: usize| measured[(measured.len() * percentile).div_ceil(100).saturating_sub(1)];
     println!(
-        "    detour  measured={}/{}  p50={:>4}% p95={:>4}% worst={:>4}% at ({}, {}) — {} steps against {}",
+        "    detour  measured={}/{}  p50={:>4}% p95={:>4}% worst={:>4}% from ({}, {}) to ({}, {}) — {} steps against {}",
         measured.len(),
         readings.len(),
         index(50),
         index(95),
         worst.detour().expect("filtered"),
+        worst.from.x,
+        worst.from.y,
         worst.x,
         worst.y,
         worst.coarse_steps.expect("a detour has a corridor"),
@@ -238,6 +284,222 @@ fn sample_ring(terrain: &MapTerrain<'_>, origin: Point, radius: u32, width: u32,
         }
     }
     found
+}
+
+/// The castle the route journal's session was walked at — 2196 components at
+/// `(1333, 1882, 0)` on Felucca, exported from a shard's `house_designs`.
+///
+/// The same file `real_routes.rs` asserts against, so the number this prints
+/// and the route that test pins are about one building.
+const CASTLE_DESIGN: &str = include_str!("../tests/data/castle-1333-1882.csv");
+/// Where a body stands to click on the building, as Chebyshev distance from its
+/// centre.
+///
+/// All of them past [`COARSE_MIN_DISTANCE`]: nearer than that a client refuses a
+/// destination the bounded search could not reach without asking the graph at
+/// all, which is a different defect (`docs/world/README.md`'s finding 24) and
+/// not a detour.
+const HOUSE_RINGS: [u32; 4] = [16, 24, 32, 48];
+/// Clicks sampled over the building, spread across its footprint.
+const HOUSE_CLICKS: usize = 6;
+
+/// `X,Y,Z` — where a design's origin is laid.
+fn origin_at(text: &str) -> Result<Point, String> {
+    let fields: Vec<&str> = text.split(',').map(str::trim).collect();
+    let [x, y, z] = fields.as_slice() else {
+        return Err(format!("{text} is not X,Y,Z"));
+    };
+    Ok(Point::new(
+        x.parse().map_err(|_| format!("{x} is not an x"))?,
+        y.parse().map_err(|_| format!("{y} is not a y"))?,
+        z.parse().map_err(|_| format!("{z} is not a z"))?,
+    ))
+}
+
+/// What the corner rule costs **on ground somebody has built on** — the reading
+/// `plans/world/pathfinding/PLAN.md`'s P1 is gated on.
+///
+/// The ring reading above measures the bare facet, where a long route amortises
+/// a corner and the worst band is 13%. The case a player meets is the other one:
+/// a destination a few tiles away that the bounded search cannot reach *for a
+/// reason that is not distance* — a roof, a courtyard, a cellar behind one door
+/// — where the corridor is asked despite the destination being near, and every
+/// tile of detour is a tile the player watches their body walk the wrong way.
+///
+/// So: the building laid live the way a client lays a house it is shown, the
+/// bare facet as the guide (which is what the graph was baked over), and a
+/// click on the building from each of several distances. The detour is the
+/// corridor's route against the shortest one the ground holds, exactly as in
+/// the ring reading.
+fn houses(
+    cli: &Cli,
+    terrain: &MapTerrain<'_>,
+    tiles: &openshard_tiles::TileData,
+    graph: &NavigationGraph,
+    width: u32,
+    height: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let text = match &cli.design {
+        Some(path) => std::fs::read_to_string(path)?,
+        None => CASTLE_DESIGN.to_owned(),
+    };
+    let design = openshard_movement::design::Design::parse(&text)?;
+    let at = cli.design_at;
+    let mut overlay = Overlay::default();
+    design.lay(&mut overlay, tiles, at);
+    // The two grounds the client's own query reads: the live world a body walks
+    // and opens doors in, and the bare map the graph was baked over. Handing
+    // `find_long_path` the live layer as its guide would measure a graph nobody
+    // has.
+    let live = Footing::new(Some(*terrain), &overlay, Doors::AllOpen);
+    let nothing_placed = Overlay::default();
+    let guide = Footing::new(Some(*terrain), &nothing_placed, Doors::AsTheyStand);
+
+    let footprint = design.footprint(at);
+    let covered: std::collections::HashSet<(u16, u16)> =
+        footprint.iter().map(|tile| (tile.x, tile.y)).collect();
+    let centre = {
+        let (x, y) = footprint.iter().fold((0_u64, 0_u64), |(x, y), tile| {
+            (x + u64::from(tile.x), y + u64::from(tile.y))
+        });
+        let count = footprint.len().max(1) as u64;
+        Point::new((x / count) as u16, (y / count) as u16, at.z)
+    };
+    // The clicks: the highest thing each tile draws, which is what a cursor
+    // hits, resolved to a place to stand the way the client resolves it.
+    //
+    // **Filtered to places a body actually stands**, and only then spread over
+    // what is left. A castle is mostly wall and roof edge, and a click that
+    // resolves into masonry is a refusal every router agrees about — sampling
+    // those measures the sampler. Striding the raw footprint is worse still:
+    // the tiles come in rows, and every stride that shares a factor with the
+    // row width picks one column of the building.
+    let standing: Vec<Point> = design
+        .tops(at)
+        .into_iter()
+        .map(|top| destination_place(&live, centre, top))
+        .filter(|place| openshard_movement::can_step(&live, *place, *place).is_some())
+        .collect();
+    let stride = (standing.len() / HOUSE_CLICKS).max(1);
+    let clicks: Vec<Point> = standing
+        .iter()
+        .copied()
+        .step_by(stride)
+        .take(HOUSE_CLICKS)
+        .collect();
+    println!(
+        "  design at ({}, {}, {}): {} components, {} tiles, centre ({}, {}); {} of them stood on, {} clicks sampled",
+        at.x,
+        at.y,
+        at.z,
+        design.components().len(),
+        footprint.len(),
+        centre.x,
+        centre.y,
+        standing.len(),
+        clicks.len(),
+    );
+    for click in &clicks {
+        println!("    click ({}, {}, {})", click.x, click.y, click.z);
+    }
+
+    for ring in HOUSE_RINGS {
+        // Standing places on the bare terrain, outside the building: a tile the
+        // design covers is not somewhere a body was standing when it clicked.
+        let starts: Vec<Point> = sample_ring(terrain, centre, ring, width, height)
+            .into_iter()
+            .filter(|start| !covered.contains(&(start.x, start.y)))
+            .collect();
+        let mut readings = Vec::with_capacity(starts.len() * clicks.len());
+        let mut bounded_answered = 0_usize;
+        let mut too_near = 0_usize;
+        for from in &starts {
+            for to in &clicks {
+                let distance = u32::from(to.x.abs_diff(from.x)).max(u32::from(to.y.abs_diff(from.y)));
+                // The client's first question, at the client's own budget. When
+                // it arrives the graph is never asked and there is no detour to
+                // measure — that is the case this reading is *not* about.
+                let started = Instant::now();
+                let bounded = search_path(&live, *from, *to, cli.budget, Weight::PLANNING);
+                let flat = started.elapsed();
+                if bounded.arrived {
+                    bounded_answered += 1;
+                    continue;
+                }
+                // And the case the client refuses outright rather than asking
+                // the graph: near in a straight line, unreachable in fact.
+                if distance <= COARSE_MIN_DISTANCE {
+                    too_near += 1;
+                    continue;
+                }
+                let started = Instant::now();
+                let route = find_long_path(&guide, &live, graph, *from, *to, cli.budget, Weight::PLANNING);
+                let coarse = started.elapsed();
+                let exact = (cli.exact > 0)
+                    .then(|| search_path(&live, *from, *to, cli.exact, Weight::PLANNING))
+                    .filter(|search| search.arrived)
+                    .map(|search| search.route.len());
+                readings.push(Reading {
+                    from: *from,
+                    x: to.x,
+                    y: to.y,
+                    distance,
+                    flat,
+                    flat_nodes: bounded.explored,
+                    flat_arrived: bounded.arrived,
+                    coarse,
+                    coarse_steps: route.map(|route| route.len()),
+                    exact_steps: exact,
+                    // No flood: the destination is a building this run laid
+                    // itself, and what a refusal means about it is read off the
+                    // exact search beside it rather than off a component.
+                    walkable_from_origin: None,
+                });
+            }
+        }
+        let asked = readings.len();
+        let refused = readings
+            .iter()
+            .filter(|reading| reading.coarse_steps.is_none())
+            .count();
+        println!(
+            "  ring {ring}: starts={} clicks={} pairs={}  bounded_answered={bounded_answered} \
+             too_near={too_near} asked_the_graph={asked} refused={refused}",
+            starts.len(),
+            clicks.len(),
+            starts.len() * clicks.len(),
+        );
+        if readings.is_empty() {
+            continue;
+        }
+        spread(
+            "coarse",
+            readings.iter().map(|reading| reading.coarse).collect(),
+            asked - refused,
+            asked,
+        );
+        detours(&readings);
+        for reading in &readings {
+            let steps = reading
+                .coarse_steps
+                .map_or_else(|| "-".to_owned(), |steps| steps.to_string());
+            let detour = match (reading.exact_steps, reading.detour()) {
+                (Some(exact), Some(detour)) => format!("shortest={exact} detour={detour}%"),
+                _ => "no shortest route inside --exact".to_owned(),
+            };
+            println!(
+                "      ({:5}, {:5}) -> ({:5}, {:5}) d={:<4} coarse {:8.3} ms steps={:<5} {detour}",
+                reading.from.x,
+                reading.from.y,
+                reading.x,
+                reading.y,
+                reading.distance,
+                ms(reading.coarse),
+                steps,
+            );
+        }
+    }
+    Ok(())
 }
 
 fn synthetic() {
@@ -306,10 +568,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let map = ground.world.snapshot.map();
     let (width, height) = (map.width(), map.height());
 
+    println!(
+        "facet {facet} {width}x{height}: {regions} regions, {nodes} nodes, {edges} edges; budget={} repeat={}",
+        cli.budget, cli.repeat,
+    );
+
+    if cli.houses {
+        println!("houses: what the corner rule costs a click on a building");
+        houses(&cli, &terrain, &ground.tiles, &graph, width, height)?;
+    }
+    if !cli.rings {
+        return Ok(());
+    }
+
     let origin = standable(&terrain, cli.x, cli.y).ok_or("nothing stands at the origin")?;
     println!(
-        "facet {facet} {width}x{height}: {regions} regions, {nodes} nodes, {edges} edges; from ({}, {}, {}) budget={} repeat={}",
-        origin.x, origin.y, origin.z, cli.budget, cli.repeat,
+        "rings: from ({}, {}, {}) over the bare facet",
+        origin.x, origin.y, origin.z,
     );
 
     // The ground truth a refusal is read against: whatever a router says about
@@ -362,6 +637,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .filter(|search| search.arrived)
                 .map(|search| search.route.len());
             readings.push(Reading {
+                from: origin,
                 x: to.x,
                 y: to.y,
                 distance,

@@ -35,6 +35,7 @@ use openshard_movement::bake::{
     WorldSource,
     open_facet,
 };
+use openshard_movement::design::Design;
 use openshard_movement::{
     COARSE_MIN_DISTANCE,
     Footing,
@@ -497,49 +498,13 @@ const CASTLE_ROOF: Point = Point::new(1345, 1894, 88);
 
 /// The castle laid into an overlay the way a client lays a house it is shown.
 ///
-/// `client/app`'s `clutter::fill`, in the one form this crate can reach: each
-/// drawn component becomes the covers its art carries, based at the height the
-/// component stands at, and every component of one tile goes in together.
+/// The laying itself is [`Design`], which `coarse_bench` reads the same file
+/// with: what a house does to a route is measured there and asserted here, and
+/// two loaders would be two buildings.
 fn place_castle(overlay: &mut Overlay, tiles: &openshard_tiles::TileData, origin: Point) {
-    let mut covers: HashMap<Tile, Vec<openshard_map::overlay::Cover>> = HashMap::new();
-    for line in CASTLE_DESIGN.lines().filter(|line| !line.is_empty()) {
-        let mut fields = line.split(',').map(|field| field.trim());
-        let mut next = || fields.next().expect("a design row has five fields");
-        let dx: i32 = next().parse().expect("dx");
-        let dy: i32 = next().parse().expect("dy");
-        let dz: i32 = next().parse().expect("dz");
-        let graphic: u16 = next().parse().expect("graphic");
-        let flags: u64 = next().parse().expect("flags");
-        // The same skip the client makes: a component the house does not draw is
-        // not in anybody's way either. See `multi::Component::drawn`.
-        if flags == 0 {
-            continue;
-        }
-        let Ok(x) = u16::try_from(i32::from(origin.x) + dx) else {
-            continue;
-        };
-        let Ok(y) = u16::try_from(i32::from(origin.y) + dy) else {
-            continue;
-        };
-        let Ok(z) = i8::try_from(i32::from(origin.z) + dz) else {
-            continue;
-        };
-        let tile = tiles.static_tile(graphic);
-        let laid = openshard_map::overlay::Cover::of_static(tile).based_at(z);
-        // A leaf is marked as one, because a client plans its own route through
-        // a shut door it is going to open — `Doors::AllOpen`, and the whole
-        // reason the session's plans reached a roof behind one. The tiledata
-        // flag rather than `client/render`'s open/shut table: which of a pair a
-        // graphic is does not matter to a step that opens either.
-        let laid = match tile.flags.has(openshard_tiles::TileFlags::DOOR) {
-            true => laid.as_door(),
-            false => laid,
-        };
-        covers.entry(Tile::new(x, y)).or_default().extend(laid);
-    }
-    for (tile, covers) in covers {
-        overlay.set(tile, covers);
-    }
+    Design::parse(CASTLE_DESIGN)
+        .expect("the exported castle is five numbers per row")
+        .lay(overlay, tiles, origin);
 }
 
 /// The report itself: the castle, the click on its roof, and the two

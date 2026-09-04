@@ -55,6 +55,7 @@
 //! defence that works is server-side: see [`WalkPace`].
 
 pub mod bake;
+pub mod design;
 mod detour;
 pub mod door_frames;
 mod footing;
