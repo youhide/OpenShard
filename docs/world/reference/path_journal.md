@@ -11,16 +11,37 @@ file; `client/app`'s `steer.rs` is what fills it in; the replay is
 
 ## Recording
 
+**It is already on.** A client writes `path-journal.jsonl` where it was
+started — beside `client_ui.ron` — from the first click of every session:
+
 ```sh
-OPENSHARD_PATH_JOURNAL=/tmp/paths.jsonl cargo run -p openshard-playground
+cargo run -p openshard-playground
 ```
 
-The variable is read **once**, when the process starts, and names the file the
-session writes; without it nothing is recorded and nothing is opened. The client
-prints the path it is writing to on stderr as it starts. The file is truncated
-per session — a journal is about *this* afternoon — and every line is flushed as
-it is written, so a client that is killed still leaves the click that killed it
-on disk.
+The switch is in the **F1 window, Tile tab**, under the terrain overlay: a
+checkbox and a line saying what has been written this session (`12 orders, 47
+plans, 31 KiB`). It persists in `client_ui.ron` like every other F1 setting, and
+a settings file written before the journal existed keeps one — a missing field
+is not a person having said no.
+
+It is not an environment variable, and that is the point. A route walks into a
+wall *once*, in the middle of playing; a diagnostic that has to be predicted
+before that session is a diagnostic that is not there the one time it matters.
+
+Three properties worth knowing:
+
+- **Nothing is opened until there is a line worth writing.** A client started to
+  look at a gump plans no route and creates no file.
+- **The session before this one is kept** as `path-journal.prev.jsonl`: the
+  first line of a new session moves the old file aside rather than over it.
+- **Every line is flushed as it is written**, so a client that is killed still
+  leaves the click that killed it on disk. Turning the switch off keeps what is
+  already there and stops adding to it; turning it back on writes a fresh
+  `session` line, so a reader can see where the gap was.
+
+The journal stops itself at 64 MiB and says so in the file (a `closed` line) and
+in the F1 status line — a journal that is always on would otherwise outlive the
+session it was interesting for.
 
 One JSON object per line, five kinds of them:
 
@@ -31,6 +52,7 @@ One JSON object per line, five kinds of them:
 | `plan` | one search answered that destination — **several per order**, because a route is replanned whenever what is left of the last one runs out |
 | `arrived` | the body reached the place the order named |
 | `abandoned` | the order gave up: four steps that did not move the body |
+| `closed` | the journal reached its size cap and stopped — the difference between a file cut short by policy and one cut short by a crash |
 
 A `plan` line carries the question (`from`, `to`, and the standing place `to`
 resolves to), both searches as they reported themselves (`arrived`, `exit`,
@@ -71,10 +93,11 @@ cargo run --release -p openshard-movement --example path_replay -- --episode 3 -
 
 `--release` matters: the run replays every plan of an episode, and a debug
 build's A\* is roughly twenty times slower than the one the session ran. The
-journal comes from `OPENSHARD_PATH_JOURNAL` and the facet from
-`OPENSHARD_CLIENT` (plus `OPENSHARD_BASE_SET` when the shard is running a world
-of ours) unless a flag names them. With no `--episode` it replays the last one,
-which is almost always the click somebody has just come to complain about.
+journal defaults to `path-journal.jsonl` in the working directory — pass
+`--journal path-journal.prev.jsonl` for the session before this one — and the
+facet comes from `OPENSHARD_CLIENT` (plus `OPENSHARD_BASE_SET` when the shard is
+running a world of ours). With no `--episode` it replays the last one, which is
+almost always the click somebody has just come to complain about.
 
 An **episode** is one destination: the click, every replan under it, and how it
 ended. `--list` prints one line each.

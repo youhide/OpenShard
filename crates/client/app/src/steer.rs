@@ -215,7 +215,7 @@ use openshard_movement::{
     WALK_HOLD,
 };
 use openshard_pathlog::record;
-use openshard_pathlog::write::journal;
+use openshard_pathlog::write::Journal;
 use openshard_protocol::direction::{
     Direction,
     Facing,
@@ -663,8 +663,22 @@ struct CachedPlan {
 const STUCK_STEPS: u8 = 4;
 
 /// Which way the player is asking to walk, from every input that can ask.
-#[derive(Clone, Debug, Default)]
+///
+/// **Not `Clone`**, since it took the route journal: a journal is an open file
+/// and a place in it, and two of them writing the same lines is not a copy of
+/// anything. Nothing ever cloned one.
+#[derive(Debug, Default)]
 pub struct Steering {
+    /// Where the routes this plans are written down, when a session is keeping
+    /// a journal — see [`Journal`] and `docs/world/reference/path_journal.md`.
+    ///
+    /// **Held here rather than reached for**, because this is the thing that
+    /// runs a search: the plan cache above it and the refusal below it are the
+    /// other two records of the same act. `None` is a caller with no journal at
+    /// all — every test in this file, and a client that has been told not to
+    /// keep one is `Some` with the writing set aside instead, so that the F1
+    /// window has something to show and to switch back on.
+    journal:     Option<Journal>,
     /// How many searches this steering has run.
     ///
     /// Test-only, and on the *caller* rather than on the ground: "did a search
@@ -1062,7 +1076,7 @@ impl Steering {
             // there". A drag restates the same one on every mouse-move and is
             // not one of these — a journal that wrote a line per raw event
             // would bury the click that matters under fifty copies of it.
-            if let Some(journal) = journal() {
+            if let Some(journal) = self.journal.as_mut() {
                 journal.record(record::Event::Order(record::Order {
                     from: record::Place::of(from),
                     to:   record::Place::of(at),
@@ -1259,12 +1273,13 @@ impl Steering {
                 _ => 0,
             };
             if self.stalled >= STUCK_STEPS {
-                if let Some(journal) = journal() {
+                let stalled = self.stalled;
+                if let Some(journal) = self.journal.as_mut() {
                     if let Some(goal) = self.goal {
                         journal.record(record::Event::Abandoned(record::Abandonment {
-                            at:      record::Place::of(from),
-                            goal:    record::Place::of(goal),
-                            stalled: self.stalled,
+                            at: record::Place::of(from),
+                            goal: record::Place::of(goal),
+                            stalled,
                         }));
                     }
                 }
@@ -1299,7 +1314,7 @@ impl Steering {
             // order.
             if from == destination_place(&ground.live, from, at) {
                 // Arrived — the ordinary way this ends.
-                if let Some(journal) = journal() {
+                if let Some(journal) = self.journal.as_mut() {
                     journal.record(record::Event::Arrived(record::Arrival {
                         at:   record::Place::of(from),
                         goal: record::Place::of(at),
@@ -1698,11 +1713,33 @@ impl Steering {
 }
 
 impl Steering {
-    /// [`plan`], counted. The single place this module runs a search.
-    fn planned(&self, ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
+    /// [`plan`], counted and journalled. The single place this module runs a
+    /// search.
+    fn planned(&mut self, ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
         #[cfg(test)]
         self.plans.set(self.plans.get() + 1);
-        plan(ground, from, goal)
+        plan(ground, from, goal, self.journal.as_mut())
+    }
+
+    /// Keep a journal of the routes this plans from now on.
+    ///
+    /// The client opens it where it opens everything else and hands it over;
+    /// this end only ever writes to it. A journal handed over while one is
+    /// already here replaces it, which is what a facet arriving after startup
+    /// does.
+    pub fn keep_journal(&mut self, journal: Journal) {
+        self.journal = Some(journal);
+    }
+
+    /// The journal, for the window that draws what it has done.
+    #[must_use]
+    pub fn journal(&self) -> Option<&Journal> {
+        self.journal.as_ref()
+    }
+
+    /// The journal, for the switch that turns it off and on.
+    pub fn journal_mut(&mut self) -> Option<&mut Journal> {
+        self.journal.as_mut()
     }
 }
 
@@ -1758,7 +1795,10 @@ impl Steering {
 /// go. The search resolves an asked-for height against the surfaces that are
 /// really there ([`openshard_movement::destination_place`]), so what this owes
 /// it is the height the player actually pointed at.
-pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
+///
+/// The journal is the caller's, and is written to at every one of the four ways
+/// out below — see [`record_plan`]. `None` is a caller keeping none.
+pub fn plan(ground: Readings<'_>, from: Point, goal: Point, journal: Option<&mut Journal>) -> Option<Plan> {
     let started = Instant::now();
     // The two readings of one ground. Which one is "real" is the caller's —
     // `ground.live` as it was handed over — because an auto-door client walks
@@ -1779,6 +1819,7 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
             });
             debug_plan(from, goal, started.elapsed(), result.as_ref());
             record_plan(
+                journal,
                 &real,
                 from,
                 goal,
@@ -1810,6 +1851,7 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
         let Some(open) = find_path_toward(&real, from, goal, PLAN_BUDGET, Weight::PLANNING) else {
             debug_plan(from, goal, started.elapsed(), None);
             record_plan(
+                journal,
                 &real,
                 from,
                 goal,
@@ -1832,6 +1874,7 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
         });
         debug_plan(from, goal, started.elapsed(), result.as_ref());
         record_plan(
+            journal,
             &real,
             from,
             goal,
@@ -1888,6 +1931,7 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
     });
     debug_plan(from, goal, started.elapsed(), result.as_ref());
     record_plan(
+        journal,
         &real,
         from,
         goal,
@@ -1915,8 +1959,14 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
 /// place to stand, and a replay that did not know which is which would go
 /// looking for a bug in the difference. See
 /// [`destination_place`](openshard_movement::destination_place).
-fn record_plan(footing: &Footing<'_>, from: Point, goal: Point, answered: Answered<'_>) {
-    let Some(journal) = journal() else {
+fn record_plan(
+    journal: Option<&mut Journal>,
+    footing: &Footing<'_>,
+    from: Point,
+    goal: Point,
+    answered: Answered<'_>,
+) {
+    let Some(journal) = journal else {
         return;
     };
     let plan = answered.plan;
@@ -2438,7 +2488,7 @@ mod tests {
         let ground = over(&world);
         let under = Point::new(100, 100, 0);
 
-        let upstairs = plan(Readings::plain(ground), under, Point::new(100, 100, 4))
+        let upstairs = plan(Readings::plain(ground), under, Point::new(100, 100, 4), None)
             .expect("the mezzanine has a way up");
         assert_eq!(
             upstairs.open,
@@ -2454,7 +2504,7 @@ mod tests {
         assert_eq!(at, Point::new(100, 100, 4), "and it lands on the upper floor");
 
         assert_eq!(
-            plan(Readings::plain(ground), under, under)
+            plan(Readings::plain(ground), under, under, None)
                 .expect("a body is always somewhere")
                 .open,
             Vec::new(),
@@ -2774,7 +2824,7 @@ mod tests {
     fn a_way_through_the_world_as_it_stands_is_the_whole_plan() {
         let doorwall = doorwall();
         let open = over(&doorwall).reading(Doors::AllOpen);
-        let plan = plan(Readings::plain(open), here(), BEYOND).expect("the doorway is open");
+        let plan = plan(Readings::plain(open), here(), BEYOND, None).expect("the doorway is open");
         assert_eq!(plan.open, vec![Direction::East; 5]);
         assert!(
             plan.barred.is_empty(),
@@ -2798,8 +2848,8 @@ mod tests {
     fn a_route_goes_round_a_body_standing_in_it() {
         let bystander = [Point::new(here().x + 1, here().y, 0)];
         let ground = open_ground().among(Bodies::standing(&bystander));
-        let plan =
-            plan(Readings::plain(ground), here(), BEYOND).expect("open ground has a way round one person");
+        let plan = plan(Readings::plain(ground), here(), BEYOND, None)
+            .expect("open ground has a way round one person");
         assert!(
             plan.barred.is_empty(),
             "somebody in the way is a longer walk, not a barred one"
@@ -2840,7 +2890,7 @@ mod tests {
             .reading(Doors::AllOpen)
             .among(Bodies::standing(&standing));
         let plan =
-            plan(Readings::plain(ground), here(), BEYOND).expect("the walk goes as far as the doorway");
+            plan(Readings::plain(ground), here(), BEYOND, None).expect("the walk goes as far as the doorway");
         assert!(
             plan.barred.is_empty(),
             "a person standing in a doorway was reported to the player as a shut leaf"
@@ -2881,6 +2931,7 @@ mod tests {
             },
             from,
             goal,
+            None,
         )
         .expect("the coarse graph reaches across the facet");
         assert_eq!(plan.open.len(), 701);
@@ -2903,6 +2954,7 @@ mod tests {
             },
             from,
             goal,
+            None,
         )
         .expect("the doors-open map still has a long route");
         assert!(!plan.barred.is_empty(), "the shut leaf remains a visible refusal");
@@ -2949,6 +3001,7 @@ mod tests {
             },
             here(),
             BEYOND,
+            None,
         )
         .expect("the map itself has a doorway");
         assert_eq!(
@@ -2998,6 +3051,7 @@ mod tests {
             },
             here(),
             Point::new(105, 100, 0),
+            None,
         )
         .expect("the body can still walk about inside its box");
         assert_eq!(
@@ -3026,6 +3080,7 @@ mod tests {
             Readings::plain(open_ground()),
             here(),
             Point::new(here().x + 2_000, here().y, 0),
+            None,
         )
         .expect("open ground is walkable toward");
         assert_eq!(
@@ -3046,6 +3101,7 @@ mod tests {
             },
             here(),
             BEYOND,
+            None,
         )
         .expect("the open snapshot provides a route");
         assert_eq!(plan.open_points.len(), 2);
@@ -3074,6 +3130,7 @@ mod tests {
             },
             here(),
             Point::new(104, 100, 0),
+            None,
         )
         .expect("there is a way round a single tile");
         assert!(

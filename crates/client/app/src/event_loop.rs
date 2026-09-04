@@ -1069,6 +1069,10 @@ impl ApplicationHandler<()> for App {
             self.control.rig(),
             self.world.presentation.crowd.ease(),
             self.scope.span(),
+            // A client keeping no journal at all saves the default rather than
+            // "off": the absence of a journal is this build's business, not a
+            // choice the person made about the next session.
+            self.steer.journal().is_none_or(|journal| journal.tally().writing),
         );
         f1.apply_pending_request(&self.pending);
         self.desk.f1 = Some(f1);

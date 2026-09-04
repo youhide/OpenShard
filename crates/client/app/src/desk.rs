@@ -851,6 +851,17 @@ pub struct F1Settings {
     pub rig_never_cut: bool,
     pub body_ease_tau: f32,
     pub scope_seconds: f32,
+    /// Whether this client writes the route journal — one line per click and
+    /// per replan, into `path-journal.jsonl` beside this file. See
+    /// `docs/world/reference/path_journal.md`.
+    ///
+    /// **On unless somebody says otherwise**, which is the whole reason it is a
+    /// setting rather than an environment variable: a route walks into a wall
+    /// once, in the middle of playing, and a diagnostic that has to be
+    /// predicted before that session is a diagnostic that is not there. A file
+    /// written by a client that never heard of this field gets the default,
+    /// which is on.
+    pub path_journal: bool,
 }
 
 /// The two meaningful forms of a rig's lift-cut threshold.
@@ -912,6 +923,7 @@ impl Default for F1Settings {
             rig_never_cut: !rig.lift_cut.is_finite(),
             body_ease_tau: crate::STARTUP_EASE.tau,
             scope_seconds: crate::SCOPE_SPAN.as_secs_f32(),
+            path_journal: true,
         }
     }
 }
@@ -992,7 +1004,17 @@ impl F1Settings {
 
     /// Capture exactly the user-facing state, deliberately excluding caches,
     /// counters and the current player's height.
-    pub fn from_runtime(graphics: &GraphicsSettings, rig: Rig, ease: Ease, scope_span: Duration) -> Self {
+    ///
+    /// `path_journal` comes in as its own argument rather than off `graphics`
+    /// because it is not a graphics setting at all — it belongs to the thing
+    /// that plans routes, and nothing about a frame depends on it.
+    pub fn from_runtime(
+        graphics: &GraphicsSettings,
+        rig: Rig,
+        ease: Ease,
+        scope_span: Duration,
+        path_journal: bool,
+    ) -> Self {
         let (rig_lift_cut, rig_never_cut) = match RuntimeLiftCut::new(rig.lift_cut) {
             RuntimeLiftCut::CutAt(value) => (value, false),
             // A fresh snapshot has no dormant slider value to retain. The rig's
@@ -1037,6 +1059,7 @@ impl F1Settings {
             rig_never_cut,
             body_ease_tau: ease.tau,
             scope_seconds: scope_span.as_secs_f32(),
+            path_journal,
         }
     }
 
@@ -1087,6 +1110,9 @@ impl F1Settings {
         }
         if let Some(value) = request.show_terrain {
             self.show_terrain = value;
+        }
+        if let Some(value) = request.path_journal {
+            self.path_journal = value;
         }
         if let Some(value) = request.show_sight {
             self.show_sight = value;
@@ -1578,6 +1604,23 @@ mod tests {
     fn old_ui_files_keep_their_startup_diagnostics_until_the_first_save() {
         let desk: Desk = ron::from_str("(tab: world)").unwrap();
         assert_eq!(desk.f1, None);
+    }
+
+    /// A settings block written before the route journal existed keeps writing
+    /// one, because on is the default and a missing field is not a person
+    /// having said no.
+    ///
+    /// The switch is the whole reason the journal is not an environment
+    /// variable, and this is the case that decides which way an upgrade goes:
+    /// every `client_ui.ron` in existence predates the field.
+    #[test]
+    fn a_settings_block_from_before_the_journal_still_keeps_one() {
+        let f1: F1Settings = ron::from_str("(show_terrain: true)").expect("fields fall back to the defaults");
+        assert!(
+            f1.path_journal,
+            "a file that never heard of it says nothing about it"
+        );
+        assert!(f1.show_terrain, "and what it does say is still read");
     }
 
     #[test]

@@ -147,6 +147,14 @@ pub struct Request {
     /// walkability lookup per visible tile and a fresh plan per frame, and that
     /// is a bill the client should only pay while somebody is looking at it.
     pub show_terrain: Option<bool>,
+    /// Start or stop writing the route journal, on the frame the box was
+    /// ticked.
+    ///
+    /// Stopping keeps the file: the lines already written are the report, and
+    /// discarding them because somebody unticked a box would throw away the
+    /// thing they are about to attach. See
+    /// `docs/world/reference/path_journal.md`.
+    pub path_journal: Option<bool>,
     /// Switch the sight overlay on or off, on the frame the box was ticked.
     ///
     /// Sent on the change like the others, though this one is the cheapest of
@@ -4274,6 +4282,65 @@ fn world_panel(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut R
     }
 }
 
+/// The route journal's switch, and what it has written this session.
+///
+/// **Beside the route counts and under the terrain overlay**, because it is the
+/// third control about the same question — *where would a click walk* — and the
+/// only one of the three whose answer outlives the frame.
+///
+/// It is on unless somebody turns it off: a route walks into a wall once, in
+/// the middle of playing, and a diagnostic that has to be switched on before
+/// that session is one that is never on when it matters. The counts under it
+/// are what tells a person there is something to replay — see
+/// `docs/world/reference/path_journal.md`.
+fn path_journal_controls(ui: &mut egui::Ui, hud: &Hud, request: &mut Request) {
+    let Some(tally) = &hud.path_journal else {
+        return;
+    };
+    let mut writing = tally.writing;
+    if ui
+        .checkbox(&mut writing, "route journal — every plan, to path-journal.jsonl")
+        .on_hover_text(
+            "one line per click and per replan, written as it happens. Afterwards: cargo run \
+             --release -p openshard-movement --example path_replay -- --list",
+        )
+        .changed()
+    {
+        request.path_journal = Some(writing);
+    }
+    ui.label(match &tally.stopped {
+        // A journal that gave up says so where the switch is, because the
+        // switch is the only place anybody would look for it.
+        Some(openshard_pathlog::write::Stopped::SizeCap) => {
+            format!(
+                "stopped at the {} MiB cap — {} orders, {} plans on disk",
+                openshard_pathlog::write::SIZE_CAP / (1024 * 1024),
+                tally.orders,
+                tally.plans,
+            )
+        }
+        Some(openshard_pathlog::write::Stopped::Trouble(error)) => format!("stopped: {error}"),
+        None => {
+            match tally.writing {
+                true => {
+                    format!(
+                        "{} orders, {} plans, {} KiB",
+                        tally.orders,
+                        tally.plans,
+                        tally.bytes / 1024
+                    )
+                }
+                false => {
+                    format!(
+                        "off — {} orders, {} plans already written",
+                        tally.orders, tally.plans
+                    )
+                }
+            }
+        }
+    });
+}
+
 /// The overlays over the ground, what the cursor is on, and what a click holds.
 ///
 /// Named for the tab and not for [`tile_panel`], which is the readout of *one*
@@ -4320,6 +4387,7 @@ fn tile_tab(ui: &mut egui::Ui, hud: &Hud, world: &WorldState, request: &mut Requ
             ui.label("no route");
         }
     }
+    path_journal_controls(ui, hud, request);
     ui.separator();
     let mut sight = hud.show_sight;
     if ui

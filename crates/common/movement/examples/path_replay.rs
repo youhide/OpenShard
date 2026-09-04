@@ -2,12 +2,16 @@
 //! and say what is different about the answer.
 //!
 //! ```sh
-//! # in the game: one line per click and per replan
-//! OPENSHARD_PATH_JOURNAL=/tmp/paths.jsonl cargo run -p openshard-playground
+//! # in the game: one line per click and per replan, unless F1 says otherwise
+//! cargo run -p openshard-playground
 //!
 //! # afterwards: what happened, and then the click that went wrong
 //! cargo run --release -p openshard-movement --example path_replay -- --list
 //! cargo run --release -p openshard-movement --example path_replay -- --episode 3
+//!
+//! # the session before this one
+//! cargo run --release -p openshard-movement --example path_replay -- \
+//!   --journal path-journal.prev.jsonl --list
 //! ```
 //!
 //! `--release`, and it matters: this replays every plan of an episode, and a
@@ -99,7 +103,11 @@ const GENEROUS: usize = 50_000;
 #[command(about = "Replay the routes a live client planned, over the real facet")]
 struct Cli {
     /// The journal a session wrote.
-    #[arg(long, env = "OPENSHARD_PATH_JOURNAL")]
+    ///
+    /// A client writes `path-journal.jsonl` where it was started, unless the F1
+    /// window says otherwise, and keeps the session before it as
+    /// `path-journal.prev.jsonl` — so this is normally not named at all.
+    #[arg(long, default_value = openshard_pathlog::write::DEFAULT_PATH)]
     journal:  PathBuf,
     /// The client install the facet is read from.
     #[arg(long, env = "OPENSHARD_CLIENT")]

@@ -1071,32 +1071,31 @@ pub fn run<D: Dial + Send + 'static>(
         _ => diagnostics::Navigation::Absent,
     };
 
-    // The first line of the route journal, when a session was started with one:
-    // what every line after it is about. A replay reads this to open the same
-    // facet — and to know whether a long destination was refused because there
-    // was no graph rather than because there is no way.
+    // The route journal this session will write, unless the F1 window says
+    // otherwise (which is read a few lines below, once the desk is loaded).
     //
-    // Said here rather than at the first click, because a session that plans
-    // nothing at all is still worth having a file for: "the journal is empty"
-    // and "the journal was never opened" are different reports.
-    if let Some(journal) = openshard_pathlog::write::journal() {
-        eprintln!("path journal: {}", journal.path().display());
-        journal.record(openshard_pathlog::record::Event::Session(
-            openshard_pathlog::record::Session {
-                facet:  facet.0,
-                world:  world_file
-                    .as_ref()
-                    .and_then(|path| path.file_name())
-                    .map(|name| name.to_string_lossy().into_owned()),
-                coarse: coarse.is_some(),
-                budget: steer::PLAN_BUDGET,
-                weight: {
-                    let (numerator, denominator) = openshard_movement::Weight::PLANNING.ratio();
-                    format!("{numerator}/{denominator}")
-                },
+    // Built here because this is where the facet is: the first line of the file
+    // says which world every line after it is about, and — the one thing a
+    // replay cannot work out for itself — whether a long destination was
+    // refused because there was no coarse graph rather than because there is no
+    // way. Nothing is opened by building it; the first click is what creates
+    // the file. See `docs/world/reference/path_journal.md`.
+    let path_journal = openshard_pathlog::write::Journal::at(
+        std::path::PathBuf::from(openshard_pathlog::write::DEFAULT_PATH),
+        openshard_pathlog::record::Session {
+            facet:  facet.0,
+            world:  world_file
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned()),
+            coarse: coarse.is_some(),
+            budget: steer::PLAN_BUDGET,
+            weight: {
+                let (numerator, denominator) = openshard_movement::Weight::PLANNING.ratio();
+                format!("{numerator}/{denominator}")
             },
-        ));
-    }
+        },
+    );
 
     // The sound mixer opens before a window exists, but its values belong to
     // the HUD's persisted settings just like light tuning does.
@@ -1291,6 +1290,15 @@ pub fn run<D: Dial + Send + 'static>(
             // that only ever goes where it was pointed is the one that
             // surprises nobody. Sliding is what a player opts into.
             let mut steer = steer::Steering::default();
+            // The journal goes to the thing that runs searches, and the F1
+            // setting decides whether it writes: a client told not to keep one
+            // still holds it set aside, so the checkbox has something to switch
+            // back on without the file name having to be found again.
+            let mut path_journal = path_journal;
+            if !f1.is_none_or(|f1| f1.path_journal) {
+                path_journal.set_aside();
+            }
+            steer.keep_journal(path_journal);
             steer.set_always_running(movement.always_run);
             steer.set_leeway(Leeway::Eighth);
             // The other one, and here for the same reason: what a turn costs

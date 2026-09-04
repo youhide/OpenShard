@@ -1227,6 +1227,16 @@ impl App {
         if let Some(show) = request.show_terrain {
             self.graphics.show_terrain = show;
         }
+        // The journal is the steering's, not the graphics': it is a record of
+        // what was *planned*, and nothing about a frame depends on it.
+        if let Some(writing) = request.path_journal {
+            if let Some(journal) = self.steer.journal_mut() {
+                match writing {
+                    true => journal.take_up(),
+                    false => journal.set_aside(),
+                }
+            }
+        }
         if let Some(show) = request.show_sight {
             self.graphics.show_sight = show;
         }
@@ -1589,6 +1599,7 @@ impl App {
             ttf_available: self.resources.ttf_font.is_some(),
             navigation: self.navigation.clone(),
             refusal: self.steer.refusal(),
+            path_journal: self.steer.journal().map(openshard_pathlog::write::Journal::tally),
             composites: self
                 .window
                 .as_ref()

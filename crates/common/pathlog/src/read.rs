@@ -76,7 +76,9 @@ pub fn session(entries: &[Entry]) -> Option<&Session> {
     entries.iter().find_map(|entry| {
         match &entry.event {
             Event::Session(session) => Some(session),
-            Event::Order(_) | Event::Plan(_) | Event::Arrived(_) | Event::Abandoned(_) => None,
+            Event::Order(_) | Event::Plan(_) | Event::Arrived(_) | Event::Abandoned(_) | Event::Closed(_) => {
+                None
+            }
         }
     })
 }
@@ -122,7 +124,9 @@ pub fn episodes(entries: &[Entry]) -> Vec<Episode> {
     let mut episodes: Vec<Episode> = Vec::new();
     for entry in entries {
         match &entry.event {
-            Event::Session(_) => {}
+            // Neither opens or closes an episode: one says what the file is
+            // about and the other says the file stops here.
+            Event::Session(_) | Event::Closed(_) => {}
             Event::Order(order) => {
                 episodes.push(Episode {
                     number:   episodes.len() + 1,
@@ -235,17 +239,23 @@ mod tests {
     /// reader unchanged — the round trip this crate is, end to end.
     #[test]
     fn a_session_written_is_a_session_read_back() {
-        let path = std::env::temp_dir().join("openshard-pathlog-read-test.jsonl");
+        let dir = std::env::temp_dir().join("openshard-pathlog-read-test");
+        std::fs::create_dir_all(&dir).expect("the test's own directory");
+        let path = dir.join(crate::write::DEFAULT_PATH);
         let goal = Point::new(120, 100, 0);
         {
-            let journal = Journal::create(&path);
-            journal.record(Event::Session(Session {
-                facet:  0,
-                world:  None,
-                coarse: true,
-                budget: 700,
-                weight: "5/4".to_owned(),
-            }));
+            // The session line is the journal's own first line — see
+            // `Journal::record` — so this writes four events and reads five.
+            let mut journal = Journal::at(
+                path.clone(),
+                Session {
+                    facet:  0,
+                    world:  None,
+                    coarse: true,
+                    budget: 700,
+                    weight: "5/4".to_owned(),
+                },
+            );
             journal.record(Event::Order(Order {
                 from: Place::of(Point::new(100, 100, 0)),
                 to:   Place::of(goal),
@@ -316,19 +326,34 @@ mod tests {
     /// a killed client's file ends, and the lines before it are the report.
     #[test]
     fn a_journal_cut_off_mid_line_reads_up_to_the_cut() {
-        let path = std::env::temp_dir().join("openshard-pathlog-truncated-test.jsonl");
+        let dir = std::env::temp_dir().join("openshard-pathlog-truncated-test");
+        std::fs::create_dir_all(&dir).expect("the test's own directory");
+        let path = dir.join(crate::write::DEFAULT_PATH);
         {
-            let journal = Journal::create(&path);
+            let mut journal = Journal::at(
+                path.clone(),
+                Session {
+                    facet:  0,
+                    world:  None,
+                    coarse: false,
+                    budget: 700,
+                    weight: "5/4".to_owned(),
+                },
+            );
             journal.record(Event::Order(Order {
                 from: Place::of(Point::new(1, 1, 0)),
                 to:   Place::of(Point::new(2, 2, 0)),
             }));
         }
         let mut text = std::fs::read_to_string(&path).expect("the journal was just written");
-        text.push_str("{\"seq\":2,\"at_ms\":1,\"eve");
+        text.push_str("{\"seq\":3,\"at_ms\":1,\"eve");
         std::fs::write(&path, &text).expect("the test's own file");
         let entries = read(&path).expect("a cut line is not a broken journal");
-        assert_eq!(entries.len(), 1, "the complete line survives the cut one");
+        assert_eq!(
+            entries.len(),
+            2,
+            "the session line and the order survive the cut one"
+        );
         std::fs::remove_file(&path).expect("the test's own file");
     }
 }

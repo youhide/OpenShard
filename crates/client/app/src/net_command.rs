@@ -856,6 +856,13 @@ impl App {
                 // frames on purpose — see `Steering::begin_frame` — so nothing
                 // else would drop it until the player clicked somewhere new.
                 self.steer.clear_plan_cache();
+                // And the journal's own session line, which was written before
+                // this arrived: a replay that read "no coarse graph" would call
+                // every long route planned after this moment a refusal the
+                // client never made.
+                if let Some(journal) = self.steer.journal_mut() {
+                    journal.note_coarse(true);
+                }
             }
             // And the other end of the same question: there will be no graph,
             // and the strip stops saying "building".

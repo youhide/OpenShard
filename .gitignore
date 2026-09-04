@@ -41,6 +41,13 @@ __pycache__/
 # screen arrangement, written on exit — see `crates/client/app/src/desk.rs`.
 /client_ui.toml
 
+# The route journal a client writes while somebody plays — every click and every
+# replan, and the session before this one. Written unless the F1 window says
+# otherwise, so it is here for the same reason the line above is: it is one
+# afternoon's own record. See `docs/world/reference/path_journal.md`.
+/path-journal.jsonl
+/path-journal.prev.jsonl
+
 # Editors / OS
 .DS_Store
 .idea/

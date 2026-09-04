@@ -441,6 +441,10 @@ pub struct Hud {
     /// one that stands, for somebody reading the strip while the body walks at
     /// a wall.
     pub refusal: Option<crate::steer::Refusal>,
+    /// What the route journal has written this session, and whether it is still
+    /// writing — see `docs/world/reference/path_journal.md`. `None` is a client
+    /// keeping none at all, which is every test and no shipping session.
+    pub path_journal: Option<openshard_pathlog::write::Tally>,
 }
 
 /// What one frame's radar demand and production resolved to.

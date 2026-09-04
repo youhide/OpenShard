@@ -54,6 +54,10 @@ pub enum Event {
     /// The order gave up: the body did not move for as many steps as the
     /// client's patience allows.
     Abandoned(Abandonment),
+    /// The journal stopped itself. Last line of the file, and the difference
+    /// between a session that was cut short by policy and one that was cut
+    /// short by a crash.
+    Closed(Closure),
 }
 
 /// What the client is walking on, said once so that every line after it can be
@@ -144,6 +148,23 @@ pub struct Abandonment {
     pub goal:    Place,
     /// How many steps in a row left it there — the client's whole patience.
     pub stalled: u8,
+}
+
+/// The journal stopped writing at its own size cap.
+///
+/// Written **into the file**, because the alternative is a reader guessing: a
+/// journal that ends mid-session looks exactly like a client that was killed,
+/// and the two want different next questions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Closure {
+    /// What had been written when it stopped.
+    pub bytes:  u64,
+    /// The cap it reached.
+    pub cap:    u64,
+    /// What is in the file: destinations named, and searches that answered
+    /// them.
+    pub orders: u32,
+    pub plans:  u32,
 }
 
 /// What one search did, reported the way the search itself reports it.
