@@ -163,6 +163,53 @@ impl BodyConv {
         self.rows.get(&body.0).copied()
     }
 
+    /// Every body this table redirects, in id order.
+    ///
+    /// Public so a caller deriving a per-body table of its own — a fallback
+    /// numbering resolved against each redirect, for one — can walk every row
+    /// without also carrying an opinion about which id is interesting.
+    /// `impl Iterator` rather than a named type: the honest type is a tower of
+    /// `Keys`/`Copied`/`Map`, and every caller of this crate reads it as
+    /// "some bodies", never as anything that type names.
+    pub fn bodies(&self) -> impl Iterator<Item = Graphic> + '_ {
+        self.rows.keys().copied().map(Graphic)
+    }
+
+    /// Which file `body` is actually read from, and what id it carries there,
+    /// once a file this install does not ship is excluded.
+    ///
+    /// [`BodyConvRow::target`] alone answers what the file *says*; this
+    /// answers what a reader with only some of the six pairs open does with
+    /// that — the last column naming a file `present` accepts wins, which is
+    /// [`crate::anim::Anim::source`]'s own redirect walk. `present` is a
+    /// predicate rather than a concrete reader so a test can state "this
+    /// install ships `anim3` and nothing else" without opening one.
+    ///
+    /// A body the table says nothing about reads as itself, out of
+    /// [`AnimFile::First`] — the ordinary answer, and the one every id gets
+    /// when this table is [`empty`](Self::empty).
+    #[must_use]
+    pub fn redirect(&self, body: Graphic, present: impl Fn(AnimFile) -> bool) -> (AnimFile, Graphic) {
+        let mut file = AnimFile::First;
+        let mut read_as = body;
+        if let Some(row) = self.row(body) {
+            for candidate in AnimFile::REDIRECTS {
+                // The last column naming a file the predicate accepts wins,
+                // which is what the reference's loop leaves behind: it
+                // overwrites the body's entry as it walks the row and skips a
+                // column whose file is not open. No shipped row names two.
+                match (row.target(candidate), present(candidate)) {
+                    (Some(target), true) => {
+                        file = candidate;
+                        read_as = target;
+                    }
+                    _ => continue,
+                }
+            }
+        }
+        (file, read_as)
+    }
+
     /// How many bodies the table moves. Zero is an install with no file.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -179,6 +226,44 @@ impl BodyConv {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::BodyKind;
+
+    /// [`BodyConv::redirect`] is what [`crate::anim::Anim::source`]'s layout
+    /// fallback and [`crate::anim::Anim::redirect_kinds`]'s numbering
+    /// fallback both read, so a body whose original id and landing id
+    /// disagree about which family it belongs to gets the *landing*'s answer
+    /// for both. Reading a body that is a monster by the plain id-range rule
+    /// as a monster's numbering while its actual frames are a person's would
+    /// draw one creature two ways — the id-range rule alone cannot tell.
+    #[test]
+    fn a_body_moved_across_a_files_own_boundary_is_typed_by_where_it_lands() {
+        let table = BodyConv::from_text("100\t-1\t500\t-1\t-1\t-1\n");
+        let (file, read_as) = table.redirect(Graphic(100), |candidate| candidate == AnimFile::Third);
+        assert_eq!(file, AnimFile::Third);
+        assert_eq!(read_as, Graphic(500));
+        assert_eq!(
+            BodyKind::of(Graphic(100)),
+            BodyKind::Monster,
+            "the id-range rule this fallback replaces",
+        );
+        assert_eq!(
+            BodyKind::in_file(read_as, file),
+            BodyKind::Human,
+            "id 500 is a person in anim3's own range",
+        );
+    }
+
+    /// The presence check is not decorative: an install below the expansion
+    /// that added `anim3` has no such file open, and the reference reads the
+    /// body under its own id rather than fail — [`Anim::source`]'s own
+    /// behaviour, mirrored here without opening a real pair.
+    #[test]
+    fn a_redirect_to_a_file_this_install_does_not_ship_reads_as_the_original_body() {
+        let table = BodyConv::from_text("100\t-1\t500\t-1\t-1\t-1\n");
+        let (file, read_as) = table.redirect(Graphic(100), |_| false);
+        assert_eq!(file, AnimFile::First, "no candidate file is open");
+        assert_eq!(read_as, Graphic(100), "so the body reads under its own id");
+    }
 
     #[test]
     fn a_row_is_an_id_and_one_column_per_animation_file() {

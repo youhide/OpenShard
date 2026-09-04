@@ -828,6 +828,13 @@ pub fn run<D: Dial + Send + 'static>(
         }
     };
 
+    // The numbering half of `mob_types`'s own fallback is blind to
+    // `Bodyconv.def`: it reads the range rule off a body's original id, not
+    // the id it actually lands under once `anim` redirects it. Resolved once,
+    // beside `mob_types`, for the same handful of bodies that redirect's
+    // block-shape half already gets right inside `anim` itself.
+    let redirect_kinds = anim.redirect_kinds(&mob_types);
+
     // What a worn item draws as. Read alongside `anim`, which is what its
     // entries resolve into.
     let equip_conv = match EquipConv::load(dir.join("Equipconv.def")) {
@@ -1176,6 +1183,7 @@ pub fn run<D: Dial + Send + 'static>(
                     // calls every wolf, bear and cougar a monster and plays
                     // group numbers those creatures' files do not have.
                     crowd.set_mob_types(mob_types);
+                    crowd.set_redirect_kinds(redirect_kinds);
                     crowd
                 },
                 combat_log:            combat_log::CombatLog::default(),

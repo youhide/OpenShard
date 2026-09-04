@@ -34,7 +34,10 @@
 //! this is that join — with tests, because it is arithmetic over a clock and not
 //! a picture.
 
-use std::collections::HashMap;
+use std::collections::{
+    BTreeMap,
+    HashMap,
+};
 use std::time::Duration;
 
 use openshard_client_render::animation::AnimationClock;
@@ -880,6 +883,17 @@ pub struct Crowd {
     /// Empty until [`Crowd::read_mob_types`], which is what every test that
     /// does not name an install gets.
     mob_types: MobTypes,
+    /// Which numbering a redirected body falls back to when `mob_types` has
+    /// no line for it — [`openshard_uofiles::anim::Anim::redirect_kinds`],
+    /// snapshotted once at startup.
+    ///
+    /// `mob_types`'s own fallback is the plain id-range rule, which knows
+    /// nothing about `Bodyconv.def` and gets the stock install's five
+    /// redirected-but-untabled bodies wrong the same way the block-shape half
+    /// of this bug used to. Consulted in [`Crowd::kind_of`] after `mob_types`
+    /// and before that range rule. Empty for a crowd built with no install,
+    /// same as `mob_types`.
+    redirect_kinds: BTreeMap<Graphic, BodyKind>,
 }
 
 impl Default for Crowd {
@@ -902,6 +916,7 @@ impl Default for Crowd {
             // every body from the range rule — which is what a crowd built
             // without one is entitled to assume. See [`Crowd::read_mob_types`].
             mob_types: MobTypes::empty(),
+            redirect_kinds: BTreeMap::new(),
         }
     }
 }
@@ -967,6 +982,29 @@ impl Crowd {
     /// has to address the index with the same answer. See the field.
     pub const fn mob_types(&self) -> &MobTypes {
         &self.mob_types
+    }
+
+    /// Give this crowd the fallback numbering for a body `mob_types` cannot
+    /// answer — [`openshard_uofiles::anim::Anim::redirect_kinds`], read
+    /// beside `mobtypes.txt` in `lib.rs` because the two are the same
+    /// question about the same install.
+    pub fn set_redirect_kinds(&mut self, redirect_kinds: BTreeMap<Graphic, BodyKind>) {
+        self.redirect_kinds = redirect_kinds;
+    }
+
+    /// Which numbering names `body`'s actions: `mob_types` where it has a
+    /// line, this install's redirect where it does not but
+    /// [`Anim::redirect_kinds`](openshard_uofiles::anim::Anim::redirect_kinds)
+    /// does, and the plain id-range rule ([`BodyKind::of`]) failing both —
+    /// which is every answer a crowd built with no install at all can give.
+    fn kind_of(&self, body: Graphic) -> BodyKind {
+        if let Some(entry) = self.mob_types.get(body) {
+            return entry.kind;
+        }
+        if let Some(&kind) = self.redirect_kinds.get(&body) {
+            return kind;
+        }
+        BodyKind::of(body)
     }
 
     /// Name the body this client walks itself.
@@ -1077,7 +1115,7 @@ impl Crowd {
         mounted: bool,
         explicit_from: Option<Point>,
     ) -> Mobile {
-        let kind = self.mob_types.kind_of(body);
+        let kind = self.kind_of(body);
         let now = self.now;
         let commanded = self.commanded == who;
         let tracked = self.tracked.entry(who).or_insert(Tracked {
@@ -1268,7 +1306,7 @@ impl Crowd {
         war: bool,
         mounted: bool,
     ) -> Mobile {
-        let kind = self.mob_types.kind_of(body);
+        let kind = self.kind_of(body);
         let tracked = self.tracked.entry(who).or_insert(Tracked {
             at,
             facing: facing.direction,
@@ -1448,7 +1486,7 @@ impl Crowd {
         equipment: std::rc::Rc<[EquipmentLayer]>,
     ) -> Mobile {
         let facing = Facing::walking(facing);
-        let kind = self.mob_types.kind_of(body);
+        let kind = self.kind_of(body);
         let group = kind.dying();
         // The fall this corpse was promised, if the shard named one: `0xAF` said
         // which body becomes which corpse while that body was still falling, and
@@ -3714,6 +3752,43 @@ mod tests {
             BodyKind::Monster.attacking(),
             AnimationGroup(4),
             "and the group it used to be sent, kept here so this stops passing if 4 becomes right",
+        );
+    }
+
+    /// A body `mobtypes.txt` says nothing about, but `Bodyconv.def` moves
+    /// into a file whose own range disagrees with the id's — the numbering
+    /// half of the redirect fallback, resolved from
+    /// [`openshard_uofiles::anim::Anim::redirect_kinds`] rather than the
+    /// plain id-range rule, exactly as the layout half already was for a
+    /// cougar. `set_redirect_kinds` rather than a real install: this is the
+    /// wiring, and [`openshard_uofiles::bodyconv`]'s own tests already cover
+    /// the walk that produces the table.
+    #[test]
+    fn a_redirected_untabled_body_is_typed_by_where_bodyconv_lands_it() {
+        const MOVED: Graphic = Graphic(100);
+        let mut crowd = Crowd::default();
+        assert_eq!(
+            BodyKind::of(MOVED),
+            BodyKind::Monster,
+            "the id-range rule this fallback replaces",
+        );
+        // As if `Bodyconv.def` moved body 100 into `anim3` at id 500, where
+        // that file's own range names a person rather than a monster.
+        crowd.set_redirect_kinds(BTreeMap::from([(MOVED, BodyKind::Human)]));
+
+        let standing = crowd.see(
+            serial(1),
+            Point::new(10, 10, 0),
+            MOVED,
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+            false,
+        );
+        assert_eq!(
+            standing.group,
+            BodyKind::Human.standing(),
+            "PeopleAnimationGroup.Stand, not the monster numbering the bare id names",
         );
     }
 

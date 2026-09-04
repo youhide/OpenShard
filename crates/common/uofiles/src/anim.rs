@@ -69,7 +69,10 @@ use openshard_protocol::wire::{
 use crate::bodyconv::BodyConv;
 use crate::color::Color16;
 use crate::image::Image;
-use crate::mobtypes::MobType;
+use crate::mobtypes::{
+    MobType,
+    MobTypes,
+};
 
 /// Bytes per `anim.idx` entry: offset, length, extra.
 const IDX_ENTRY: usize = 12;
@@ -1101,28 +1104,60 @@ impl Anim {
     /// through the client as well.
     #[must_use]
     pub fn source(&self, body: Graphic, mob_type: Option<MobType>) -> AnimSource {
-        let mut file = AnimFile::First;
-        let mut read_as = body;
-        if let Some(row) = self.conv.row(body) {
-            for candidate in AnimFile::REDIRECTS {
-                // The last column naming a file this install actually ships
-                // wins, which is what the reference's loop leaves behind: it
-                // overwrites the body's entry as it walks the row and skips a
-                // column whose file is not open. No shipped row names two.
-                match (row.target(candidate), self.pair(candidate).is_some()) {
-                    (Some(target), true) => {
-                        file = candidate;
-                        read_as = target;
-                    }
-                    _ => continue,
-                }
-            }
-        }
+        let (file, read_as) = self.redirect(body);
         AnimSource {
             file,
             body: read_as,
             layout: mob_type.map_or_else(|| IndexLayout::in_file(read_as, file), |named| named.layout),
         }
+    }
+
+    /// Which file `body` is actually read from on this install, and what id
+    /// it carries there.
+    ///
+    /// [`source`](Self::source)'s redirect walk, on its own: a caller with no
+    /// frames to read still needs this half — see
+    /// [`redirect_kinds`](Self::redirect_kinds). [`BodyConv::redirect`] does
+    /// the actual walk; this just hands it "is that file open here".
+    fn redirect(&self, body: Graphic) -> (AnimFile, Graphic) {
+        self.conv.redirect(body, |file| self.pair(file).is_some())
+    }
+
+    /// Which numbering a redirected body falls back to when `mobtypes.txt`
+    /// has no line for it.
+    ///
+    /// [`crate::mobtypes::MobTypes::kind_of`]'s own fallback is
+    /// [`BodyKind::of`] — the id-range rule, blind to `Bodyconv.def` — and
+    /// that can read the wrong numbering for a body the table moves into a
+    /// file whose own range disagrees with the original id's, exactly the way
+    /// the id-range rule already misreads the block shape for a body
+    /// `mobtypes.txt` names but the range rule alone would not
+    /// (`docs/roadmap/backlog/gameplay.md`, "A body id names a file too").
+    /// The stock install's five bodies in this position happen to land where
+    /// [`BodyKind::of`] and [`BodyKind::in_file`] already agree — see
+    /// [`source`](Self::source)'s own note — so this closes a install-shaped
+    /// gap rather than a bug the shipped files can be seen to hit yet. The
+    /// block-shape half of the same fallback is resolved this way already,
+    /// inside `source`; this is the numbering half, exposed so a caller that
+    /// chooses group numbers before it has any frame to read — the client's
+    /// `Crowd` — can resolve the two the same way instead of disagreeing with
+    /// its own renderer.
+    ///
+    /// A snapshot rather than a live query: this cannot change once the
+    /// install is open, and `Crowd` needs the answer long before it has any
+    /// reason to hold this (large, file-backed) reader itself. Restricted to
+    /// bodies `mobtypes.txt` is silent about — a body the file *does* name
+    /// already has its numbering, and this must not second-guess it.
+    #[must_use]
+    pub fn redirect_kinds(&self, mob_types: &MobTypes) -> BTreeMap<Graphic, BodyKind> {
+        self.conv
+            .bodies()
+            .filter(|&body| mob_types.get(body).is_none())
+            .filter_map(|body| {
+                let (file, read_as) = self.redirect(body);
+                (file != AnimFile::First).then(|| (body, BodyKind::in_file(read_as, file)))
+            })
+            .collect()
     }
 
     /// Whether one animation has any frames at all.

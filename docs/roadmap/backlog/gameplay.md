@@ -669,16 +669,25 @@ the ones that add them.
 
 Left open, each found while doing it:
 
-- **The numbering half of the fallback is still the general range rule.** Where
-  `mobtypes.txt` has no line for a body, the *block shape* is now resolved
-  against the file the body lands in (`BodyKind::in_file` — `anim2` has no
-  people at all, `anim3` puts animals below monsters), but which numbering names
-  its *actions* is chosen in `client/app`'s `Crowd` out of
-  `MobTypes::kind_of`, from the id the shard named and with no knowledge of the
-  redirect. The two agree for every row the stock install has: its five
-  redirected bodies with no `mobtypes.txt` line all land in `anim3` above id
-  400, where both rules say the same word. Threading `BodyConv` into the crowd
-  is what closing it would cost, and no shipped row asks for it yet.
+- ~~**The numbering half of the fallback is still the general range rule.**~~
+  **Fixed: `BodyConv` is threaded into the crowd.** Where `mobtypes.txt` has
+  no line for a body, the *block shape* was already resolved against the file
+  the body lands in (`BodyKind::in_file` — `anim2` has no people at all,
+  `anim3` puts animals below monsters); which numbering names its *actions*
+  now is too. `Anim::redirect_kinds` walks every row `Bodyconv.def` moves and
+  `mobtypes.txt` is silent about, resolves the same redirect `Anim::source`
+  already does — including which of the five files this install actually
+  ships, so a body sent to a file that is not open still reads under its own
+  id — and hands `BodyKind::in_file` the landing rather than the original id.
+  `client/app`'s `Crowd` reads this table beside `MobTypes::kind_of` rather
+  than falling straight through to `BodyKind::of`. Snapshotted once at
+  startup, beside `mobtypes.txt`, because it cannot change once the install is
+  open and `Crowd` needs the answer long before it has any reason to hold the
+  (large, file-backed) reader itself. No shipped row's numbering actually
+  changes on the stock install — its five such bodies already land where the
+  two rules agree — so this closes an install-shaped gap rather than a bug the
+  shipped files can be seen to hit; a later install that ships a row breaking
+  that tie is what this was for.
 - **`Bodyconv.def`'s mount height is not ported.** The reference attaches a
   vertical offset to a mounted body per redirect file (`-9` for most of `anim5`,
   `+9` for one `anim3` body, `0` for two ids), and it reads those numbers out of
