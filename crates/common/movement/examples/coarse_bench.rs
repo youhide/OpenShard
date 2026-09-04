@@ -10,6 +10,17 @@
 //! the host, while the routed/refused counts and the node counts beside them
 //! are properties of the map and hold across machines.
 //!
+//! **And on a shared machine it is a property of who else is running.** P1 was
+//! first measured here at a load average of 30–50 and the durations came out
+//! 30–60% high and — worse — high *unevenly*, which reversed the sign of one
+//! comparison. Every repeat is a minimum for that reason (`--repeat`), and a
+//! reading meant to be believed wants three things beside it: elevated priority
+//! (`sudo nice -n -15 setpriv --reuid=$UID --regid=$UID --init-groups …`, which
+//! raises the process without making it root's), the configurations being
+//! compared run **interleaved** rather than one after the other, and the load
+//! average written down. Step counts need none of this: a route is a property
+//! of the graph.
+//!
 //! **This used to be synthetic** — a 1024×1024 open world with no map in it, on
 //! which the hierarchy measured *slower* than flat A\*. An open plain is the one
 //! world where a coarse graph can only lose: flat A\* walks a straight line to
@@ -419,9 +430,15 @@ fn houses(
                 // The client's first question, at the client's own budget. When
                 // it arrives the graph is never asked and there is no detour to
                 // measure — that is the case this reading is *not* about.
-                let started = Instant::now();
-                let bounded = search_path(&live, *from, *to, cli.budget, Weight::PLANNING);
-                let flat = started.elapsed();
+                let mut flat = Duration::MAX;
+                let mut bounded = None;
+                for _ in 0..cli.repeat.max(1) {
+                    let started = Instant::now();
+                    let search = search_path(&live, *from, *to, cli.budget, Weight::PLANNING);
+                    flat = flat.min(started.elapsed());
+                    bounded = Some(search);
+                }
+                let bounded = bounded.expect("at least one repeat");
                 if bounded.arrived {
                     bounded_answered += 1;
                     continue;
@@ -432,9 +449,21 @@ fn houses(
                     too_near += 1;
                     continue;
                 }
-                let started = Instant::now();
-                let route = find_long_path(&guide, &live, graph, *from, *to, cli.budget, Weight::PLANNING);
-                let coarse = started.elapsed();
+                // `--repeat`, and the fastest of them, for the ring reading's
+                // own reason: this workstation is shared and the slow readings
+                // are the ones somebody else's build was running through. The
+                // steps do not vary — the route is a property of the graph — so
+                // what the repeats buy is the millisecond and nothing else.
+                let mut coarse = Duration::MAX;
+                let mut route = None;
+                for _ in 0..cli.repeat.max(1) {
+                    let started = Instant::now();
+                    let answer =
+                        find_long_path(&guide, &live, graph, *from, *to, cli.budget, Weight::PLANNING);
+                    coarse = coarse.min(started.elapsed());
+                    route = Some(answer);
+                }
+                let route = route.expect("at least one repeat");
                 let exact = (cli.exact > 0)
                     .then(|| search_path(&live, *from, *to, cli.exact, Weight::PLANNING))
                     .filter(|search| search.arrived)

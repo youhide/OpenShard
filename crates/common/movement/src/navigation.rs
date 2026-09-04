@@ -147,7 +147,7 @@ pub struct NavigationGraph {
     ///
     /// The garbage rule is the span layer's verbatim — never compacted during a
     /// session, until the dead outweigh the live — with one difference:
-    /// `SpanIndex` answers that by baking the facet whole, and 18 s is the
+    /// `SpanIndex` answers that by baking the facet whole, and 14 s is the
     /// thing this graph's own rebake exists to stop paying. See
     /// [`repack`](NavigationGraph::repack).
     pub(crate) dead_edges:        u32,
@@ -161,7 +161,7 @@ pub struct NavigationGraph {
 /// behind it. The span index's `BlockTable` and `WorldMap`'s `blocks` are the
 /// other two; `docs/world/design_navigation_graph.md`'s G1 is the argument in full, and
 /// what it buys here is that a publish rebuilds the regions around it instead of
-/// dropping a graph that costs 18 s to build.
+/// dropping a graph that costs 14 s to build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Run {
     pub(crate) base:  u32,
@@ -938,7 +938,7 @@ impl NavigationGraph {
     /// `docs/world/design_navigation_graph.md`'s **G1**, and the third artefact of
     /// `what_a_change_costs.md`'s S3: the span index and `WorldMap`'s statics
     /// already follow a publish locally, and this is the one that used to be
-    /// *dropped* instead — 18 s to build, on a tick an operator typed into.
+    /// *dropped* instead — 14 s to build, on a tick an operator typed into.
     ///
     /// **The area is two rings and a half**, and each of the three is a different
     /// claim:
@@ -1452,7 +1452,7 @@ impl NavigationGraph {
     /// The garbage rule, and it is the span layer's verbatim — *never compact
     /// during a session, until the dead outweigh the live* — with one difference
     /// that matters: `SpanIndex` answers it by baking the facet whole, and
-    /// 18 s is the thing this file exists to stop paying. So the answer here is
+    /// 14 s is the thing this file exists to stop paying. So the answer here is
     /// a **repack**: one walk of what is live, at no point asking the ground
     /// anything.
     fn repack_if_mostly_dead(&mut self) {

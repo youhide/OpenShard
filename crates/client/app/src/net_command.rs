@@ -234,7 +234,7 @@ impl App {
     /// Reading the artifact needs the stamp, the stamp needs the world's own
     /// revision and log, and resolving those goes through
     /// [`FacetWorld::read`](openshard_movement::bake::FacetWorld::read) — which
-    /// reads the whole base set. A hundred megabytes and eighteen seconds of
+    /// reads the whole base set. A hundred megabytes and fourteen seconds of
     /// flood are both far past a frame, and the second one is why the client
     /// starts without a graph in the first place.
     ///
@@ -830,7 +830,7 @@ impl App {
                     self.derived_over_the_ground_dropped(facet, revision, &[]);
                 }
                 // And the coarse graph over it, which the span bake above is
-                // not: one is 0.16 s and the other is eighteen seconds of flood,
+                // not: one is 0.16 s and the other is fourteen seconds of flood,
                 // so it is looked for on disk and built off this thread when it
                 // is not there. See `App::take_up_navigation`.
                 //

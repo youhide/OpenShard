@@ -23,9 +23,10 @@ Those numbers are from before the region size and the grouping settled; the
 whole bake was **96 s** on this facet until N4, and **11.7 s** after it — the two
 hot passes were asking `step_allowed` once per direction, which is
 `steps_out_of` computed eight times over and used once. P1's crossing spacing
-then bought a third of a detour back for **19.8 s**. It is still an offline
-artifact and for the same reason: twenty seconds is not a thing to make two
-processes pay for at every start, and the second copy is still the point.
+then bought a third of a detour back for **14.4 s** (10.6 s without it, measured
+the same way on the same host). It is still an offline artifact and for the same
+reason: a quarter of a minute is not a thing to make two processes pay for at
+every start, and the second copy is still the point.
 
 The graph is derived solely from static client files and the routing rules. It
 therefore belongs in an offline artifact, not on either process's critical

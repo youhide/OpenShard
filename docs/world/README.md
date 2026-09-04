@@ -65,7 +65,7 @@ every answer taken so far is a row in [`design_layers.md`](design_layers.md).
 | The radar: one raster serving both windows, a view picking its own level, an evicting cache, the floor swept once | ✅ shipping | section 10 below — the page array at 2× HiDPI, the `floor`/`round` level rule, and a carry that is O(everything ready) | [`design_radar.md`](design_radar.md) |
 | Interiors: the building index, the floor a person is on, a sealed room as a black area | 🟡 in the tree, unrecorded | `Buildings::bake`, `InteriorFrame` and `FloorView` exist in `client/render`; **the document carries no status marks at all**, and R3 (walls at knee height) has nothing in the tree | [`design_interiors.md`](design_interiors.md) |
 | The map editor's first usable cut | 🟡 partial | continuous drag strokes, art-composited static preview, smooth, stamps, rebase | [`plans/world/map_editor/PLAN.md`](../../plans/world/map_editor/PLAN.md) |
-| A corridor sends a body where the graph lets it cross — a wide border is crossed every 16 tiles, not at its corners | ✅ shipping | `ROUTING_VERSION` 5: 32% → 7% at the p95 on a click at a building, for 34% more nodes and an 83% dearer bake | [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md), P1 |
+| A corridor sends a body where the graph lets it cross — a wide border is crossed every 16 tiles, not at its corners | ✅ shipping | `ROUTING_VERSION` 5: 32% → 7% at the p95 on a click at a building, and the walk-path query 30.4 → 24.4 ms, for 34% more nodes and a 36% dearer bake | [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md), P1 |
 | One click still has two standing answers, and the client plans on the thread that draws | ⬜ | P2 and P3; P1 and P4 are done | the same |
 | Every boot replays the whole log | ⬜ | S4 | [`plans/world/what_a_change_costs/PLAN.md`](../../plans/world/what_a_change_costs/PLAN.md) |
 | `revert` is a word no operator can type | ⬜ | S5 | the same |
@@ -465,35 +465,47 @@ none was near enough for the client to refuse without asking.
 So P1 opened, and **is now built**: a wide run gets a representative every
 `PORTAL_SPACING` crossings, 16, between its two ends — the simplest of the three
 options, and the one whose bound on the detour is the spacing itself. What that
-costs and buys, all of it measured on this facet on one host, `ROUTING_VERSION`
-4 against 5:
+costs and buys, `ROUTING_VERSION` 4 against 5:
 
 | | corners only | every 16 | every 8 |
 |---|---|---|---|
 | nodes | 71,545 | 95,672 (+34%) | 144,417 (+102%) |
 | edges | 416,122 | 740,339 (+78%) | 1,819,968 (+337%) |
 | artifact | 7.84 MB | 10.20 MB | 17.50 MB |
-| whole-facet bake | 10.8 s | 19.8 s | 30.7 s |
-| publish rebake, two rings | 41.6 ms | 45.9 ms | 58.3 ms |
+| whole-facet bake | 10.6 s | 14.4 s (+36%) | 21.5 s (+103%) |
+| publish rebake, two rings | 41.4 ms | 43.3 ms | 48.6 ms |
 | houses detour p95, 16 tiles out | **32%** | **7%** | **7%** |
 | houses detour p95, 24 tiles out | 18% | 6% | 5% |
-| long-query p95, worst ring band | 3.1 ms | 6.0 ms | 13.2 ms |
+| walk-path corridor p95 | 30.4 ms | **24.4 ms** | 24.5 ms |
+| ring query p95, band 512 / 1024 | 2.6 / 3.0 ms | 4.4 / 3.5 ms | 11.1 / 3.7 ms |
 
 **Eight buys nothing sixteen has not already bought.** The castle's region was
 crossable only at its corners; one crossing in the middle of the border is the
 whole repair, and halving the spacing again only pays for it twice — 4.4× the
-edges of the old graph against 1.8×, and a long query that is twice as dear
-again. Sixteen is what shipped.
+edges of the old graph against 1.8×, a bake twice as long, and band 512's query
+at 11.1 ms against 4.4. Sixteen is what shipped.
 
-What it does not buy is the bare facet: the ring bands are 13/3/11/5/3/4% at the
-p95 against 13/3/10/5/4/4% before, which is the same reading with noise on it.
-That was the argument for measuring the houses case in the first place.
+What it does not buy is the bare facet's route lengths: the ring bands are
+13/3/11/5/3/4% at the p95 against 13/3/10/5/4/4% before, the same reading with
+noise on it. That was the argument for measuring the houses case in the first
+place.
 
-**The price is real and is not noise.** A whole-facet bake is 83% dearer and a
-long query up to twice; what stays cheap is the path that runs during play — a
-publish rebakes two rings in 45.9 ms against 41.6 — and the walk-path corridor,
-which the live join dominates, moves from ~32 ms to ~42 ms. That last one is
-finding 28's number and P3's problem, not this one's.
+**And the walk path got *faster*, which is the opposite of what was expected.**
+The corridor a step asks for goes 30.4 → 24.4 ms on every one of the four rings:
+more crossings mean a nearer one, so the refinement the query spends its
+milliseconds in has fewer and shorter hops to walk and fewer retries to make,
+and that saves more than the larger abstract search costs. What is dearer is the
+bake — 36% — and the longest bare-facet band, where the abstract search is
+biggest.
+
+**These numbers were taken twice.** The first set was measured while this
+workstation was running several agents at a load average of 30–50, and it was
+wrong in a way that mattered: it put the bake at 19.8 s and reported the
+walk-path query as 30% *worse*. The table above is `nice -15`, the three rules
+run interleaved round-robin, every duration the minimum of its repeats, two
+agreeing rounds, at a load average of 3–10. The detour percentages are identical
+in both, because a route's length is a property of the graph and not of the
+machine.
 
 Findings 25 to 29 are one track and are held as one:
 [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md) is
@@ -522,7 +534,7 @@ and nowhere else:
 cargo run --release -p openshard-movement --bin openshard-navigation-bake -- --facet 0
 ```
 
-It takes 19.8 s on Felucca — 11.7 s until P1 gave a wide border a crossing every
+It takes 14.4 s on Felucca — 10.6 s until P1 gave a wide border a crossing every
 sixteen tiles instead of two. A shard that was *edited* and then restarted no
 longer needs this: boot replays the log's missed chunks into the artifact and
 writes it back.

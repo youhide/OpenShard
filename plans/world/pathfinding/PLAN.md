@@ -127,38 +127,60 @@ options below, and that is the four numbers named next — not a preference.
 **What was built: option 1, at a spacing of sixteen.** `PORTAL_SPACING` in
 [`navigation.rs`](../../../crates/common/movement/src/navigation.rs), and
 `ROUTING_VERSION` 5 because a version 4 artifact is a graph whose regions are
-crossed at their corners. Both spacings were baked and measured, on one host, so
-that the choice is a reading rather than an argument:
+crossed at their corners. All three rules were baked and measured so that the
+choice is a reading rather than an argument:
 
 | | corners only | every 16 | every 8 |
 |---|---|---|---|
 | nodes | 71,545 | 95,672 (+34%) | 144,417 (+102%) |
 | edges | 416,122 | 740,339 (+78%) | 1,819,968 (+337%) |
 | artifact | 7.84 MB | 10.20 MB | 17.50 MB |
-| whole-facet bake | 10.8 s | 19.8 s | 30.7 s |
-| publish rebake, two rings | 41.6 ms | 45.9 ms | 58.3 ms |
+| whole-facet bake | 10.6 s | 14.4 s (+36%) | 21.5 s (+103%) |
+| publish rebake, two rings | 41.4 ms | 43.3 ms (+5%) | 48.6 ms (+17%) |
 | houses detour p95, 16 tiles out | **32%** | **7%** | **7%** |
 | houses detour p95, 24 tiles out | 18% | 6% | 5% |
 | houses detour p95, 32 / 48 out | 3% / 4% | 4% / 4% | 4% / 4% |
 | ring detour p95, six bands | 13/3/10/5/4/4% | 13/3/11/5/3/4% | 13/3/5/3/2/3% |
-| long-query p95, worst ring band | 3.1 ms | 6.0 ms | 13.2 ms |
-| walk-path corridor p95 (houses) | ~32 ms | ~42 ms | ~42 ms |
+| **walk-path corridor p95** (houses) | 30.4 ms | **24.4 ms (−20%)** | 24.5 ms |
+| ring query p95, bands 32–256 | 1.1/1.0/1.1/1.3 ms | 1.1/1.0/1.2/1.3 ms | 1.1/1.0/1.1/1.2 ms |
+| ring query p95, band 512 | 2.6 ms | 4.4 ms | 11.1 ms |
+| ring query p95, band 1024 | 3.0 ms | 3.5 ms | 3.7 ms |
+
+**How these were taken, because the first set of them was wrong.** This
+workstation runs several agents and its load average was 30–50 when P1 was first
+measured, which inflated every duration and inflated them unevenly — the first
+reading had the bake at 19.8 s and claimed the walk-path query got *worse*. The
+numbers above are: `nice -15` (via `sudo … setpriv`, so the process is elevated
+but still the user's), the three rules built as three binaries and run
+**interleaved** round-robin so that any drift hits all of them alike, each
+duration the **minimum** of its repeats (bakes three rounds, queries
+`--repeat 5`, the publish rebake's own `best_of`), and two full rounds of the
+bench that agree to within a few tenths of a millisecond. Load average during
+them was 3–10. The step counts never moved: a route is a property of the graph,
+not of the machine, so every detour percentage here is the same one the loaded
+run reported.
 
 **Eight buys nothing sixteen has not already bought.** The castle's region was
 crossable only at its corners, and one crossing in the middle of the border is
 the whole repair; halving the spacing again pays for it a second time — 4.4× the
-old edge count against 1.8×, and a long query twice as dear again — for the same
-7%. Sixteen shipped.
+old edge count against 1.8×, a bake twice as long, and band 512's query at
+11.1 ms against 4.4 — for the same 7%. Sixteen shipped.
 
-**The done-when below is met on the detour and not on the price, and that is a
-decision rather than an oversight.** The near ring goes 32% → 7%, inside the
-quarter. Bake time and long-query p95 are *not* within noise: a whole-facet bake
-is 83% dearer and the worst ring band's p95 doubles. No option that adds a node
-can be, and the clause was written before any of these numbers existed. What the
-measurement does say is where the price lands: the path that runs during play
-barely moves — a publish rebakes its two rings in 45.9 ms against 41.6 — and the
-walk-path corridor's ~32 → ~42 ms is dominated by the live join, which is
-finding 28 and P3's problem rather than this one's.
+**The done-when below is met on the detour, and the price is a third of what the
+loaded run said.** The near ring goes 32% → 7%. Against that: a whole-facet bake
+is 36% dearer (10.6 → 14.4 s), a publish's two rings 5% (41.4 → 43.3 ms), and
+one ring band — 512, where the abstract search is largest — goes 2.6 → 4.4 ms
+while the bands under it do not move. Bake time is still not "within noise", and
+no option that adds a node could be.
+
+**And the walk path got faster, which is the opposite of what was expected.**
+The corridor a body's step asks for goes **30.4 → 24.4 ms**, reproducibly, on
+every one of the four rings. More crossings mean a nearer one, which means fewer
+and shorter refinement hops and fewer retries — the abstract search's extra
+nodes cost less than the refinement they save. So the clause about long-query
+p95 was written against a fear the measurement does not support: the query that
+runs while somebody is walking is 20% cheaper, and only the longest bare-facet
+bands pay anything at all.
 
 **What is not touched.** The bare facet's ring bands are the same reading with
 noise on it, which is the whole reason the houses case had to be measured
@@ -203,9 +225,10 @@ answer — the ratio
 `a_route_onto_a_castle_roof_does_not_walk_away_from_the_castle` already asserts
 for one click — **on the houses reading's near ring**, which is the 32% above
 and the only band that fails today, with bake time and long-query p95 no worse
-than today's by more than the measurement's own noise. — Met on the detour (7%),
-knowingly not on the price; see the table above for what that price is and where
-it lands. The five `real_routes` scenes pass unchanged against the new graph:
+than today's by more than the measurement's own noise. — Met on the detour (7%)
+and on the query the walk path actually makes (30.4 → 24.4 ms); knowingly not
+met on bake time, which is 36% dearer. See the table above.
+The five `real_routes` scenes pass unchanged against the new graph:
 the originating click is 95 steps against the exact 94, its 9 neighbouring
 starts and 196 long routes loop nowhere, and the walked click still arrives in
 95 steps and 95 plans.
