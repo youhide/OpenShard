@@ -404,6 +404,25 @@ one — which is exactly the fact the field exists to keep a replay from guessin
 wrong about. The flag wants writing when the first line is written, not when the
 journal is built.
 
+**28. The client plans on the thread that draws.** Findings 24 and 26 are two
+readings of one number: three plans a step at 110–124 ms in the session's own
+build, ~30 ms for the corridor alone in `release`, on every step a body walks.
+A step is ~200 ms of walking, so planning is a large and permanent fraction of
+the frame while anybody is moving, and none of the repairs above changes that —
+`without_folds` shortens the *route*, not the search that proposed it.
+
+Moving it off the frame thread is the obvious answer and it is not free, so what
+it waits on is a decision rather than an implementation. The search reads two
+grounds: the guide, which is the bare facet and never changes, and the live
+overlay, which the network side rewrites as the world arrives. A worker cannot
+borrow the second and this repository does not share it behind a lock, so the
+shape to argue about is what the worker is *given* — an owned slice of the
+overlay around the query, cut on the frame thread — and what it costs to cut
+one. The latency it adds is already survivable: a walk holds its last plan while
+the next is asked for, which is what the plan cache is, and an answer that
+arrives a frame late is a plan from a tile the body has just left, which is the
+case refinement already handles on every replan.
+
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change
 the geometry, and not before) and **which validation blocks a publish**
