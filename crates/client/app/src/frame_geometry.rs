@@ -616,6 +616,7 @@ pub(crate) fn assemble_geometry(
         &window.atlases.mobiles,
         cutaway,
         &resources.equip_conv,
+        world.presentation.crowd.mob_types(),
         mobile_ringed.filter(|index| {
             drawn
                 .get(index.position())
@@ -630,6 +631,7 @@ pub(crate) fn assemble_geometry(
         &window.atlases.mobiles,
         cutaway,
         &resources.equip_conv,
+        world.presentation.crowd.mob_types(),
         held_mobile.filter(|index| {
             drawn
                 .get(index.position())
@@ -642,6 +644,7 @@ pub(crate) fn assemble_geometry(
         &window.atlases.mobiles,
         cutaway,
         &resources.equip_conv,
+        world.presentation.crowd.mob_types(),
         mobile_hued,
         interior,
     );

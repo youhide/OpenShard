@@ -649,10 +649,17 @@ impl BodyDef {
             Err(source) => return Err(AnimError::Read { path, source }),
         };
 
-        Ok(Self::parse(&source))
+        Ok(Self::from_text(&source))
     }
 
-    fn parse(source: &str) -> Self {
+    /// Parse the file's text.
+    ///
+    /// Public for the same reason [`crate::mobtypes::MobTypes::from_text`] is:
+    /// a test about one redirect should be able to state that one row, rather
+    /// than needing a client install on disk to say "a barded horse is drawn as
+    /// body 200".
+    #[must_use]
+    pub fn from_text(source: &str) -> Self {
         let mut redirects = BTreeMap::new();
         for line in source.lines() {
             let line = line.split('#').next().unwrap_or_default();
@@ -1395,7 +1402,7 @@ mod tests {
 
     #[test]
     fn body_def_redirects_a_grey_wolf_to_its_real_animation_body() {
-        let body_def = BodyDef::parse(
+        let body_def = BodyDef::from_text(
             "# original body { visual body } hue\n\
              25 {225} 946\n\
              46 {12, 59} 1106\n\

@@ -466,7 +466,11 @@ fn the_group_packed_is_the_group_the_crowd_is_playing() {
     // packing path goes through the refresh at all.
     let drawn = App::everyone_drawn(&crowd, None, &stepped, &[], &[]);
     let mobiles: Vec<Mobile> = drawn.into_iter().map(|(_, mobile)| mobile).collect();
-    let wanted = mobiles::needed_animations(&mobiles, &EquipConv::default());
+    let wanted = mobiles::needed_animations(
+        &mobiles,
+        &EquipConv::default(),
+        &openshard_uofiles::mobtypes::MobTypes::empty(),
+    );
     let (direction, _) = openshard_uofiles::anim::facing(mobiles[0].facing);
     assert!(
         wanted.contains(&openshard_client_render::atlas::AnimationKey::new(

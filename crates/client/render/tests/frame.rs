@@ -3453,6 +3453,7 @@ fn a_walking_billboard_is_lit_where_it_is_drawn_not_where_it_is_going() {
             &atlas,
             &Cutaway::OPEN,
             &EquipConv::default(),
+            &openshard_uofiles::mobtypes::MobTypes::empty(),
             None,
         );
         assert_eq!(quads.len(), 1, "the frame is packed, so it draws");
@@ -5292,6 +5293,7 @@ fn a_mobile_is_drawn_over_the_ground_and_mirrors_with_its_facing() {
             &atlas,
             &Cutaway::OPEN,
             &EquipConv::default(),
+            &openshard_uofiles::mobtypes::MobTypes::empty(),
             None,
         );
         assert_eq!(quads.len(), 1, "the frame is packed, so it draws");
@@ -5792,10 +5794,18 @@ fn dump_a_frame_of_britain() {
     let mobile_atlas = AnimAtlas::build(
         &mut anim,
         &mob_types,
-        mobiles::needed_animations(&people, &equip_conv),
+        mobiles::needed_animations(&people, &equip_conv, &mob_types),
     )
     .expect("a body fits");
-    let mobile_quads = mobiles::collect(&people, &camera, &mobile_atlas, &Cutaway::OPEN, &equip_conv, None);
+    let mobile_quads = mobiles::collect(
+        &people,
+        &camera,
+        &mobile_atlas,
+        &Cutaway::OPEN,
+        &equip_conv,
+        &mob_types,
+        None,
+    );
 
     let frame = render_both(
         &device,

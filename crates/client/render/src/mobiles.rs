@@ -52,6 +52,7 @@ use openshard_uofiles::anim::{
     BodyKind,
 };
 use openshard_uofiles::equipconv::EquipConv;
+use openshard_uofiles::mobtypes::MobTypes;
 
 use crate::atlas::{
     AnimAtlas,
@@ -184,6 +185,11 @@ pub struct EquipmentLayer {
     /// `anim.idx`, under the mount's own group, by [`mount_of`]. Where that
     /// number comes from and why it is not the file's is `crowd::mount_picture`,
     /// in `client/app`, which is where the wire's list becomes this one.
+    ///
+    /// Being a body id and not an `AnimID`, it is subject to the install's
+    /// `Body.def` exactly as [`Mobile::body`] is, and `App::apply_body_def`
+    /// rewrites it here for the same reason it rewrites that field — see
+    /// [`mount_of`] on why one table without the other is no fix at all.
     pub graphic: AnimId,
     /// Its hue, or [`Hue::NONE`] for none.
     pub hue:     Hue,
@@ -297,8 +303,14 @@ pub fn walked_offset(mobile: &Mobile) -> Vec2 {
 /// `AnimID` ordinarily, or [`EquipConv`]'s override where this body has one.
 /// And, for a mounted rider, the mount's own body under its own group — see
 /// [`mount_of`], whose key this is not: the mount plays a different group
-/// from the rider it is packed alongside.
-pub fn needed_animations(mobiles: &[Mobile], equip_conv: &EquipConv) -> Vec<crate::atlas::AnimationKey> {
+/// from the rider it is packed alongside. `mob_types` is what names that group:
+/// the mount is a body like any other and its numbering comes from the install's
+/// table, not from its id.
+pub fn needed_animations(
+    mobiles: &[Mobile],
+    equip_conv: &EquipConv,
+    mob_types: &MobTypes,
+) -> Vec<crate::atlas::AnimationKey> {
     let mut wanted: Vec<crate::atlas::AnimationKey> = Vec::new();
     for mobile in mobiles {
         let (direction, _) = openshard_uofiles::anim::facing(mobile.facing);
@@ -315,7 +327,7 @@ pub fn needed_animations(mobiles: &[Mobile], equip_conv: &EquipConv) -> Vec<crat
                 wanted.push(crate::atlas::AnimationKey::new(graphic, mobile.group, direction));
             }
         }
-        if let Some((mount_body, _, mount_group)) = mount_of(mobile) {
+        if let Some((mount_body, _, mount_group)) = mount_of(mobile, mob_types) {
             wanted.push(crate::atlas::AnimationKey::new(
                 mount_body,
                 mount_group,
@@ -394,7 +406,28 @@ enum MountedStance {
 /// (`Mounts.cs`'s `OffsetY`, non-zero only for the unusually tall or short —
 /// a unicorn, a tiger) is a backlog entry for whenever such a mount exists
 /// here, not a silent approximation now.
-fn mount_of(mobile: &Mobile) -> Option<(Graphic, Hue, AnimationGroup)> {
+///
+/// # The mount is a body, and a body is named by the install's two tables
+///
+/// `mob_types` and not [`BodyKind::of`]: the range rule is the fallback for an
+/// install with no `mobtypes.txt` (see [`MobTypes::kind_of`]), and it is wrong
+/// about **19 of the 30 rideable bodies** in [`openshard_protocol::mounts`] —
+/// the nine below 200 it calls monsters (`0x0074` the horse-with-barding,
+/// `0x00A9` the llama, `0x00BB` and `0x00BC` the ridgebacks) and the ten at 400
+/// and above it calls humans (`0x0317` the swamp dragon, `0x05A0` the reptalon).
+/// Every one of them is `ANIMAL` in the shipped file. Getting it wrong is silent
+/// in the way this whole family of bugs is: a horse stood at the monster
+/// numbering's group 1 plays `LowAnimationGroup.Fidget`, and one stood at the
+/// human numbering's 4 plays a group most animals do not have at all, so the
+/// mount vanishes from under its rider.
+///
+/// The *other* table is applied before this is ever called: `Body.def` redirects
+/// 13 of those 30 bodies, and `App::apply_body_def` rewrites the `Layer::MOUNT`
+/// graphic with the rest of the mobile so the id arriving here is already the
+/// one `anim.mul` holds frames for. Both tables or neither — a mount resolved
+/// through one of them is a mount drawn from a body id half the install agrees
+/// with.
+fn mount_of(mobile: &Mobile, mob_types: &MobTypes) -> Option<(Graphic, Hue, AnimationGroup)> {
     let human = BodyKind::Human;
     let stance = if Some(mobile.group) == human.standing_mounted() {
         MountedStance::Standing
@@ -415,13 +448,43 @@ fn mount_of(mobile: &Mobile) -> Option<(Graphic, Hue, AnimationGroup)> {
         return None;
     }
     let mount_body = Graphic(saddle.graphic.0);
-    let mount_kind = BodyKind::of(mount_body);
+    let mount_kind = mob_types.kind_of(mount_body);
     let group = match stance {
         MountedStance::Standing => mount_kind.standing(),
         MountedStance::Walking => mount_kind.walking(),
         MountedStance::Running => mount_kind.running().unwrap_or_else(|| mount_kind.walking()),
     };
     Some((mount_body, saddle.hue, group))
+}
+
+/// The frame to play the mount's own group at.
+///
+/// The rider and its mount share one server-side step, [`Mobile::frame`], but
+/// that index is counted against the *rider's* animation
+/// (`crate::presentation`'s frame builder asks the atlas under
+/// `mobile.body`/`mobile.group`) — never the mount's. [`mount_of`] hands back
+/// a seated pose from the mount's own, separate body and group, whose frame
+/// table is not guaranteed to be as long: a mounted attack plays five or
+/// seven frames, and a horse's own standing group has fewer. Read past its
+/// end, the shared index simply is not a key the atlas holds, so the mount's
+/// frame silently falls back and gets filtered out of the draw entirely —
+/// the horse vanishing for the frames beyond its own table. Wrapping instead
+/// keeps it animated (or, at worst, motionless on its own last frame) for
+/// every frame the rider plays.
+fn mount_frame(
+    mobile: &Mobile,
+    mount_body: Graphic,
+    mount_group: AnimationGroup,
+    atlas: &AnimAtlas,
+) -> AnimationFrameIndex {
+    let (direction, _) = openshard_uofiles::anim::facing(mobile.facing);
+    match atlas
+        .frame_count(AnimationKey::new(mount_body, mount_group, direction))
+        .0
+    {
+        0 => mobile.frame,
+        frames => AnimationFrameIndex(mobile.frame.0 % frames),
+    }
 }
 
 /// What one worn layer draws with, and what hue — or `None` for a layer that
@@ -508,15 +571,21 @@ struct Placement {
 /// its *own* group — an animal's ordinary [`BodyKind::standing`], never the
 /// human numbering the rider is drawn from — while still sharing the rider's
 /// frame and facing. See [`mount_of`].
+///
+/// `frame` is likewise not always [`Mobile::frame`]: every ordinary caller
+/// still passes that field straight through, since it was counted against
+/// this same `(body, group)`'s own table in [`crate::presentation`]'s frame
+/// builder. The mount is the one exception — see [`mount_frame`].
 fn place(
     mobile: &Mobile,
     body: Graphic,
     group: AnimationGroup,
+    frame: AnimationFrameIndex,
     camera: &Camera,
     atlas: &AnimAtlas,
 ) -> Option<Placement> {
     let (direction, mirrored) = openshard_uofiles::anim::facing(mobile.facing);
-    let key = FrameKey::new(AnimationKey::new(body, group, direction), mobile.frame);
+    let key = FrameKey::new(AnimationKey::new(body, group, direction), frame);
     let (packed, source) = atlas.frame_or_fallback(key, mobile.corpse);
 
     // Tiles and not the pixels it is between: the order steps once, at the tile
@@ -590,18 +659,25 @@ pub fn collect(
     atlas: &AnimAtlas,
     cutaway: &Cutaway,
     equip_conv: &EquipConv,
+    mob_types: &MobTypes,
     highlight: Option<MobileIndex>,
 ) -> Vec<SpriteQuad> {
-    collect_with_interior(mobiles, camera, atlas, cutaway, equip_conv, highlight, None)
+    collect_with_interior(
+        mobiles, camera, atlas, cutaway, equip_conv, mob_types, highlight, None,
+    )
 }
 
 /// [`collect`] with the resolved building-cell gate from the same frame.
+// The scene, the eye, and the four read-only tables a body is drawn from — the
+// same list `pick` takes, plus the interior gate.
+#[allow(clippy::too_many_arguments)]
 pub fn collect_with_interior(
     mobiles: &[Mobile],
     camera: &Camera,
     atlas: &AnimAtlas,
     cutaway: &Cutaway,
     equip_conv: &EquipConv,
+    mob_types: &MobTypes,
     highlight: Option<MobileIndex>,
     interior: Option<&crate::interiors::InteriorFrame>,
 ) -> Vec<SpriteQuad> {
@@ -618,7 +694,9 @@ pub fn collect_with_interior(
             true => Some(crate::items::HIGHLIGHT_HUE),
             false => None,
         };
-        push_quads(mobile, camera, atlas, cutaway, equip_conv, hue, &mut quads);
+        push_quads(
+            mobile, camera, atlas, cutaway, equip_conv, mob_types, hue, &mut quads,
+        );
     }
 
     // Back to front, and a *stable* sort on the order alone: two bodies on one
@@ -640,12 +718,16 @@ pub fn collect_with_interior(
 ///
 /// `hue` overrides both the body's and every layer's own colour when it is
 /// given; `None` leaves each with what it arrived wearing.
+// One creature's whole drawing context: it is the caller's argument list minus
+// the list, and splitting it would only move the same nine facts.
+#[allow(clippy::too_many_arguments)]
 fn push_quads(
     mobile: &Mobile,
     camera: &Camera,
     atlas: &AnimAtlas,
     cutaway: &Cutaway,
     equip_conv: &EquipConv,
+    mob_types: &MobTypes,
     hue: Option<Hue>,
     out: &mut Vec<(depth::Order, SpriteQuad)>,
 ) {
@@ -661,6 +743,7 @@ fn push_quads(
         mobile,
         openshard_uofiles::anim::animation_body(mobile.body),
         mobile.group,
+        mobile.frame,
         camera,
         atlas,
     ) else {
@@ -675,8 +758,9 @@ fn push_quads(
     // why this is a whole second body rather than a layer over the rider's
     // own frame.
     if !body_is_fallback {
-        if let Some((mount_body, mount_hue, mount_group)) = mount_of(mobile) {
-            if let Some(mount) = place(mobile, mount_body, mount_group, camera, atlas)
+        if let Some((mount_body, mount_hue, mount_group)) = mount_of(mobile, mob_types) {
+            let frame = mount_frame(mobile, mount_body, mount_group, atlas);
+            if let Some(mount) = place(mobile, mount_body, mount_group, frame, camera, atlas)
                 .filter(|mount| matches!(mount.source, AnimFrameSource::Frame(_)))
             {
                 out.push((
@@ -724,7 +808,7 @@ fn push_quads(
         let Some((graphic, worn_hue)) = worn_graphic(mobile, layer, equip_conv) else {
             continue;
         };
-        let Some(worn) = place(mobile, graphic, mobile.group, camera, atlas) else {
+        let Some(worn) = place(mobile, graphic, mobile.group, mobile.frame, camera, atlas) else {
             continue;
         };
         if !matches!(worn.source, AnimFrameSource::Frame(_)) {
@@ -770,11 +854,14 @@ pub fn outlined(
     atlas: &AnimAtlas,
     cutaway: &Cutaway,
     equip_conv: &EquipConv,
+    mob_types: &MobTypes,
     highlight: Option<MobileIndex>,
 ) -> Vec<SpriteQuad> {
     let mut quads: Vec<(depth::Order, SpriteQuad)> = Vec::new();
     if let Some(mobile) = highlight.and_then(|index| mobiles.get(index.position())) {
-        push_quads(mobile, camera, atlas, cutaway, equip_conv, None, &mut quads);
+        push_quads(
+            mobile, camera, atlas, cutaway, equip_conv, mob_types, None, &mut quads,
+        );
     }
     quads.into_iter().map(|(_, quad)| quad).collect()
 }
@@ -805,9 +892,19 @@ pub fn pick(
     atlas: &AnimAtlas,
     cutaway: &Cutaway,
     equip_conv: &EquipConv,
+    mob_types: &MobTypes,
     cursor: RealPixel,
 ) -> Option<MobileIndex> {
-    pick_iter_with_interior(mobiles.iter(), camera, atlas, cutaway, equip_conv, cursor, None)
+    pick_iter_with_interior(
+        mobiles.iter(),
+        camera,
+        atlas,
+        cutaway,
+        equip_conv,
+        mob_types,
+        cursor,
+        None,
+    )
 }
 
 /// Pick from borrowed mobile views without materialising a second owned list.
@@ -823,12 +920,18 @@ pub fn pick_iter<'a>(
     atlas: &AnimAtlas,
     cutaway: &Cutaway,
     equip_conv: &EquipConv,
+    mob_types: &MobTypes,
     cursor: RealPixel,
 ) -> Option<MobileIndex> {
-    pick_iter_with_interior(mobiles, camera, atlas, cutaway, equip_conv, cursor, None)
+    pick_iter_with_interior(
+        mobiles, camera, atlas, cutaway, equip_conv, mob_types, cursor, None,
+    )
 }
 
 /// [`pick_iter`] under the same building policy as mobile collection.
+// Deliberately `collect_with_interior`'s list with a cursor for the highlight:
+// the pick has to test exactly what the picture draws.
+#[allow(clippy::too_many_arguments)]
 #[must_use]
 pub fn pick_iter_with_interior<'a>(
     mobiles: impl Iterator<Item = &'a Mobile>,
@@ -836,6 +939,7 @@ pub fn pick_iter_with_interior<'a>(
     atlas: &AnimAtlas,
     cutaway: &Cutaway,
     equip_conv: &EquipConv,
+    mob_types: &MobTypes,
     cursor: RealPixel,
     interior: Option<&crate::interiors::InteriorFrame>,
 ) -> Option<MobileIndex> {
@@ -850,7 +954,7 @@ pub fn pick_iter_with_interior<'a>(
         // that a mounted rider is still picked as one body, never two.
         let body = openshard_uofiles::anim::animation_body(mobile.body);
         let mut touched = None;
-        let Some(body) = place(mobile, body, mobile.group, camera, atlas) else {
+        let Some(body) = place(mobile, body, mobile.group, mobile.frame, camera, atlas) else {
             continue;
         };
         if opaque_under(&body, atlas, in_view) {
@@ -858,11 +962,18 @@ pub fn pick_iter_with_interior<'a>(
         }
         if touched.is_none() && matches!(body.source, AnimFrameSource::Frame(_)) {
             let worn = drawn_layers(mobile).filter_map(|layer| {
-                worn_graphic(mobile, layer, equip_conv).map(|(graphic, _)| (graphic, mobile.group))
+                worn_graphic(mobile, layer, equip_conv)
+                    .map(|(graphic, _)| (graphic, mobile.group, mobile.frame))
             });
-            let mount = mount_of(mobile).map(|(mount_body, _, mount_group)| (mount_body, mount_group));
-            for (graphic, group) in worn.chain(mount) {
-                let Some(placement) = place(mobile, graphic, group, camera, atlas) else {
+            let mount = mount_of(mobile, mob_types).map(|(mount_body, _, mount_group)| {
+                (
+                    mount_body,
+                    mount_group,
+                    mount_frame(mobile, mount_body, mount_group, atlas),
+                )
+            });
+            for (graphic, group, frame) in worn.chain(mount) {
+                let Some(placement) = place(mobile, graphic, group, frame, camera, atlas) else {
                     continue;
                 };
                 // `collect` skips a missing equipment or mount frame rather
@@ -934,6 +1045,7 @@ pub fn screen_rect(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
         mobile,
         openshard_uofiles::anim::animation_body(mobile.body),
         mobile.group,
+        mobile.frame,
         camera,
         atlas,
     )?;
@@ -1072,6 +1184,7 @@ pub fn opaque_mask(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
         mobile,
         openshard_uofiles::anim::animation_body(mobile.body),
         mobile.group,
+        mobile.frame,
         camera,
         atlas,
     )?;
@@ -1106,6 +1219,7 @@ pub fn head_anchor(mobile: &Mobile, camera: &Camera, atlas: &AnimAtlas) -> Optio
         mobile,
         openshard_uofiles::anim::animation_body(mobile.body),
         mobile.group,
+        mobile.frame,
         camera,
         atlas,
     )?;
@@ -1150,6 +1264,15 @@ mod tests {
     /// equipment itself draws bare bodies.
     fn no_equip() -> EquipConv {
         EquipConv::default()
+    }
+
+    /// An install with no `mobtypes.txt`, where every body's numbering comes
+    /// from the range rule — which is the right table for the bodies below,
+    /// all of them plain 400-series humans and 200-series animals the file and
+    /// the rule agree about. The mount tests that turn on the disagreement say
+    /// so with a table of their own.
+    fn no_types() -> MobTypes {
+        MobTypes::empty()
     }
 
     /// A worn layer in an ordinary slot — `Layer.InnerTorso`, a shirt.
@@ -1208,6 +1331,7 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 None,
             )
             .len(),
@@ -1221,6 +1345,7 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 cursor_over(&camera, live_rect, live_rect.width / 2.0, live_rect.height / 2.0),
             ),
             Some(MobileIndex::new(0)),
@@ -1244,6 +1369,7 @@ mod tests {
             mobile,
             openshard_uofiles::anim::animation_body(mobile.body),
             mobile.group,
+            mobile.frame,
             camera,
             atlas,
         )
@@ -1341,6 +1467,7 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 cursor_over(&camera, at, dx, dy),
             )
         };
@@ -1377,6 +1504,7 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 cursor_over(&camera, at, dx, 30.0),
             )
         };
@@ -1422,6 +1550,7 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 cursor_over(&camera, at, 5.0, 30.0),
             ),
             Some(MobileIndex::new(0)),
@@ -1474,7 +1603,7 @@ mod tests {
             ..body_at(100, Direction::SouthEast)
         };
         assert_eq!(
-            needed_animations(std::slice::from_ref(&mobile), &no_equip()),
+            needed_animations(std::slice::from_ref(&mobile), &no_equip(), &no_types()),
             vec![
                 AnimationKey::new(Graphic(200), AnimationGroup(2), AnimationDirection(0)),
                 AnimationKey::new(Graphic(400), AnimationGroup(25), AnimationDirection(0)),
@@ -1487,6 +1616,7 @@ mod tests {
             &atlas,
             &Cutaway::OPEN,
             &no_equip(),
+            &no_types(),
             None,
         );
         assert_eq!(quads.len(), 2, "the horse and its rider, nothing else drawn");
@@ -1534,7 +1664,7 @@ mod tests {
         };
 
         assert_eq!(
-            needed_animations(std::slice::from_ref(&mobile), &no_equip()),
+            needed_animations(std::slice::from_ref(&mobile), &no_equip(), &no_types()),
             vec![
                 AnimationKey::new(Graphic(200), AnimationGroup(2), AnimationDirection(0)),
                 AnimationKey::new(Graphic(400), AnimationGroup(27), AnimationDirection(0)),
@@ -1548,11 +1678,76 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 None,
             )
             .len(),
             2,
             "the horse remains behind the archer throughout the bow pose",
+        );
+    }
+
+    /// A mounted unarmed attack plays more frames (`OnmountAttack`'s five, see
+    /// `crowd.rs`'s `action_on_mount`) than the mount's own standing group has
+    /// to offer — the horse's stand here is packed with a single frame. Before
+    /// [`mount_frame`] wrapped the shared index, a frame beyond the mount's own
+    /// table was not a key the atlas held, and the horse dropped out of the
+    /// draw for exactly that frame of the swing.
+    #[test]
+    fn a_mounted_punch_keeps_the_horse_through_every_frame() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let atlas = AnimAtlas::pack([
+            (
+                // The rider's swing: frame 3 of OnmountAttack, group 26.
+                FrameKey::new(
+                    AnimationKey::new(Graphic(400), AnimationGroup(26), AnimationDirection(0)),
+                    AnimationFrameIndex(3),
+                ),
+                AnimFrame {
+                    center_x: 12,
+                    center_y: -3,
+                    image:    Image::new(40, 60, vec![Color16(0x7C00); 40 * 60]),
+                },
+            ),
+            (
+                // The mount's own stand: one frame only, far short of the
+                // rider's five-frame swing.
+                FrameKey::new(
+                    AnimationKey::new(Graphic(200), AnimationGroup(2), AnimationDirection(0)),
+                    AnimationFrameIndex(0),
+                ),
+                AnimFrame {
+                    center_x: 22,
+                    center_y: 0,
+                    image:    Image::new(44, 44, vec![Color16(0x7C00); 44 * 44]),
+                },
+            ),
+        ])
+        .expect("both frames fit");
+        let mobile = Mobile {
+            group: AnimationGroup(26), // PeopleAnimationGroup.OnmountAttack.
+            frame: AnimationFrameIndex(3),
+            equipment: vec![EquipmentLayer {
+                graphic: AnimId(200),
+                hue:     Hue::NONE,
+                layer:   Layer::MOUNT,
+            }]
+            .into(),
+            ..body_at(100, Direction::SouthEast)
+        };
+        assert_eq!(
+            collect(
+                std::slice::from_ref(&mobile),
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                &no_types(),
+                None,
+            )
+            .len(),
+            2,
+            "the horse is still drawn on a swing frame past its own frame count",
         );
     }
 
@@ -1572,13 +1767,120 @@ mod tests {
             ..body_at(100, Direction::SouthEast)
         };
         assert_eq!(
-            needed_animations(std::slice::from_ref(&mobile), &no_equip()),
+            needed_animations(std::slice::from_ref(&mobile), &no_equip(), &no_types()),
             vec![AnimationKey::new(
                 Graphic(400),
                 AnimationGroup(4),
                 AnimationDirection(0)
             )],
             "an on-foot stand packs no mount, whatever is still equipped",
+        );
+    }
+
+    /// A mount is a body, and a body's action numbering comes from the
+    /// install's `mobtypes.txt` and not from its id — [`mount_of`]'s own note
+    /// counts the 19 of 30 rideable bodies the range rule is wrong about.
+    ///
+    /// Both directions of the disagreement, in one scene: the ridgeback (187)
+    /// is below 200, so the range rule calls it a monster and stands it at
+    /// group 1; the hiryu (1407) is above 400, so the rule calls it *human* and
+    /// stands it at group 4. The file calls both `ANIMAL`, which stands at 2 —
+    /// the only group either horse has a frame packed for here.
+    #[test]
+    fn a_mount_is_stood_at_the_group_the_install_table_names() {
+        let camera = Camera::new(Point::new(100, 100, 0), 800, 600);
+        let mob_types = MobTypes::from_text("187\tANIMAL\t20\n1407\tANIMAL\t20\n");
+        let rider = |mount: u16, x: u16| {
+            Mobile {
+                group: AnimationGroup(25), // PeopleAnimationGroup.OnmountStand.
+                equipment: vec![EquipmentLayer {
+                    graphic: AnimId(mount),
+                    hue:     Hue::NONE,
+                    layer:   Layer::MOUNT,
+                }]
+                .into(),
+                ..body_at(x, Direction::SouthEast)
+            }
+        };
+        let mounted = [rider(187, 100), rider(1407, 101)];
+
+        assert_eq!(
+            needed_animations(&mounted, &no_equip(), &mob_types),
+            vec![
+                AnimationKey::new(Graphic(187), AnimationGroup(2), AnimationDirection(0)),
+                AnimationKey::new(Graphic(400), AnimationGroup(25), AnimationDirection(0)),
+                AnimationKey::new(Graphic(1407), AnimationGroup(2), AnimationDirection(0)),
+            ],
+            "both mounts are animal-numbered, whichever side of the range rule they fall",
+        );
+        // And the same list under an install with no table, which is what the
+        // range rule alone answers — neither number is the animal stand, and a
+        // horse packed at one of these is a horse with nothing to draw.
+        assert_eq!(
+            needed_animations(&mounted, &no_equip(), &no_types()),
+            vec![
+                AnimationKey::new(Graphic(187), AnimationGroup(1), AnimationDirection(0)),
+                AnimationKey::new(Graphic(400), AnimationGroup(25), AnimationDirection(0)),
+                AnimationKey::new(Graphic(1407), AnimationGroup(4), AnimationDirection(0)),
+            ],
+            "the fallback's two wrong answers, stated so the fix above is not a tautology",
+        );
+
+        // Drawn, not merely packed: the atlas holds each mount's animal stand
+        // and nothing else, so a rider whose mount was resolved by the range
+        // rule finds no frame and glides along with nothing underneath.
+        let atlas = AnimAtlas::pack(
+            [
+                (Graphic(400), AnimationGroup(25), 40u16, 60u16, 12i16),
+                (Graphic(187), AnimationGroup(2), 44, 44, 22),
+                (Graphic(1407), AnimationGroup(2), 44, 44, 22),
+            ]
+            .map(|(body, group, width, height, center_x)| {
+                (
+                    FrameKey::new(
+                        AnimationKey::new(body, group, AnimationDirection(0)),
+                        AnimationFrameIndex(0),
+                    ),
+                    AnimFrame {
+                        center_x,
+                        center_y: 0,
+                        image: Image::new(
+                            width,
+                            height,
+                            vec![Color16(0x7C00); usize::from(width) * usize::from(height)],
+                        ),
+                    },
+                )
+            }),
+        )
+        .expect("three frames fit");
+        assert_eq!(
+            collect(
+                &mounted,
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                &mob_types,
+                None
+            )
+            .len(),
+            4,
+            "two riders and the two horses under them",
+        );
+        assert_eq!(
+            collect(
+                &mounted,
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                &no_types(),
+                None
+            )
+            .len(),
+            2,
+            "the range rule draws the riders alone, which is the defect this table fixes",
         );
     }
 
@@ -1601,6 +1903,7 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 // Inside the near sprite's top strip, over the far one's body.
                 cursor_over(&camera, near, 22.0, 10.0),
             ),
@@ -1643,6 +1946,7 @@ mod tests {
             &atlas,
             &Cutaway::OPEN,
             &no_equip(),
+            &no_types(),
             Some(MobileIndex::new(1)),
         );
         assert_eq!(quads.len(), 4, "two bodies and a robe each");
@@ -1669,13 +1973,22 @@ mod tests {
             body_at(100, Direction::SouthEast),
             body_at(101, Direction::SouthEast),
         ];
-        let drawn = collect(&mobiles, &camera, &atlas, &Cutaway::OPEN, &no_equip(), None);
+        let drawn = collect(
+            &mobiles,
+            &camera,
+            &atlas,
+            &Cutaway::OPEN,
+            &no_equip(),
+            &no_types(),
+            None,
+        );
         let ringed = outlined(
             &mobiles,
             &camera,
             &atlas,
             &Cutaway::OPEN,
             &no_equip(),
+            &no_types(),
             Some(MobileIndex::new(0)),
         );
         assert_eq!(ringed.len(), 1, "one creature, one silhouette");
@@ -1683,7 +1996,16 @@ mod tests {
         assert_eq!(ringed[0].rect, drawn[0].rect);
         assert_eq!(ringed[0].depth, drawn[0].depth);
         assert!(
-            outlined(&mobiles, &camera, &atlas, &Cutaway::OPEN, &no_equip(), None).is_empty(),
+            outlined(
+                &mobiles,
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                &no_types(),
+                None
+            )
+            .is_empty(),
             "nothing pointed at is an empty list and not a case to handle",
         );
     }
@@ -1717,6 +2039,7 @@ mod tests {
             &atlas,
             &Cutaway::OPEN,
             &no_equip(),
+            &no_types(),
             None,
         );
         assert_eq!(quads.len(), 1);
@@ -1752,6 +2075,7 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 None,
             )
         };
@@ -1798,6 +2122,7 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 None
             )
             .len(),
@@ -1816,6 +2141,7 @@ mod tests {
                 &atlas,
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 None
             )
             .len(),
@@ -1855,7 +2181,7 @@ mod tests {
             equipment: Vec::new().into(),
         };
         assert_eq!(
-            needed_animations(std::slice::from_ref(&ghost), &no_equip()),
+            needed_animations(std::slice::from_ref(&ghost), &no_equip(), &no_types()),
             vec![AnimationKey::new(
                 Graphic(400),
                 AnimationGroup(4),
@@ -1871,6 +2197,7 @@ mod tests {
                 &atlas(400, 0, 40, 60, (12, -3)),
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 None,
             )
             .len(),
@@ -1885,6 +2212,7 @@ mod tests {
                 &atlas(402, 0, 40, 60, (12, -3)),
                 &Cutaway::OPEN,
                 &no_equip(),
+                &no_types(),
                 None,
             )
             .len(),
@@ -1918,6 +2246,7 @@ mod tests {
             &atlas,
             &Cutaway::OPEN,
             &no_equip(),
+            &no_types(),
             None,
         );
         let anchor = head_anchor(&mobile, &camera, &atlas).expect("packed");
@@ -1975,6 +2304,7 @@ mod tests {
             &atlas,
             &Cutaway::OPEN,
             &no_equip(),
+            &no_types(),
             None,
         );
         // Half a tile back the way it came: a step east is eleven pixels right
@@ -1988,6 +2318,7 @@ mod tests {
             &atlas,
             &Cutaway::OPEN,
             &no_equip(),
+            &no_types(),
             None,
         );
         assert_eq!(standing.len(), 1);
@@ -2042,6 +2373,7 @@ mod tests {
             &atlas,
             &Cutaway::OPEN,
             &no_equip(),
+            &no_types(),
             None,
         );
         assert_eq!(quads.len(), 1);
@@ -2063,6 +2395,7 @@ mod tests {
             &atlas,
             &Cutaway::OPEN,
             &no_equip(),
+            &no_types(),
             None,
         );
         assert!(
@@ -2096,6 +2429,7 @@ mod tests {
                 mobile(Direction::SouthEast),
             ],
             &no_equip(),
+            &no_types(),
         );
         assert_eq!(
             wanted,
@@ -2142,7 +2476,15 @@ mod tests {
             drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(7017), Hue::NONE)].into(),
         };
-        let quads = collect(&[mobile], &camera, &atlas, &Cutaway::OPEN, &equip_conv, None);
+        let quads = collect(
+            &[mobile],
+            &camera,
+            &atlas,
+            &Cutaway::OPEN,
+            &equip_conv,
+            &no_types(),
+            None,
+        );
         assert_eq!(quads.len(), 2, "the body and its one worn item");
         assert_eq!(
             quads[0].depth, quads[1].depth,
@@ -2200,7 +2542,15 @@ mod tests {
             ]
             .into(),
         };
-        let quads = collect(&[mobile], &camera, &atlas, &Cutaway::OPEN, &no_equip(), None);
+        let quads = collect(
+            &[mobile],
+            &camera,
+            &atlas,
+            &Cutaway::OPEN,
+            &no_equip(),
+            &no_types(),
+            None,
+        );
         assert_eq!(quads.len(), 3, "the body and its two garments");
         assert_eq!(
             quads[1].hue,
@@ -2263,7 +2613,7 @@ mod tests {
             equipment: vec![worn_on_torso(AnimId(0), Hue::NONE)].into(),
         };
         assert_eq!(
-            needed_animations(std::slice::from_ref(&mobile), &no_equip()),
+            needed_animations(std::slice::from_ref(&mobile), &no_equip(), &no_types()),
             vec![AnimationKey::new(
                 Graphic(400),
                 AnimationGroup(4),
@@ -2272,7 +2622,16 @@ mod tests {
             "the body alone; body 0 is not an animation anybody asked for",
         );
         assert_eq!(
-            collect(&[mobile], &camera, &atlas, &Cutaway::OPEN, &no_equip(), None).len(),
+            collect(
+                &[mobile],
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                &no_types(),
+                None
+            )
+            .len(),
             1,
             "the body alone, with no monster's frame worn over it",
         );
@@ -2334,14 +2693,23 @@ mod tests {
 
         let living = dressed(Graphic(0x0190));
         assert_eq!(
-            collect(&[living], &camera, &atlas, &Cutaway::OPEN, &no_equip(), None).len(),
+            collect(
+                &[living],
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                &no_types(),
+                None
+            )
+            .len(),
             3,
             "a living body wears both of them: the body, the shirt and the hair",
         );
 
         let ghost = dressed(Graphic(0x0192));
         assert_eq!(
-            needed_animations(std::slice::from_ref(&ghost), &no_equip()),
+            needed_animations(std::slice::from_ref(&ghost), &no_equip(), &no_types()),
             vec![
                 AnimationKey::new(Graphic(0x0190), AnimationGroup(4), AnimationDirection(0)),
                 AnimationKey::new(Graphic(7005), AnimationGroup(4), AnimationDirection(0)),
@@ -2349,7 +2717,16 @@ mod tests {
             "the hair is not packed either — the pack and the draw must agree",
         );
         assert_eq!(
-            collect(&[ghost], &camera, &atlas, &Cutaway::OPEN, &no_equip(), None).len(),
+            collect(
+                &[ghost],
+                &camera,
+                &atlas,
+                &Cutaway::OPEN,
+                &no_equip(),
+                &no_types(),
+                None
+            )
+            .len(),
             2,
             "and a ghost wears only the shirt: the body, the shirt, no hair",
         );
@@ -2389,7 +2766,15 @@ mod tests {
             drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(7017), Hue::NONE)].into(),
         };
-        let quads = collect(&[mobile], &camera, &atlas, &Cutaway::OPEN, &no_equip(), None);
+        let quads = collect(
+            &[mobile],
+            &camera,
+            &atlas,
+            &Cutaway::OPEN,
+            &no_equip(),
+            &no_types(),
+            None,
+        );
         assert_eq!(
             quads.len(),
             2,
@@ -2416,7 +2801,15 @@ mod tests {
             drawn:     Gaze::on(Point::new(100, 100, 0)),
             equipment: vec![worn_on_torso(AnimId(7017), Hue::NONE)].into(),
         };
-        let quads = collect(&[mobile], &camera, &atlas, &Cutaway::OPEN, &no_equip(), None);
+        let quads = collect(
+            &[mobile],
+            &camera,
+            &atlas,
+            &Cutaway::OPEN,
+            &no_equip(),
+            &no_types(),
+            None,
+        );
         assert_eq!(
             quads.len(),
             1,

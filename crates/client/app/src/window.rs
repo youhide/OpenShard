@@ -325,6 +325,7 @@ pub(crate) fn wanted_in(
     drawn: &[Mobile],
     animations: &StaticAnimations,
     equip_conv: &EquipConv,
+    mob_types: &MobTypes,
 ) -> Wanted {
     let mut wanted = Wanted::empty();
     for band in bands {
@@ -337,7 +338,7 @@ pub(crate) fn wanted_in(
     wanted.statics.extend(items::needed_graphics(items, animations));
     wanted
         .animations
-        .extend(mobiles::needed_animations(drawn, equip_conv));
+        .extend(mobiles::needed_animations(drawn, equip_conv, mob_types));
     wanted
 }
 
@@ -558,6 +559,7 @@ pub(crate) fn ready_atlases(
             &drawn.iter().map(|(_, mobile)| mobile.clone()).collect::<Vec<_>>(),
             &world.presentation.tile_animations,
             &resources.equip_conv,
+            world.presentation.crowd.mob_types(),
         );
         match Atlases::build(
             &resources.art,
@@ -1447,6 +1449,7 @@ impl App {
             &drawn,
             &self.world.presentation.tile_animations,
             &self.resources.equip_conv,
+            self.world.presentation.crowd.mob_types(),
         )
     }
 }

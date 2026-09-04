@@ -582,17 +582,28 @@ literal, which is what also took the animal cast off group 12 (`Die2`: a
 casting animal used to fall over and stay down). An install with no
 `mobtypes.txt` keeps the range rule, which is what the reference does too.
 
-Three things this turned up and did not fix:
+Three things this turned up. One is fixed, two are not:
 
-- **A mount is drawn through neither table.** `mobiles::mount_of`
-  (`crates/client/render/src/mobiles.rs`) resolves the saddle layer to a body
-  and asks `BodyKind::of` for its stand/walk/run. Nine of the thirty rideable
-  bodies are numbered below 200 (116, 117, 122, 132, 144, 169, 187, 188, 190),
-  so they get the monster numbering — and they get no `Body.def` redirect
-  either, which `apply_body_def` performs on `mobile.body` alone and never on
-  an equipment layer. Both tables have to reach that seam together: fixing the
-  numbering without the redirect just asks a body with no frames for a
-  different group it also does not have.
+- ~~**A mount is drawn through neither table.**~~ **Fixed**, both tables at
+  once, because either alone is no fix: the numbering without the redirect asks
+  a body with no frames for a different group it also does not have.
+  `mobiles::mount_of` now takes the install's `MobTypes` and asks it for the
+  mount's stand/walk/run, which the range rule is wrong about for **19 of the
+  30** rideable bodies — the nine below 200 (116, 117, 122, 132, 144, 169, 187,
+  188, 190) it calls monsters and the ten at 400 and above (791, 793, 794, 799,
+  1407, 1408, 1410, 1440, 1441, 1510) it calls *humans*; the shipped file calls
+  every one of them `ANIMAL`. And `App::redirect_mount` applies `Body.def` to
+  the `Layer::MOUNT` graphic beside the body it already redirected, which the
+  stock file has an opinion about for 13 of the 30 (116 and 117 are body 200
+  hued 1109 and 1154; 791 is body 220). The mount's group needs no translating
+  the way the rider's does — it is derived from the redirected body rather than
+  carried — so the two tables meet in one place: the redirect decides which
+  body, the table decides how its actions are numbered. Threading `MobTypes`
+  into the renderer's mobile entry points is what that cost. **Open question
+  left behind:** the redirect's hue replaces the saddle's own wire hue whenever
+  the file gives one, which is the rule `apply_body_def` already applies to a
+  body — nobody has checked against the reference whether a *dyed* mount item
+  is supposed to win over `Body.def`'s colour, and today it loses.
 - **Bodies 95 and 826 lose their pictures.** `mobtypes.txt` calls them animals
   with no extended flag, which is the low layout applied to a body below its
   own first id. The reference subtracts anyway and reads whatever it lands on

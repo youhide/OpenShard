@@ -91,8 +91,13 @@ use openshard_client_render::{
 use openshard_map::grid::BlockCoord;
 use openshard_map::map::WorldMap;
 use openshard_protocol::speech::Font;
-use openshard_protocol::wire::Hue;
+use openshard_protocol::wire::{
+    Graphic,
+    Hue,
+    Layer,
+};
 use openshard_protocol::world::Point;
+use openshard_tiles::AnimId;
 use openshard_uofiles::anim::{
     AnimationGroup,
     BodyDef,
@@ -1428,8 +1433,13 @@ impl App {
     /// name animation-atlas keys.  `Body.def` may cross animation families:
     /// its grey wolf redirect is monster body 25 to animal body 225, where
     /// stand, walk and death have different group numbers.
+    ///
+    /// A rider's mount is redirected too, by [`App::redirect_mount`]: it is a
+    /// second body drawn from the same `anim.mul`, and the file has an opinion
+    /// about 13 of the 30 rideable bodies.
     fn apply_body_def(mobiles: &mut [(Who, Mobile)], body_def: &BodyDef, mob_types: &MobTypes) {
         for (_, mobile) in mobiles {
+            Self::redirect_mount(mobile, body_def);
             let appearance = body_def.appearance(mobile.body);
             if appearance.body == mobile.body {
                 continue;
@@ -1442,6 +1452,50 @@ impl App {
                 mobile.hue = appearance.hue;
             }
         }
+    }
+
+    /// The same redirect for the creature a rider is sitting on.
+    ///
+    /// `Layer::MOUNT` is the one worn layer whose graphic is a *body* id and not
+    /// an item's `AnimID` (`crowd::mount_picture` puts it there), so `Body.def`
+    /// speaks about it — and says something for 13 of the 30 bodies in
+    /// [`openshard_protocol::mounts`]: the barded horses 116 and 117 are body
+    /// 200 hued 1109 and 1154, the swamp dragon 791 is body 220, and the
+    /// reference client redirects them all before it asks for a frame. Left
+    /// unredirected, a mount is drawn from an id whose frames a modern install's
+    /// legacy `anim.mul` need not hold at all, which is the rider gliding along
+    /// with nothing under them.
+    ///
+    /// No group is translated the way [`App::apply_body_def`] translates the
+    /// rider's: a mount's group is not carried, it is *derived* from the
+    /// redirected body by `mobiles::mount_of` — which asks the same
+    /// `mobtypes.txt` this function's caller does. That is the other half of the
+    /// pair: the redirect decides which body, the table decides how its actions
+    /// are numbered, and a mount resolved through only one of the two is drawn
+    /// from a body id half the install disagrees with.
+    ///
+    /// The equipment list is shared by [`Rc`] and rebuilt only where a redirect
+    /// actually changes something, so an unmounted body — or a mount the file is
+    /// silent about, which is the ordinary horse — allocates nothing.
+    fn redirect_mount(mobile: &mut Mobile, body_def: &BodyDef) {
+        let Some((index, saddle)) = mobile
+            .equipment
+            .iter()
+            .enumerate()
+            .find(|(_, layer)| layer.layer == Layer::MOUNT)
+        else {
+            return;
+        };
+        let appearance = body_def.appearance(Graphic(saddle.graphic.0));
+        if appearance.body.0 == saddle.graphic.0 && appearance.hue == Hue::NONE {
+            return;
+        }
+        let mut layers = mobile.equipment.to_vec();
+        layers[index].graphic = AnimId(appearance.body.0);
+        if appearance.hue != Hue::NONE {
+            layers[index].hue = appearance.hue;
+        }
+        mobile.equipment = layers.into();
     }
 
     /// Refresh each body's animation group from the crowd's clock.
@@ -1849,6 +1903,7 @@ impl App {
                     &window.atlases.mobiles,
                     &cutaway,
                     &self.resources.equip_conv,
+                    self.world.presentation.crowd.mob_types(),
                     cursor,
                     interior.as_ref(),
                 )
@@ -3274,7 +3329,10 @@ pub(crate) fn write_frame_dump(
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use openshard_client_render::follow::Gaze;
+    use openshard_client_render::mobiles::EquipmentLayer;
     use openshard_protocol::direction::{
         Direction,
         Facing,
@@ -3316,6 +3374,85 @@ mod tests {
         assert_eq!(player.drawn, motion.drawn());
         assert_ne!(player.drawn, Gaze::on(start));
         assert_eq!(player.from, Some(start));
+    }
+
+    /// A rider is two bodies, and `Body.def` speaks about both.
+    ///
+    /// The barded horse is the stock file's own row — `116 {200} 1109` — and
+    /// the id the wire equips is 116, which a modern install's legacy
+    /// `anim.mul` need not hold a single frame for. Redirecting only
+    /// [`Mobile::body`] leaves the saddle naming that id for ever, which is a
+    /// rider gliding along with nothing underneath.
+    #[test]
+    fn a_body_def_redirect_reaches_the_mount_under_the_rider() {
+        let body_def = BodyDef::from_text("# original body { visual body } hue\n116 {200} 1109\n");
+        let mob_types = MobTypes::from_text("200\tANIMAL\t0\n400\tHUMAN\t0\n");
+        let mounted = |mount: u16, hue: Hue| {
+            (
+                None,
+                Mobile {
+                    at:        Point::new(100, 100, 0),
+                    body:      Graphic(400),
+                    group:     AnimationGroup(25), // OnmountStand.
+                    facing:    Direction::SouthEast,
+                    frame:     openshard_uofiles::anim::AnimationFrameIndex(0),
+                    from:      None,
+                    corpse:    false,
+                    hue:       Hue::NONE,
+                    drawn:     Gaze::on(Point::new(100, 100, 0)),
+                    equipment: vec![EquipmentLayer {
+                        graphic: AnimId(mount),
+                        hue,
+                        layer: Layer::MOUNT,
+                    }]
+                    .into(),
+                },
+            )
+        };
+        let mount_layer = |mobile: &Mobile| {
+            *mobile
+                .equipment
+                .iter()
+                .find(|layer| layer.layer == Layer::MOUNT)
+                .expect("the saddle stays equipped through the redirect")
+        };
+
+        let mut riders = [mounted(116, Hue::NONE), mounted(200, Hue::NONE)];
+        App::apply_body_def(&mut riders, &body_def, &mob_types);
+
+        assert_eq!(
+            mount_layer(&riders[0].1),
+            EquipmentLayer {
+                graphic: AnimId(200),
+                hue:     Hue(1109),
+                layer:   Layer::MOUNT,
+            },
+            "the barded horse is drawn as body 200 in the file's own hue",
+        );
+        assert_eq!(
+            mount_layer(&riders[1].1),
+            EquipmentLayer {
+                graphic: AnimId(200),
+                hue:     Hue::NONE,
+                layer:   Layer::MOUNT,
+            },
+            "a mount the file says nothing about keeps the id and hue it arrived with",
+        );
+        assert_eq!(
+            riders[0].1.group,
+            AnimationGroup(25),
+            "the rider's own group is untouched: the mount's is derived, not carried",
+        );
+
+        // The equipment list is shared by `Rc`, so a body the redirect does not
+        // change must not be rebuilt — every frame goes through here.
+        let untouched = mounted(200, Hue::NONE);
+        let mut same = [untouched.clone()];
+        App::apply_body_def(&mut same, &body_def, &mob_types);
+        assert!(
+            Rc::ptr_eq(&same[0].1.equipment, &untouched.1.equipment),
+            "an unredirected mount keeps the allocation it arrived with",
+        );
     }
 
     #[test]

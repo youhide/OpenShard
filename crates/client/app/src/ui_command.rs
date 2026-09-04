@@ -779,6 +779,7 @@ impl App {
             &window.atlases.mobiles,
             &cutaway,
             &self.resources.equip_conv,
+            self.world.presentation.crowd.mob_types(),
             self.control.cursor(),
         );
         if let Some(index) = on_mobile {
