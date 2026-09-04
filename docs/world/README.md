@@ -228,6 +228,39 @@ one of which bakes a `SpanIndex` and the other does not — and
 have to keep timing it. The two fixtures are a straight conversion; the example
 wants the open split into read-and-bake before it can use one.
 
+The three below came out of the **first session the route journal recorded**
+(2026-09-04, one click at `(1345, 1894, 88)` from about twenty-five tiles away,
+143 plans). They are one report each, and the journal is what separated them:
+
+**22. A destination resolves to two different places in the same second.** The
+click named a column whose only *map* surface is the ground at z 0; the live
+layer had a surface at z 88 on it. Over the walk, `destination_place` answered
+88 on some plans and 0 on others — twice within one millisecond of each other
+(lines 125/126, 130/131, 139/140) — so the client alternated between a 24-step
+route to the ground and a 95-step route onto the roof. Whatever is at 88 is
+therefore *entering and leaving the client's overlay* while the body stands
+still, twenty-five tiles away: the same shape as the anchor-only view range this
+domain has already been bitten by. Until it settles, no plan for that click is
+stable, and the switch is invisible to a player — both routes draw green.
+
+**23. A route to that destination oscillates, and nothing ends the order.** With
+the goal at z 88, the plan from `(1344, 1919)` starts `NE` — onto
+`(1345, 1918)` — and the plan from `(1345, 1918)` starts `SW`, back again. The
+body walked between those two tiles for the rest of the session. The stall
+patience cannot see it (`STUCK_STEPS` compares the body's position, and the body
+*is* moving), and the destination is never reached, so the order never ends: 126
+plans on one click and still walking when the window closed. Two neighbouring
+starts whose long routes each begin by stepping onto the other is a property of
+the corridor join, not of the ground.
+
+**24. A long plan costs 56–130 ms, and there are two or three per step.** Median
+61 ms over those 143 plans, every one of them with `explored = 701`: the bounded
+search spends its whole budget, fails, and the coarse query then pays for the
+corridor. That is the client's own frame budget several times over, on the walk
+path, while a player is moving — and the preview and the step ask for it
+separately. The node budget bounds the *bounded* search only; nothing bounds
+what the fallback costs in milliseconds.
+
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change
 the geometry, and not before) and **which validation blocks a publish**

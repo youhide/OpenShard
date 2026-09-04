@@ -110,8 +110,12 @@ struct Cli {
     #[arg(long, default_value = openshard_pathlog::write::DEFAULT_PATH)]
     journal:  PathBuf,
     /// The client install the facet is read from.
+    ///
+    /// Optional, because `--list` is a reading of the journal alone: what a
+    /// session did is in the file, and only re-asking its questions needs a
+    /// map.
     #[arg(long, env = "OPENSHARD_CLIENT")]
-    client:   PathBuf,
+    client:   Option<PathBuf>,
     /// The base set the shard is running, when it is not the install's own map.
     ///
     /// The journal's session line names the file it was; this has to be the
@@ -143,7 +147,11 @@ fn open(cli: &Cli, facet: Facet) -> (OpenFacet, Option<NavigationGraph>) {
         Some(path) => WorldSource::BaseSet(path),
         None => WorldSource::Install,
     };
-    let ground = open_facet(&cli.client, source, facet).expect("the facet should load");
+    let client = cli
+        .client
+        .as_ref()
+        .expect("replaying a plan needs the facet it was planned over: pass --client");
+    let ground = open_facet(client, source, facet).expect("the facet should load");
     let coarse = ground
         .coarse()
         .map_err(|error| eprintln!("no coarse graph: {error}"))
