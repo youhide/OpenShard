@@ -585,6 +585,20 @@ impl World {
         self
     }
 
+    /// Give the shard the install's `mobtypes.txt`, so the animation group
+    /// numbers it sends are the ones each creature's own family names.
+    ///
+    /// Separate from [`with_tiles`](Self::with_tiles) because it is optional in
+    /// a way the tile table is not: an install that predates the file, or a
+    /// shard with no client files at all, keeps the empty table and the id-range
+    /// rule — which is right for a shard that cannot see the client's answer,
+    /// and wrong for one that can.
+    #[must_use]
+    pub fn with_mob_types(mut self, mob_types: openshard_uofiles::mobtypes::MobTypes) -> Self {
+        self.state.mob_types = mob_types;
+        self
+    }
+
     /// Give the shard its operator-imported custom house designs.
     ///
     /// They are keyed by their JSON file stem, rather than synthetic multi ids:

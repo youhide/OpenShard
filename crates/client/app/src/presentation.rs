@@ -98,6 +98,7 @@ use openshard_uofiles::anim::{
     BodyDef,
     BodyKind,
 };
+use openshard_uofiles::mobtypes::MobTypes;
 
 use crate::app::App;
 use crate::chat::draw_chat_and_speech;
@@ -1396,7 +1397,11 @@ impl App {
             &self.world.presentation.others,
             &self.world.presentation.corpses,
         );
-        Self::apply_body_def(&mut mobiles, &self.resources.body_def);
+        Self::apply_body_def(
+            &mut mobiles,
+            &self.resources.body_def,
+            self.world.presentation.crowd.mob_types(),
+        );
         mobiles
     }
 
@@ -1423,14 +1428,14 @@ impl App {
     /// name animation-atlas keys.  `Body.def` may cross animation families:
     /// its grey wolf redirect is monster body 25 to animal body 225, where
     /// stand, walk and death have different group numbers.
-    fn apply_body_def(mobiles: &mut [(Who, Mobile)], body_def: &BodyDef) {
+    fn apply_body_def(mobiles: &mut [(Who, Mobile)], body_def: &BodyDef, mob_types: &MobTypes) {
         for (_, mobile) in mobiles {
             let appearance = body_def.appearance(mobile.body);
             if appearance.body == mobile.body {
                 continue;
             }
-            let from = BodyKind::of(mobile.body);
-            let to = BodyKind::of(appearance.body);
+            let from = mob_types.kind_of(mobile.body);
+            let to = mob_types.kind_of(appearance.body);
             mobile.group = redirected_group(mobile.group, from, to);
             mobile.body = appearance.body;
             if appearance.hue != Hue::NONE {
@@ -2433,7 +2438,12 @@ impl App {
         // camera-frame capture path.
         if cutaway == Cutaway::OPEN {
             for work in self.composite_work.preparation_candidates() {
-                if let Some(ground) = prepare_composite_job(&mut self.resources, window, work.key) {
+                if let Some(ground) = prepare_composite_job(
+                    &mut self.resources,
+                    self.world.presentation.crowd.mob_types(),
+                    window,
+                    work.key,
+                ) {
                     self.composite_work.mark_prepared(work.key, ground);
                 }
             }

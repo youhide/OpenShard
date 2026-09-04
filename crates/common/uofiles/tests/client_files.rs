@@ -29,10 +29,12 @@ use openshard_tiles::{
 use openshard_uofiles::anim::{
     Anim,
     AnimationDirection,
+    AnimationGroup,
     AnimationKey,
     BodyDef,
     BodyKind,
     DIRECTIONS,
+    IndexLayout,
 };
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
@@ -43,6 +45,7 @@ use openshard_uofiles::font::{
     GLYPH_BASE,
 };
 use openshard_uofiles::hues::Hues;
+use openshard_uofiles::mobtypes::MobTypes;
 use openshard_uofiles::skillgrp::SkillGroups;
 use openshard_uofiles::skills::{
     SkillId,
@@ -739,11 +742,14 @@ fn a_humans_standing_animation_is_where_the_index_says() {
     // `PeopleAnimationGroup.Stand`.
     for direction in 0..DIRECTIONS {
         let frames = anim
-            .frames(AnimationKey::new(
-                Graphic(400),
-                BodyKind::Human.standing(),
-                AnimationDirection::new(direction),
-            ))
+            .frames(
+                AnimationKey::new(
+                    Graphic(400),
+                    BodyKind::Human.standing(),
+                    AnimationDirection::new(direction),
+                ),
+                IndexLayout::People,
+            )
             .expect("a well-formed entry")
             .unwrap_or_else(|| panic!("body 400 has no standing animation facing {direction}"));
         assert!(
@@ -792,16 +798,115 @@ fn a_grey_wolf_redirect_reaches_its_animation() {
         .appearance(Graphic(25));
     assert_eq!(appearance.body, Graphic(225), "the stock grey-wolf redirect");
 
+    let table = MobTypes::open(&dir).expect("a readable optional mobtypes.txt");
     let mut anim = Anim::open(&dir).expect("anim.idx and anim.mul");
     let frames = anim
-        .frames(AnimationKey::new(
-            appearance.body,
-            BodyKind::of(appearance.body).standing(),
-            AnimationDirection::new(0),
-        ))
+        .frames(
+            AnimationKey::new(
+                appearance.body,
+                table.kind_of(appearance.body).standing(),
+                AnimationDirection::new(0),
+            ),
+            table.layout_of(appearance.body),
+        )
         .expect("a well-formed wolf entry")
         .expect("the redirected grey wolf has a standing animation");
     assert!(!frames.is_empty(), "the redirected grey wolf has frames");
+}
+
+/// A cougar is an animal that the body-id range rule calls a monster, and the
+/// difference is a creature that vanishes when it swings.
+///
+/// Body 63 is `ANIMAL` in `mobtypes.txt` and `Animal` in ServUO's own
+/// `bodyTable.cfg`, but it is numbered below 200, so `BodyKind::of` calls it a
+/// monster. Read under the monster numbering its attack is group 4
+/// (`HighAnimationGroup.Attack1`); under the animal numbering the file actually
+/// stores, group 4 is `LowAnimationGroup.Unknown` — an entry that exists in one
+/// direction out of five, and holds one drawable picture and two blanks — while
+/// the attack it *does* have is group 5, five frames in all five directions.
+/// Nothing fails: facing south-east the creature plays a single stray frame,
+/// and facing any other way it has nothing to draw and is dropped from the
+/// scene for the length of the swing.
+///
+/// A real-install test because it is a statement about shipped data. The table
+/// says which numbering; the file says which of the two numbers finds pictures.
+#[test]
+fn a_cougars_attack_is_the_animal_group_and_not_the_monster_one() {
+    let Some(dir) = client_dir() else {
+        return;
+    };
+    let mut anim = Anim::open(&dir).expect("anim.idx and anim.mul");
+    let table = MobTypes::open(&dir).expect("a readable optional mobtypes.txt");
+
+    assert_eq!(
+        table.kind_of(Graphic(63)),
+        BodyKind::Animal,
+        "mobtypes.txt says the cougar is an animal",
+    );
+    assert_eq!(
+        BodyKind::of(Graphic(63)),
+        BodyKind::Monster,
+        "and the range rule this replaces says it is a monster",
+    );
+
+    // The frames come from the body `Body.def` redirects to, which is an
+    // animal in the file's own numbering too.
+    let body = BodyDef::open(&dir)
+        .expect("a readable optional Body.def")
+        .appearance(Graphic(63))
+        .body;
+    assert_eq!(body, Graphic(214), "the stock cougar redirect");
+    let kind = table.kind_of(body);
+    let layout = table.layout_of(body);
+    assert_eq!(kind, BodyKind::Animal);
+
+    // `LowAnimationGroup.Attack1`, which is what an attacking cougar must play.
+    let attack = AnimationGroup::new(5);
+    // `HighAnimationGroup.Attack1`, which is what the range rule asks for.
+    let monster_attack = AnimationGroup::new(4);
+    for direction in 0..DIRECTIONS {
+        let direction = AnimationDirection::new(direction);
+        let frames = anim
+            .frames(AnimationKey::new(body, attack, direction), layout)
+            .expect("a well-formed cougar entry")
+            .unwrap_or_else(|| panic!("the cougar has no attack facing {direction}"));
+        assert_eq!(frames.len(), 5, "the cougar's attack facing {direction}");
+        assert!(
+            frames.iter().all(|frame| frame.image.width() > 0),
+            "a frame of the cougar's attack facing {direction} decoded to nothing",
+        );
+    }
+
+    // What the monster numbering finds instead: one direction with one
+    // drawable picture in it, and four with no entry at all.
+    assert!(
+        anim.has_frames(
+            AnimationKey::new(body, monster_attack, AnimationDirection::new(0)),
+            layout
+        ),
+        "the stray south-east entry that made this look like a rendering fault",
+    );
+    for direction in 1..DIRECTIONS {
+        assert!(
+            !anim.has_frames(
+                AnimationKey::new(body, monster_attack, AnimationDirection::new(direction)),
+                layout
+            ),
+            "the monster numbering's attack has an entry facing {direction}, so a cougar \
+             swinging that way would not have vanished",
+        );
+    }
+
+    // And the run it was denied by being called a monster: `BodyKind::running`
+    // is `None` for the high numbering, so a running cougar was walking.
+    let running = kind.running().expect("an animal runs");
+    assert!(
+        anim.has_frames(
+            AnimationKey::new(body, running, AnimationDirection::new(0)),
+            layout
+        ),
+        "the cougar has a run animation",
+    );
 }
 
 /// The index is mostly empty, and that is the file rather than a bug.
@@ -818,16 +923,16 @@ fn the_animation_index_is_sparse_but_the_bodies_that_exist_are_dense() {
         return;
     };
     let anim = Anim::open(&dir).expect("anim.idx and anim.mul");
+    let table = MobTypes::open(&dir).expect("a readable optional mobtypes.txt");
 
     // Standing, facing 0, for every body the file could hold.
     let present = (0..1000u16)
         .filter(|body| {
-            let kind = BodyKind::of(Graphic(*body));
-            anim.has_frames(AnimationKey::new(
-                Graphic(*body),
-                kind.standing(),
-                AnimationDirection::new(0),
-            ))
+            let body = Graphic(*body);
+            anim.has_frames(
+                AnimationKey::new(body, table.kind_of(body).standing(), AnimationDirection::new(0)),
+                table.layout_of(body),
+            )
         })
         .count();
     assert!(

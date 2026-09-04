@@ -1295,6 +1295,21 @@ pub struct WorldState {
     /// Owned outright, like [`tiles`](Self::tiles) beside it: one holder each,
     /// and nothing on the shard to share either with.
     pub multis: openshard_uofiles::multi::Multis,
+    /// Which animation family each body id belongs to, from the install's
+    /// `mobtypes.txt`.
+    ///
+    /// The shard chooses animation *group numbers* — an attack, a death, a cast
+    /// — and the same number means a different action for a monster, an animal
+    /// and a person, so it has to know which of the three each body is. The
+    /// body id alone does not say: it is below 200 for every wolf, bear and
+    /// cougar, and all of those are animals. ServUO answers the same question
+    /// from its own `Data/bodyTable.cfg`, for the same reason.
+    ///
+    /// Beside [`tiles`](Self::tiles) and [`multis`](Self::multis), and total in
+    /// the same way: a shard with no client files gets an empty table, which is
+    /// not a stand-in but the file saying nothing — every body then answers from
+    /// the id-range rule, which is what this shard did before the table existed.
+    pub mob_types: openshard_uofiles::mobtypes::MobTypes,
     /// Imported house designs the operator has made available to staff.
     ///
     /// Unlike [`multis`](Self::multis), these shapes are original content rather
@@ -1785,6 +1800,9 @@ impl WorldState {
             craft_stock: crate::craft_stock::CraftStockIndex::new(),
             tiles,
             multis,
+            // Read from the install by `World::with_mob_types`, if there is
+            // one. Until then every body answers from the id-range rule.
+            mob_types: openshard_uofiles::mobtypes::MobTypes::empty(),
             house_templates: BTreeMap::new(),
             players: HashMap::new(),
             connections: HashMap::new(),
@@ -3029,7 +3047,7 @@ impl WorldState {
         };
         let body = self.registry.get::<Body>(mobile).copied();
         let humanoid = body.is_some_and(|body| body_opens_doors(body.id));
-        let kind = body.map_or(BodyKind::Monster, |body| BodyKind::of(body.id));
+        let kind = body.map_or(BodyKind::Monster, |body| self.mob_types.kind_of(body.id));
         let (group, frames) = action.classic_action(kind, humanoid, WeaponAnimation::Wrestle);
         let duration_ms = duration_ticks
             .saturating_mul(1_000 / TICKS_PER_SECOND)
@@ -3086,7 +3104,7 @@ impl WorldState {
         // A body that was not supplied used the monster fallback before this
         // table was introduced; retain that answer for malformed/incomplete
         // mobiles, while every real body selects its client-file layout.
-        let animation_kind = body.map_or(BodyKind::Monster, |body| BodyKind::of(body.id));
+        let animation_kind = body.map_or(BodyKind::Monster, |body| self.mob_types.kind_of(body.id));
         // An `0xE2` attack is only a category. Its sub-action is where the
         // weapon motion lives, and zero means wrestling. Read the equipped item
         // at the swing, just as combat reads its damage at the swing: taking an
@@ -3203,15 +3221,27 @@ impl Action {
     /// The `0x6E` classic action id and frame count, which *are* body-specific.
     /// The humanoid ids are ServUO's people-animation values (the equipped
     /// weapon's 9..19 group, Wrestle 31 unarmed, human die 21, human
-    /// directed-cast 16). The low animal table and high monster table use
-    /// different death groups: 8 and 2 respectively.
+    /// directed-cast 16).
+    ///
+    /// **Every creature branch reads `kind`.** The three numberings share no
+    /// action but the walk, so a number written as a literal here is a number
+    /// that is right for one family and something else entirely for the other
+    /// two — group 4 is the monster's `Attack1`, and the animal group it lands
+    /// on is one most animals do not have. `kind` is the install's answer for
+    /// this body (`WorldState::mob_types`), not its id range.
     const fn classic_action(self, kind: BodyKind, humanoid: bool, weapon: WeaponAnimation) -> (u16, u16) {
         // `body_opens_doors` is a gameplay distinction: an orc has hands, but
         // it still reads the high-monster animation table. Death therefore
         // cannot share the attack's `humanoid` shortcut.
+        //
+        // Four frames for a creature swing: the attack groups of both creature
+        // numberings are five pictures, and the fifth is the recovery. This is
+        // the count the shard has always sent and it stays here rather than
+        // becoming a fifth thing this change moves.
+        let creature_attack = (kind.attacking().index() as u16, 4);
         match (self, humanoid) {
             (Self::Attack, true) => (weapon.group(), weapon.frame_count()),
-            (Self::Attack, false) => (4, 4), // monster attack1
+            (Self::Attack, false) => creature_attack,
             (Self::Die, _) => {
                 (
                     kind.dying().index() as u16,
@@ -3227,18 +3257,26 @@ impl Action {
             // the choice is what [`Action`] carries.
             (Self::CastDirected, true) => (16, 7), // human directed-cast
             (Self::CastArea, true) => (17, 7),     // human area-cast
-            (Self::CastDirected | Self::CastArea, false) => (12, 7), // monster cast
+            // A creature's cast, where its numbering has one — an animal's does
+            // not, and 12 there is `Die2`, so a casting animal used to fall
+            // over and stay down. See `BodyKind::casting`.
+            (Self::CastDirected | Self::CastArea, false) => {
+                match kind.casting() {
+                    Some(group) => (group.index() as u16, 7),
+                    None => creature_attack,
+                }
+            }
             // Only a person bows; a creature that is asked for money simply looks
             // at you, so the classic path animates nothing body-specific for it.
-            (Self::Bow, true) => (32, 5), // human bow
-            (Self::Bow, false) => (4, 4), // nothing better on a monster
+            (Self::Bow, true) => (32, 5),          // human bow
+            (Self::Bow, false) => creature_attack, // nothing better on a creature
             // The pre-SA harvest actions, ServUO's `EffectActions`. Only a person
             // swings a pick or casts a line; the creature arm is unreachable in
             // practice, since a tool is double-clicked by a client.
             (Self::Mine, true) => (11, 5), // human bend down / mine
             (Self::Chop, true) => (13, 6), // human two-handed swing
             (Self::Fish, true) => (12, 5), // human cast a line
-            (Self::Mine | Self::Chop | Self::Fish, false) => (4, 4),
+            (Self::Mine | Self::Chop | Self::Fish, false) => creature_attack,
         }
     }
 }
@@ -5234,6 +5272,118 @@ mod tests {
                 expected,
                 "body {:#06x} must use its own animation table",
                 body.0
+            );
+        }
+    }
+
+    /// The four bodies above are all animals *by their id*. The cougar is not,
+    /// and that is the whole point of reading `mobtypes.txt`.
+    ///
+    /// Body 63 is numbered where the monsters are, so the id-range rule sends
+    /// it group 4 for an attack — `HighAnimationGroup.Attack1` — and 2 for a
+    /// death. Its frames are an animal's: `LowAnimationGroup` puts the attack
+    /// at 5 and Die1 at 8, and group 4 there is a group the creature has in one
+    /// direction of five. So the shard drew nothing at all for four of the five
+    /// ways a cougar can face while it swings.
+    #[test]
+    fn a_cougar_is_animated_from_the_installs_table_and_not_from_its_body_id() {
+        let cougar = Graphic(63);
+        // Two rows of the shipped file, exactly as it writes them.
+        let table = openshard_uofiles::mobtypes::MobTypes::from_text(
+            "63\tANIMAL\t20\t# Cougar\n17\tMONSTER\t0\t# Daemon\n",
+        );
+
+        assert_eq!(BodyKind::of(cougar), BodyKind::Monster, "what the id alone says");
+        assert_eq!(table.kind_of(cougar), BodyKind::Animal, "what the install says");
+
+        for (action, by_id, by_table) in [
+            // `HighAnimationGroup.Attack1` against `LowAnimationGroup.Attack1`.
+            (Action::Attack, (4, 4), (5, 4)),
+            // Die1 in each numbering.
+            (Action::Die, (2, 4), (8, 4)),
+        ] {
+            let humanoid = body_opens_doors(cougar);
+            assert_eq!(
+                action.classic_action(BodyKind::of(cougar), humanoid, WeaponAnimation::Wrestle),
+                by_id,
+                "the range rule's answer, kept here so this test fails if it stops being wrong",
+            );
+            assert_eq!(
+                action.classic_action(table.kind_of(cougar), humanoid, WeaponAnimation::Wrestle),
+                by_table,
+            );
+        }
+
+        // And a body the table does not name keeps the range rule, rather than
+        // becoming an animal because the table happens to be loaded.
+        assert_eq!(table.kind_of(Graphic(0x0190)), BodyKind::Human);
+        assert_eq!(
+            table.kind_of(Graphic(17)),
+            BodyKind::Monster,
+            "the row it does name"
+        );
+    }
+
+    /// The table reaches the packet, and not only the table.
+    ///
+    /// `classic_action` above is a pure function; this is the seam that used to
+    /// be wrong — `animate_inner` asked the body id, so a shard that had read
+    /// `mobtypes.txt` still sent group 4.
+    #[test]
+    fn the_animation_a_cougar_is_sent_comes_from_the_table_the_shard_read() {
+        // A watcher on an old client, so the animation it is sent is the
+        // classic `0x6E` — the packet whose action id *is* body-specific.
+        let mut state = a_shard();
+        let connection = ConnectionId::from_raw(1);
+        state.connections.insert(
+            connection,
+            Connection::new(
+                ClientVersion::T2A,
+                AccountName::new("tester"),
+                AccessLevel::Player,
+            ),
+        );
+        let (watcher, _) = state.registry.spawn_with_serial(SerialKind::Mobile).unwrap();
+        state.registry.insert(
+            watcher,
+            Body {
+                id:  Graphic(0x0190),
+                hue: Hue::NONE,
+            },
+        );
+        state.registry.insert(watcher, Client { connection });
+        state.registry.insert(watcher, Position(Point::new(4, 4, 0)));
+        state.place_mobile(Facet(0), watcher, Point::new(4, 4, 0));
+
+        let (cougar, _) = state.registry.spawn_with_serial(SerialKind::Mobile).unwrap();
+        state.registry.insert(
+            cougar,
+            Body {
+                id:  Graphic(63),
+                hue: Hue::NONE,
+            },
+        );
+        state.registry.insert(cougar, Position(Point::new(4, 5, 0)));
+        state.place_mobile(Facet(0), cougar, Point::new(4, 5, 0));
+
+        state.mob_types = openshard_uofiles::mobtypes::MobTypes::from_text("63\tANIMAL\t20\n");
+        state.outbox.clear();
+        state.animate(cougar, Action::Attack);
+
+        // `0x6E`: the id, the serial, then the action as a big-endian `u16`.
+        let actions: Vec<u16> = state
+            .outbox
+            .iter()
+            .map(|outbound| &outbound.packet)
+            .filter(|packet| packet.first() == Some(&0x6E))
+            .map(|packet| u16::from_be_bytes([packet[5], packet[6]]))
+            .collect();
+        assert!(!actions.is_empty(), "an attack in view animates for the watcher");
+        for action in actions {
+            assert_eq!(
+                action, 5,
+                "LowAnimationGroup.Attack1; group 4 is what the body-id range rule asked for, and \
+                 it is a group the cougar's own file has in one direction of five",
             );
         }
     }

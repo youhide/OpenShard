@@ -5788,8 +5788,13 @@ fn dump_a_frame_of_britain() {
         })
         .collect();
     let equip_conv = EquipConv::default();
-    let mobile_atlas =
-        AnimAtlas::build(&mut anim, mobiles::needed_animations(&people, &equip_conv)).expect("a body fits");
+    let mob_types = openshard_uofiles::mobtypes::MobTypes::open(&dir).expect("an optional mobtypes.txt");
+    let mobile_atlas = AnimAtlas::build(
+        &mut anim,
+        &mob_types,
+        mobiles::needed_animations(&people, &equip_conv),
+    )
+    .expect("a body fits");
     let mobile_quads = mobiles::collect(&people, &camera, &mobile_atlas, &Cutaway::OPEN, &equip_conv, None);
 
     let frame = render_both(

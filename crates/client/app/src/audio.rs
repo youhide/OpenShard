@@ -48,6 +48,13 @@ pub(crate) struct Footstep {
     /// `None` is the offline player before a shard assigns a serial.
     pub who:     Option<Serial>,
     pub body:    Graphic,
+    /// Which animation family the body belongs to, from the install's table.
+    ///
+    /// Carried on the event rather than derived here, because it is not
+    /// derivable from the body id — see [`openshard_uofiles::mobtypes`] — and
+    /// the table lives with the crowd, which is where the packet this event is
+    /// made from is read.
+    pub kind:    BodyKind,
     pub at:      Point,
     pub running: bool,
     pub mounted: bool,
@@ -328,7 +335,7 @@ impl NativeAudio {
     }
 
     fn play_footstep(&mut self, step: Footstep, listener: Point) {
-        if BodyKind::of(step.body) != BodyKind::Human || step.hidden || step.dead || is_ghost(step.body) {
+        if step.kind != BodyKind::Human || step.hidden || step.dead || is_ghost(step.body) {
             return;
         }
         let now = std::time::Instant::now();
@@ -701,6 +708,7 @@ mod tests {
         MusicId,
         Point,
     };
+    use openshard_uofiles::anim::BodyKind;
 
     /// A short buffer of silence — enough to be a source, and nothing is ever
     /// asked to play it.
@@ -892,6 +900,7 @@ mod tests {
             super::Footstep {
                 who: None,
                 body: Graphic(400),
+                kind: BodyKind::Human,
                 at: Point::new(0, 0, 0),
                 running,
                 mounted,

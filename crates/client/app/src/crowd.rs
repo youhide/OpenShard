@@ -86,6 +86,7 @@ use openshard_uofiles::anim::{
     AnimationGroup,
     BodyKind,
 };
+use openshard_uofiles::mobtypes::MobTypes;
 
 /// The wire's list, as [`Mobile::equipment`] wants it.
 ///
@@ -338,6 +339,10 @@ fn animation_hold(takes: Duration) -> Duration {
 /// here because only the client has the currently displayed body's kind.
 fn modern_action(kind: BodyKind, animation_type: u16, sub_action: u16) -> Option<(u16, u16)> {
     let human = matches!(kind, BodyKind::Human);
+    // The swing every creature has, in its own numbering — see
+    // [`BodyKind::attacking`]. Four frames, matching the shard's `0x6E`
+    // fallback for the same action.
+    let creature_attack = (u16::from(kind.attacking().index()), 4);
     match animation_type {
         // Attack. The sub-action is ServUO's weapon motion; harvesting uses the
         // same ids because it deliberately asks for a particular tool swing.
@@ -352,24 +357,25 @@ fn modern_action(kind: BodyKind, animation_type: u16, sub_action: u16) -> Option
                 (true, 7) => (13, 6), // two-handed slash / chop
                 (true, 8) => (14, 7), // two-handed pierce
                 (true, _) => (31, 7), // wrestle / unknown
-                (false, _) => {
-                    match kind {
-                        BodyKind::Monster => (4, 4), // HighAnimationGroup.Attack1
-                        BodyKind::Animal => (5, 4),  // LowAnimationGroup.Attack1
-                        BodyKind::Human => unreachable!("human handled above"),
-                    }
-                }
+                (false, _) => creature_attack,
             })
         }
         3 => {
-            Some(match kind {
-                BodyKind::Monster => (2, 4), // HighAnimationGroup.Die1
-                BodyKind::Animal => (8, 4),  // LowAnimationGroup.Die1
-                BodyKind::Human => (21, 6),  // PeopleAnimationGroup.Die1
+            Some((
+                u16::from(kind.dying().index()),
+                // A person falls in six pictures and a creature in four.
+                if human { 6 } else { 4 },
+            ))
+        }
+        9 => Some(if human { (32, 5) } else { creature_attack }), // bow
+        // Spell. An animal's numbering has no cast at all, and 12 there is
+        // `Die2` — see [`BodyKind::casting`].
+        11 => {
+            Some(match kind.casting() {
+                Some(group) => (u16::from(group.index()), 7),
+                None => creature_attack,
             })
         }
-        9 => Some(if human { (32, 5) } else { (4, 4) }), // bow
-        11 => Some(if human { (16, 7) } else { (12, 7) }), // spell
         _ => None,
     }
 }
@@ -420,6 +426,15 @@ struct Tracked {
     /// know what "standing" means, and a horse and a player stop into different
     /// group numbers — see [`BodyKind::standing`].
     body:              Graphic,
+    /// Which numbering [`Tracked::body`]'s actions are named in.
+    ///
+    /// Kept beside the body rather than derived at each use, because it is not
+    /// derivable from the body: it is a row of the install's `mobtypes.txt`,
+    /// and the range rule that looks like a derivation calls every wolf, bear
+    /// and cougar a monster. Written wherever `body` is written, from the table
+    /// the caller holds, so the group numbers this history plays are the ones
+    /// the creature's own family names.
+    kind:              BodyKind,
     /// Whether it stands in war mode.
     ///
     /// Kept for exactly [`Tracked::body`]'s reason, and it is the same sentence:
@@ -844,6 +859,27 @@ pub struct Crowd {
     commanded: Who,
     /// How far the drawn bodies may lag the walk they are doing. See [`Ease`].
     ease: Ease,
+    /// Which animation family each body id belongs to, from the install's
+    /// `mobtypes.txt`.
+    ///
+    /// **Here because this is where group numbers are chosen.** A walk that
+    /// ends picks a standing group, a death picks a dying one, and both are
+    /// numbered differently for a monster, an animal and a person — so the
+    /// table has to be reachable from the same place that decision is. Held
+    /// rather than passed in at each of the eleven such decisions, for the
+    /// reason `WorldState` holds its tile table: it is one fact about the
+    /// install, and a caller that could pass a different one at each call is a
+    /// caller that eventually will.
+    ///
+    /// **The client's only copy.** `Anim` deliberately does not keep one — it
+    /// takes the resolved [`openshard_uofiles::anim::IndexLayout`] at each read
+    /// — so this is the single owner of the parsed file on the client side, and
+    /// the renderer borrows it through [`Crowd::mob_types`] to address the
+    /// index with.
+    ///
+    /// Empty until [`Crowd::read_mob_types`], which is what every test that
+    /// does not name an install gets.
+    mob_types: MobTypes,
 }
 
 impl Default for Crowd {
@@ -862,6 +898,10 @@ impl Default for Crowd {
             now: Duration::ZERO,
             commanded: None,
             ease: Ease::NONE,
+            // The install has not been read yet, and an empty table answers
+            // every body from the range rule — which is what a crowd built
+            // without one is entitled to assume. See [`Crowd::read_mob_types`].
+            mob_types: MobTypes::empty(),
         }
     }
 }
@@ -911,6 +951,22 @@ impl Crowd {
     /// What it is easing by, for the panel that edits it.
     pub const fn ease(&self) -> Ease {
         self.ease
+    }
+
+    /// Give this crowd the install's `mobtypes.txt`, so the group numbers
+    /// chosen here are the ones each creature's own family names.
+    ///
+    /// The file is read where every other client file is — see `lib.rs` — and
+    /// handed over whole. An install that ships none hands over an empty table,
+    /// which leaves every answer on the body-id range rule.
+    pub fn set_mob_types(&mut self, mob_types: MobTypes) {
+        self.mob_types = mob_types;
+    }
+
+    /// The table this crowd chooses group numbers with, for the renderer that
+    /// has to address the index with the same answer. See the field.
+    pub const fn mob_types(&self) -> &MobTypes {
+        &self.mob_types
     }
 
     /// Name the body this client walks itself.
@@ -1021,13 +1077,14 @@ impl Crowd {
         mounted: bool,
         explicit_from: Option<Point>,
     ) -> Mobile {
-        let kind = BodyKind::of(body);
+        let kind = self.mob_types.kind_of(body);
         let now = self.now;
         let commanded = self.commanded == who;
         let tracked = self.tracked.entry(who).or_insert(Tracked {
             at,
             facing: facing.direction,
             body,
+            kind,
             war,
             mounted,
             corpse: false,
@@ -1147,6 +1204,7 @@ impl Crowd {
         }
         tracked.facing = facing.direction;
         tracked.body = body;
+        tracked.kind = kind;
         // The stance, for the body that is *not* stepping: drawing a sword is a
         // packet with the same position in it as the one before, so a stance
         // that only reached the group through the walk above would not be seen
@@ -1210,11 +1268,12 @@ impl Crowd {
         war: bool,
         mounted: bool,
     ) -> Mobile {
-        let kind = BodyKind::of(body);
+        let kind = self.mob_types.kind_of(body);
         let tracked = self.tracked.entry(who).or_insert(Tracked {
             at,
             facing: facing.direction,
             body,
+            kind,
             war,
             mounted,
             corpse: false,
@@ -1234,6 +1293,7 @@ impl Crowd {
         tracked.at = at;
         tracked.facing = facing.direction;
         tracked.body = body;
+        tracked.kind = kind;
         // The stance is restated here as it is in `see`, and the animation is
         // still deliberately left alone: whatever group is playing keeps
         // playing, and the walk-to-standing check below picks the new stance up
@@ -1348,7 +1408,7 @@ impl Crowd {
         // cow needs group 8, rather than the high-animation group's 2; derive
         // the group from the body instead of borrowing whatever it was doing
         // when its hit points reached zero.
-        let kind = BodyKind::of(tracked.body);
+        let kind = tracked.kind;
         let death_group = kind.dying();
         // Keep a fall that the ordinary action packet already started at its
         // current frame.  Resetting it here would make two simultaneous deaths
@@ -1388,7 +1448,8 @@ impl Crowd {
         equipment: std::rc::Rc<[EquipmentLayer]>,
     ) -> Mobile {
         let facing = Facing::walking(facing);
-        let group = BodyKind::of(body).dying();
+        let kind = self.mob_types.kind_of(body);
+        let group = kind.dying();
         // The fall this corpse was promised, if the shard named one: `0xAF` said
         // which body becomes which corpse while that body was still falling, and
         // [`Crowd::died`] has been holding it since. Taken by serial and not by
@@ -1408,6 +1469,7 @@ impl Crowd {
                     at,
                     facing: facing.direction,
                     body,
+                    kind,
                     war: false,
                     mounted: false,
                     corpse: true,
@@ -1424,6 +1486,7 @@ impl Crowd {
                     Tracked {
                         at,
                         body,
+                        kind,
                         war: false,
                         mounted: false,
                         corpse: false,
@@ -1462,6 +1525,7 @@ impl Crowd {
         tracked.at = at;
         tracked.facing = facing.direction;
         tracked.body = body;
+        tracked.kind = kind;
         tracked.war = false;
         tracked.corpse = true;
         tracked.settles_as_corpse = false;
@@ -1494,7 +1558,7 @@ impl Crowd {
             return;
         };
         let (action, frame_count) = action_on_mount(
-            BodyKind::of(tracked.body),
+            tracked.kind,
             tracked.mounted,
             animation.action,
             animation.frame_count,
@@ -1502,7 +1566,7 @@ impl Crowd {
         let Ok(group) = u8::try_from(action) else {
             return;
         };
-        let death = AnimationGroup(group) == BodyKind::of(tracked.body).dying();
+        let death = AnimationGroup(group) == tracked.kind.dying();
         // Ordinary actions are latest-wins: a new authoritative swing starts
         // cleanly at frame zero instead of queuing stale motions.  Death is the
         // one terminal action, so it wins over any delayed attack packet.
@@ -1562,11 +1626,8 @@ impl Crowd {
         let Some(tracked) = self.tracked.get(&Some(animation.serial)) else {
             return;
         };
-        let Some((action, frames)) = modern_action(
-            BodyKind::of(tracked.body),
-            animation.animation_type,
-            animation.action,
-        ) else {
+        let Some((action, frames)) = modern_action(tracked.kind, animation.animation_type, animation.action)
+        else {
             return;
         };
         self.play(Animation {
@@ -1731,12 +1792,8 @@ impl Crowd {
         let Some(tracked) = self.tracked.get_mut(&Some(preview.serial)) else {
             return;
         };
-        let (action, frame_count) = action_on_mount(
-            BodyKind::of(tracked.body),
-            tracked.mounted,
-            preview.action,
-            preview.frame_count,
-        );
+        let (action, frame_count) =
+            action_on_mount(tracked.kind, tracked.mounted, preview.action, preview.frame_count);
         let Ok(group) = u8::try_from(action) else {
             return;
         };
@@ -2110,13 +2167,13 @@ impl Tracked {
 
     /// The group this body stands still in. See [`entry_stand`].
     fn standing_group(&self) -> AnimationGroup {
-        entry_stand(BodyKind::of(self.body), self.war, self.mounted)
+        entry_stand(self.kind, self.war, self.mounted)
     }
 
     /// The group this body moves in, at the pace the step said. See
     /// [`entry_move`].
     fn moving_group(&self, running: bool) -> AnimationGroup {
-        entry_move(BodyKind::of(self.body), running, self.war, self.mounted)
+        entry_move(self.kind, running, self.war, self.mounted)
     }
 
     /// How much of a frame's span this body spent actually crossing its tile.
@@ -3586,6 +3643,77 @@ mod tests {
             crowd.group_for(serial(1)),
             Some(AnimationGroup(25)),
             "the ride times out into the mounted stand"
+        );
+    }
+
+    /// A cougar is an animal whose body id sits among the monsters, and every
+    /// group it plays is chosen from the install's table rather than from that
+    /// id.
+    ///
+    /// Three groups, all wrong before the table was read: a monster has no run
+    /// at all (`BodyKind::running` is `None`), so a sprinting cougar was drawn
+    /// walking; its stand is 1 in the high numbering and 2 in the low one; and
+    /// its attack is 4 rather than 5 — a group the file has in one direction of
+    /// five, so the creature had no frame to draw and vanished mid-swing.
+    #[test]
+    fn a_cougar_plays_the_animal_groups_its_body_id_would_deny_it() {
+        const COUGAR: Graphic = Graphic(63);
+        let mut crowd = Crowd::default();
+        // One row of the shipped `mobtypes.txt`, as the file writes it.
+        crowd.set_mob_types(MobTypes::from_text("63\tANIMAL\t20\t# Cougar\n"));
+        assert_eq!(
+            BodyKind::of(COUGAR),
+            BodyKind::Monster,
+            "the id-range rule this test exists to replace",
+        );
+
+        let at = Point::new(10, 10, 0);
+        let standing = crowd.see(
+            serial(1),
+            at,
+            COUGAR,
+            Facing::walking(Direction::South),
+            Hue::NONE,
+            false,
+            false,
+        );
+        assert_eq!(
+            standing.group,
+            BodyKind::Animal.standing(),
+            "LowAnimationGroup.Stand, not the high numbering's 1",
+        );
+
+        let running = crowd.see(
+            serial(1),
+            Point::new(11, 10, 0),
+            COUGAR,
+            Facing::running(Direction::South),
+            Hue::NONE,
+            false,
+            false,
+        );
+        assert_eq!(
+            running.group,
+            BodyKind::Animal.running().expect("an animal runs"),
+            "a monster has no run, so this used to be the walk",
+        );
+
+        // `0xE2`'s attack category, which the client turns into a group itself.
+        crowd.play_new(NewAnimation {
+            serial:         serial(1).expect("a real mobile serial"),
+            animation_type: 0,
+            action:         0,
+            delay:          0,
+        });
+        assert_eq!(
+            crowd.group_for(serial(1)),
+            Some(BodyKind::Animal.attacking()),
+            "LowAnimationGroup.Attack1",
+        );
+        assert_eq!(
+            BodyKind::Monster.attacking(),
+            AnimationGroup(4),
+            "and the group it used to be sent, kept here so this stops passing if 4 becomes right",
         );
     }
 

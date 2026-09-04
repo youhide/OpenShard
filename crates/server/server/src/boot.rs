@@ -697,7 +697,33 @@ pub fn load_world(config: &Config) -> Result<World, Box<dyn std::error::Error>> 
         }
     };
 
-    let mut world = configured_world(config)?.with_tiles(tiles, multis);
+    // Which animation family each body id belongs to. The shard picks the group
+    // number an attack or a death plays, and the three families number their
+    // actions differently — see `WorldState::mob_types`. A failure here is a
+    // shard that falls back to the body-id range rule, not a shard with no
+    // world, for the reason the multis above are: an install can predate the
+    // file.
+    let mob_types = match openshard_uofiles::mobtypes::MobTypes::open(dir) {
+        Ok(mob_types) => {
+            eprintln!(
+                "world load +{:.3}s: {} body animation types read",
+                started.elapsed().as_secs_f64(),
+                mob_types.len()
+            );
+            mob_types
+        }
+        Err(error) => {
+            warn!(
+                %error,
+                "could not read mobtypes.txt; animation groups fall back to the body-id range rule"
+            );
+            openshard_uofiles::mobtypes::MobTypes::empty()
+        }
+    };
+
+    let mut world = configured_world(config)?
+        .with_tiles(tiles, multis)
+        .with_mob_types(mob_types);
     match openshard_housing::template::load_directory(&dir.join("openshard-houses")) {
         Ok(templates) => {
             if !templates.is_empty() {

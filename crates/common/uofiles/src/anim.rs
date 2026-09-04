@@ -5,16 +5,21 @@
 //! flattened, in that order — and each entry holds a 256-colour palette and the
 //! run-length encoded frames that use it.
 //!
-//! # The index is arithmetic, not a table
+//! # The index is arithmetic over a table
 //!
-//! There is no lookup: which block of `anim.idx` a body's frames live in is
-//! computed from the body id, and the constant depends on which of three kinds
-//! it is. A monster gets 22 groups, an animal 13 and a human 35, each with five
-//! stored directions — so the blocks per body are 110, 65 and 175, and the
-//! bases are 0, 22,000 and 35,000. `AnimationsLoader.CalculateOffset` is where
-//! those numbers come from, and they are not derivable from anything in the
-//! file: an index computed with the wrong constant reads real frames belonging
-//! to another creature, which draws something plausible and wrong.
+//! The position of a body's frames in `anim.idx` is computed, not looked up:
+//! one of three constants times the body id. Which of the three is
+//! [`IndexLayout`] — 22 groups based at 0, 13 based at 22,000, or 35 based at
+//! 35,000, each with five stored directions, so 110, 65 and 175 blocks per
+//! body. `AnimationsLoader.CalculateOffset` is where those numbers come from,
+//! and they are not derivable from anything in the file: an index computed
+//! with the wrong constant reads real frames belonging to another creature,
+//! which draws something plausible and wrong.
+//!
+//! *Which* layout a body uses is the one part that is a table —
+//! [`crate::mobtypes`], read from the install beside these two files. The body
+//! id alone only approximates it ([`BodyKind::of`], [`IndexLayout::of`]), and
+//! the client falls back to that approximation only when it has no table.
 //!
 //! # Five directions, eight facings
 //!
@@ -232,24 +237,37 @@ impl std::error::Error for AnimError {
     }
 }
 
-/// Which of the three shapes of the index a body uses.
+/// Which of the three ways a body's actions are numbered.
 ///
-/// The kinds are the client's and they are decided by the body id alone —
-/// `AnimationsLoader.GetAnimType` for the file this reader opens. They are not
-/// a taxonomy: a "monster" here means "22 groups, based at zero", and a body
-/// that looks like a horse is an animal because of its number.
+/// The kinds are the client's own three enumerations. They are not a taxonomy:
+/// a "monster" here means "actions named the way `HighAnimationGroup` names
+/// them", and a body that looks like a horse is an animal because the client's
+/// `mobtypes.txt` says so — see [`crate::mobtypes`], which is where the answer
+/// actually comes from.
+///
+/// **This is the numbering only.** Which block of `anim.idx` the frames sit in
+/// is [`IndexLayout`], and the two genuinely disagree: most animals below body
+/// 200 are animal-numbered and stored in a monster-shaped block.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BodyKind {
-    /// Bodies below 200: 22 groups.
+    /// `HighAnimationGroup`: 22 actions, walk at 0 and stand at 1.
     Monster,
-    /// Bodies 200 to 399: 13 groups.
+    /// `LowAnimationGroup`: 13 actions, with a run the other two lack.
     Animal,
-    /// Bodies 400 and up: 35 groups, which is where players live.
+    /// `PeopleAnimationGroup`: 35 actions, which is where players live.
     Human,
 }
 
 impl BodyKind {
-    /// Which kind a body id is.
+    /// Which kind a body id is *by its number alone*.
+    ///
+    /// The reference client's `CalculateTypeByGraphic`, which it reaches only
+    /// when the install ships no `mobtypes.txt`. It disagrees with the shipped
+    /// file for 322 bodies — every wolf, bear and cougar among them — so this
+    /// is the fallback and [`crate::mobtypes::MobTypes::kind_of`] is the
+    /// answer. Kept `const` and public because the fallback is a real answer
+    /// for an install that has no table, and because a caller with no table in
+    /// hand must reach something rather than inventing a fourth rule.
     pub const fn of(body: Graphic) -> Self {
         if body.0 < 200 {
             Self::Monster
@@ -260,8 +278,15 @@ impl BodyKind {
         }
     }
 
-    /// How many animation groups this kind has.
-    pub const fn groups(self) -> u8 {
+    /// How many actions this numbering names.
+    ///
+    /// Deliberately not [`IndexLayout::groups`], which counts the *slots* in a
+    /// block. The two carry the same three numbers and answer different
+    /// questions, and a sea monster is where they part company: 13 actions in a
+    /// 22-slot block. A group number this side of `actions` is one the
+    /// numbering has a name for; one this side of `groups` is merely one the
+    /// index can address.
+    pub const fn actions(self) -> u8 {
         match self {
             Self::Monster => 22,
             Self::Animal => 13,
@@ -298,6 +323,44 @@ impl BodyKind {
             Self::Monster => AnimationGroup(2),
             Self::Animal => AnimationGroup(8),
             Self::Human => AnimationGroup(21),
+        }
+    }
+
+    /// Which group means "the ordinary swing".
+    ///
+    /// `HighAnimationGroup.Attack1` is 4 and `LowAnimationGroup.Attack1` is 5,
+    /// which is the pair that made an attacking cougar disappear: 4 in the
+    /// animal numbering is `Unknown`, a group most animals have in one
+    /// direction of five or in none at all, so a shard that reached for the
+    /// monster's number handed the renderer nothing to draw.
+    ///
+    /// A human's is 31, `PeopleAnimationGroup.AttackUnarmedAndWalk` — the
+    /// bare-handed swing, and the same number `WeaponAnimation::Wrestle`
+    /// carries. What a *weapon* does to it needs to know what is in the hands,
+    /// which nothing in this crate does; this is the answer for a body that is
+    /// holding nothing, and the one every creature has.
+    pub const fn attacking(self) -> AnimationGroup {
+        match self {
+            Self::Monster => AnimationGroup(4),
+            Self::Animal => AnimationGroup(5),
+            Self::Human => AnimationGroup(31),
+        }
+    }
+
+    /// Which group means "casting a spell", or `None` for a kind with no such
+    /// pose.
+    ///
+    /// `HighAnimationGroup.Cast` is 12 and a human's directed cast is 16. The
+    /// low numbering has neither: 12 there is `Die2`, so an animal handed the
+    /// monster's number plays a *death* and then holds its last frame. `None`
+    /// is "it has no cast", and the caller's answer for that is
+    /// [`attacking`](Self::attacking) — a creature that cannot gesture still
+    /// lunges.
+    pub const fn casting(self) -> Option<AnimationGroup> {
+        match self {
+            Self::Monster => Some(AnimationGroup(12)),
+            Self::Animal => None,
+            Self::Human => Some(AnimationGroup(16)),
         }
     }
 
@@ -423,16 +486,67 @@ impl BodyKind {
             Self::Human => Some(AnimationGroup(24)),
         }
     }
+}
 
-    /// The first index block belonging to `body`.
+/// Which shape of `anim.idx` block a body's frames are stored in.
+///
+/// The three cases of `AnimationsLoader.CalculateOffset`. Separate from
+/// [`BodyKind`] because the client's own table makes them disagree: an animal
+/// carrying `CalculateOffsetLowGroupExtended` — which is most animals numbered
+/// below body 200 — is animal-*numbered* and monster-*shaped*, and a sea
+/// monster is both of those too. Conflating them reads another creature's
+/// frames, which draws something plausible and wrong rather than failing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IndexLayout {
+    /// 22 groups of five, based at block zero: `CalculateHighGroupOffset`.
+    High,
+    /// 13 groups of five, based at block 22,000: `CalculateLowGroupOffset`.
+    Low,
+    /// 35 groups of five, based at block 35,000: `CalculatePeopleGroupOffset`.
+    People,
+}
+
+impl IndexLayout {
+    /// Which layout a body id uses *by its number alone*.
     ///
-    /// The three cases of `AnimationsLoader.CalculateOffset`, in blocks rather
-    /// than bytes.
-    const fn base(self, body: u16) -> usize {
+    /// [`BodyKind::of`]'s counterpart, and the same fallback: what to answer
+    /// when the install ships no `mobtypes.txt`.
+    pub const fn of(body: Graphic) -> Self {
+        if body.0 < 200 {
+            Self::High
+        } else if body.0 < 400 {
+            Self::Low
+        } else {
+            Self::People
+        }
+    }
+
+    /// How many animation groups a block of this shape holds.
+    pub const fn groups(self) -> u8 {
         match self {
-            Self::Monster => body as usize * 110,
-            Self::Animal => 22_000 + (body as usize - 200) * 65,
-            Self::Human => 35_000 + (body as usize - 400) * 175,
+            Self::High => 22,
+            Self::Low => 13,
+            Self::People => 35,
+        }
+    }
+
+    /// The first index block belonging to `body`, or `None` where the
+    /// arithmetic does not reach one.
+    ///
+    /// `CalculateOffset` in blocks rather than bytes. The absent answer is the
+    /// low and people bases applied to a body below their own first id: the
+    /// reference subtracts anyway and casts the negative product to `uint`,
+    /// which lands the read in another family's region. The shipped table asks
+    /// for exactly that twice — bodies 95 and 169 are `ANIMAL` with no
+    /// extended flag — and reading a stranger's frames there is worse than
+    /// reading none.
+    const fn base(self, body: u16) -> Option<usize> {
+        let body = body as usize;
+        match self {
+            Self::High => Some(body * 110),
+            Self::Low if body >= 200 => Some(22_000 + (body - 200) * 65),
+            Self::People if body >= 400 => Some(35_000 + (body - 400) * 175),
+            Self::Low | Self::People => None,
         }
     }
 }
@@ -634,6 +748,12 @@ impl IdxEntry {
 }
 
 /// The client's animations, indexed and ready to read from.
+///
+/// Which block a body's frames sit in is not this reader's to decide: it is a
+/// row of the install's `mobtypes.txt`, and every lookup here therefore takes
+/// the [`IndexLayout`] its caller resolved from [`crate::mobtypes::MobTypes`].
+/// Holding a copy of that table here instead would put a second owner of one
+/// file's contents beside the client's own.
 #[derive(Debug)]
 pub struct Anim {
     entries:  Vec<IdxEntry>,
@@ -652,10 +772,10 @@ impl Anim {
     /// Open a named pair, for the other four `animN` files and for tests.
     ///
     /// Only the first file's index arithmetic is implemented — see
-    /// [`BodyKind`] — so the others are openable and not yet addressable. That
-    /// is deliberate: `anim2` through `anim5` re-base the same three kinds
-    /// differently, and guessing which without a body that needs one would put
-    /// an unverified constant in the one place that must be right.
+    /// [`IndexLayout`] — so the others are openable and not yet addressable.
+    /// That is deliberate: `anim2` through `anim5` re-base the same three
+    /// layouts differently, and guessing which without a body that needs one
+    /// would put an unverified constant in the one place that must be right.
     pub fn from_files(idx: impl AsRef<Path>, mul: impl AsRef<Path>) -> Result<Self, AnimError> {
         let idx_path = idx.as_ref();
         let raw = std::fs::read(idx_path).map_err(|source| {
@@ -717,8 +837,8 @@ impl Anim {
     /// Cheap — it reads the index only — and worth having separately: most of
     /// the index is empty, and "does this body exist" is a question a caller
     /// asks far more often than it asks for pixels.
-    pub fn has_frames(&self, key: AnimationKey) -> bool {
-        self.entry(key).is_some_and(IdxEntry::is_present)
+    pub fn has_frames(&self, key: AnimationKey, layout: IndexLayout) -> bool {
+        self.entry(key, layout).is_some_and(IdxEntry::is_present)
     }
 
     /// The frames of one body, group and *stored* direction.
@@ -728,11 +848,22 @@ impl Anim {
     /// Drawing is not this crate's business and the flip belongs where the
     /// quad is built.
     ///
+    /// `layout` is the install's answer for this body — see
+    /// [`crate::mobtypes::MobTypes::layout_of`]. It is a parameter rather than
+    /// something derived here because it is not derivable from the body id:
+    /// the range rule that looks like a derivation puts every wolf and cougar
+    /// in the wrong region, and a block read at the wrong stride decodes
+    /// another creature's frames perfectly.
+    ///
     /// `None` means the client ships no animation there, which is the ordinary
     /// answer for most of the index: a group a body does not have, or a body id
     /// nothing uses.
-    pub fn frames(&mut self, key: AnimationKey) -> Result<Option<Vec<AnimFrame>>, AnimError> {
-        let Some(entry) = self.entry(key) else {
+    pub fn frames(
+        &mut self,
+        key: AnimationKey,
+        layout: IndexLayout,
+    ) -> Result<Option<Vec<AnimFrame>>, AnimError> {
+        let Some(entry) = self.entry(key, layout) else {
             return Ok(None);
         };
         if !entry.is_present() {
@@ -759,12 +890,11 @@ impl Anim {
     }
 
     /// The index entry for one animation.
-    fn entry(&self, key: AnimationKey) -> Option<IdxEntry> {
-        let kind = BodyKind::of(key.body);
-        if key.group.index() >= kind.groups() || key.direction.index() >= DIRECTIONS {
+    fn entry(&self, key: AnimationKey, layout: IndexLayout) -> Option<IdxEntry> {
+        if key.group.index() >= layout.groups() || key.direction.index() >= DIRECTIONS {
             return None;
         }
-        let block = kind.base(key.body.0)
+        let block = layout.base(key.body.0)?
             + usize::from(key.group.index()) * usize::from(DIRECTIONS)
             + usize::from(key.direction.index());
         self.entries.get(block).copied()
@@ -908,34 +1038,49 @@ mod tests {
     /// file cannot confirm — a body read with the wrong one lands on another
     /// creature's frames, which decode perfectly.
     #[test]
-    fn a_bodys_index_block_is_its_kinds_arithmetic() {
-        assert_eq!(BodyKind::of(Graphic(0)), BodyKind::Monster);
-        assert_eq!(BodyKind::of(Graphic(199)), BodyKind::Monster);
-        assert_eq!(BodyKind::of(Graphic(200)), BodyKind::Animal);
-        assert_eq!(BodyKind::of(Graphic(399)), BodyKind::Animal);
-        assert_eq!(BodyKind::of(Graphic(400)), BodyKind::Human);
+    fn a_bodys_index_block_is_its_layouts_arithmetic() {
+        assert_eq!(IndexLayout::of(Graphic(0)), IndexLayout::High);
+        assert_eq!(IndexLayout::of(Graphic(199)), IndexLayout::High);
+        assert_eq!(IndexLayout::of(Graphic(200)), IndexLayout::Low);
+        assert_eq!(IndexLayout::of(Graphic(399)), IndexLayout::Low);
+        assert_eq!(IndexLayout::of(Graphic(400)), IndexLayout::People);
 
-        assert_eq!(BodyKind::Monster.base(0), 0);
-        assert_eq!(BodyKind::Monster.base(1), 110);
-        // The kinds abut: the last monster block is where the animals start.
-        assert_eq!(BodyKind::Monster.base(200), BodyKind::Animal.base(200));
-        assert_eq!(BodyKind::Animal.base(200), 22_000);
-        assert_eq!(BodyKind::Animal.base(400), BodyKind::Human.base(400));
-        assert_eq!(BodyKind::Human.base(400), 35_000);
+        assert_eq!(IndexLayout::High.base(0), Some(0));
+        assert_eq!(IndexLayout::High.base(1), Some(110));
+        // The layouts abut: the last monster block is where the animals start.
+        assert_eq!(IndexLayout::High.base(200), IndexLayout::Low.base(200));
+        assert_eq!(IndexLayout::Low.base(200), Some(22_000));
+        assert_eq!(IndexLayout::Low.base(400), IndexLayout::People.base(400));
+        assert_eq!(IndexLayout::People.base(400), Some(35_000));
 
-        // And each kind's blocks are its groups times its directions, which is
-        // the relation the three constants encode.
+        // And each layout's blocks are its groups times its directions, which
+        // is the relation the three constants encode.
         assert_eq!(
-            BodyKind::Monster.base(1) - BodyKind::Monster.base(0),
-            usize::from(BodyKind::Monster.groups()) * usize::from(DIRECTIONS),
+            IndexLayout::High.base(1).unwrap() - IndexLayout::High.base(0).unwrap(),
+            usize::from(IndexLayout::High.groups()) * usize::from(DIRECTIONS),
         );
         assert_eq!(
-            BodyKind::Animal.base(201) - BodyKind::Animal.base(200),
-            usize::from(BodyKind::Animal.groups()) * usize::from(DIRECTIONS),
+            IndexLayout::Low.base(201).unwrap() - IndexLayout::Low.base(200).unwrap(),
+            usize::from(IndexLayout::Low.groups()) * usize::from(DIRECTIONS),
         );
         assert_eq!(
-            BodyKind::Human.base(401) - BodyKind::Human.base(400),
-            usize::from(BodyKind::Human.groups()) * usize::from(DIRECTIONS),
+            IndexLayout::People.base(401).unwrap() - IndexLayout::People.base(400).unwrap(),
+            usize::from(IndexLayout::People.groups()) * usize::from(DIRECTIONS),
+        );
+    }
+
+    /// A base below its own layout's first body is not a block at all. The
+    /// reference subtracts anyway and lands in another family's region; the
+    /// shipped table asks for exactly that for bodies 95 and 169.
+    #[test]
+    fn a_layout_applied_below_its_own_first_body_names_no_block() {
+        assert_eq!(IndexLayout::Low.base(95), None);
+        assert_eq!(IndexLayout::Low.base(199), None);
+        assert_eq!(IndexLayout::People.base(399), None);
+        assert_eq!(
+            IndexLayout::High.base(0),
+            Some(0),
+            "the high layout starts at body zero"
         );
     }
 
@@ -982,8 +1127,8 @@ mod tests {
         for kind in [BodyKind::Monster, BodyKind::Animal, BodyKind::Human] {
             assert_eq!(kind.walking(), AnimationGroup(0));
             // Whatever a kind names, it names inside its own table.
-            assert!(kind.standing().index() < kind.groups());
-            assert!(kind.running().is_none_or(|group| group.index() < kind.groups()));
+            assert!(kind.standing().index() < kind.actions());
+            assert!(kind.running().is_none_or(|group| group.index() < kind.actions()));
         }
         assert_eq!(BodyKind::Monster.running(), None, "High has no run");
         assert_eq!(BodyKind::Animal.running(), Some(AnimationGroup(1)));
@@ -1018,11 +1163,11 @@ mod tests {
         for kind in [BodyKind::Monster, BodyKind::Animal, BodyKind::Human] {
             assert!(
                 kind.standing_at_war()
-                    .is_none_or(|group| group.index() < kind.groups())
+                    .is_none_or(|group| group.index() < kind.actions())
             );
             assert!(
                 kind.walking_at_war()
-                    .is_none_or(|group| group.index() < kind.groups())
+                    .is_none_or(|group| group.index() < kind.actions())
             );
             assert!(
                 kind.standing_at_war()
@@ -1076,22 +1221,20 @@ mod tests {
         let mut anim = Anim::open(&dir).expect("anim.idx and anim.mul");
         for ghost in [0x0192u16, 0x0193] {
             assert!(
-                anim.frames(AnimationKey::new(
-                    Graphic(ghost),
-                    BodyKind::Human.standing(),
-                    AnimationDirection(0),
-                ))
+                anim.frames(
+                    AnimationKey::new(Graphic(ghost), BodyKind::Human.standing(), AnimationDirection(0)),
+                    IndexLayout::People,
+                )
                 .expect("reading the index")
                 .is_none(),
                 "body {ghost:#06x} has frames after all, and the remap is hiding them",
             );
             let drawn = animation_body(Graphic(ghost));
             assert!(
-                anim.frames(AnimationKey::new(
-                    drawn,
-                    BodyKind::Human.standing(),
-                    AnimationDirection(0),
-                ))
+                anim.frames(
+                    AnimationKey::new(drawn, BodyKind::Human.standing(), AnimationDirection(0)),
+                    IndexLayout::People,
+                )
                 .expect("reading the index")
                 .is_some_and(|frames| !frames.is_empty()),
                 "body {:#06x} is what a ghost is drawn from and has no frames either",

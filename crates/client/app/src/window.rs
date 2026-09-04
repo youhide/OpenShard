@@ -83,6 +83,7 @@ use openshard_tiles::{
 use openshard_uofiles::anim::Anim;
 use openshard_uofiles::art::Art;
 use openshard_uofiles::equipconv::EquipConv;
+use openshard_uofiles::mobtypes::MobTypes;
 use openshard_uofiles::texmaps::TexMaps;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
@@ -226,6 +227,7 @@ impl Atlases {
         texmaps: &TexMaps,
         tiledata: &TileData,
         anim: &mut Anim,
+        mob_types: &MobTypes,
         wanted: &Wanted,
     ) -> Result<Self, AtlasError> {
         Ok(Self {
@@ -235,7 +237,7 @@ impl Atlases {
             // outlives the frame it was built in and packs more art on every
             // scroll, so it has to keep what it reads a graphic's surface out of.
             statics: StaticAtlasPages::build_from(art, wanted.statics.iter().copied(), surfaces.cloned())?,
-            mobiles: AnimAtlas::build(anim, wanted.animations.iter().copied())?,
+            mobiles: AnimAtlas::build(anim, mob_types, wanted.animations.iter().copied())?,
         })
     }
 
@@ -256,6 +258,7 @@ impl Atlases {
         texmaps: &TexMaps,
         tiledata: &TileData,
         anim: &mut Anim,
+        mob_types: &MobTypes,
         wanted: &Wanted,
     ) -> Result<(), (&'static str, AtlasError)> {
         // Both halves of a ground quad from the same set, in the same growth: a
@@ -271,7 +274,7 @@ impl Atlases {
             .add(art, wanted.statics.iter().copied())
             .map_err(|error| ("statics", error))?;
         self.mobiles
-            .add(anim, wanted.animations.iter().copied())
+            .add(anim, mob_types, wanted.animations.iter().copied())
             .map_err(|error| ("mobiles", error))?;
         Ok(())
     }
@@ -347,6 +350,7 @@ pub(crate) fn wanted_in(
 /// completed composites store final pixels and are not keyed to that growth.
 pub(crate) fn prepare_composite_job(
     resources: &mut resources::Resources,
+    mob_types: &MobTypes,
     window: &mut Screen,
     key: CompositeKey,
 ) -> Option<FlatGroundBlock> {
@@ -390,6 +394,7 @@ pub(crate) fn prepare_composite_job(
             &resources.texmaps,
             &resources.tiledata,
             &mut resources.anim,
+            mob_types,
             &wanted,
         )
         .is_err()
@@ -486,6 +491,7 @@ pub(crate) fn ready_atlases(
             &resources.texmaps,
             &resources.tiledata,
             &mut resources.anim,
+            world.presentation.crowd.mob_types(),
             wanted,
         );
         // Whatever was packed is uploaded, including on the way out of a
@@ -559,6 +565,7 @@ pub(crate) fn ready_atlases(
             &resources.texmaps,
             &resources.tiledata,
             &mut resources.anim,
+            world.presentation.crowd.mob_types(),
             &wanted,
         ) {
             Ok(atlases) => {
@@ -1145,6 +1152,7 @@ impl App {
             &self.resources.texmaps,
             &self.resources.tiledata,
             &mut self.resources.anim,
+            self.world.presentation.crowd.mob_types(),
             &wanted,
         )
         .map_err(StartupError::Atlas)?;

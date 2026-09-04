@@ -816,6 +816,18 @@ pub fn run<D: Dial + Send + 'static>(
         }
     };
 
+    // Which of the three animation families each body id belongs to. Read
+    // beside `Body.def` because the two are asked in the same breath — one
+    // redirects a body, the other says how the body it lands on is numbered —
+    // and handed to the crowd, which is where group numbers are chosen.
+    let mob_types = match openshard_uofiles::mobtypes::MobTypes::open(dir) {
+        Ok(mob_types) => mob_types,
+        Err(error) => {
+            eprintln!("opening mobtypes.txt: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     // What a worn item draws as. Read alongside `anim`, which is what its
     // entries resolve into.
     let equip_conv = match EquipConv::load(dir.join("Equipconv.def")) {
@@ -1159,6 +1171,11 @@ pub fn run<D: Dial + Send + 'static>(
                     // The body's ease, which is not the camera's — see `STARTUP_EASE`.
                     let mut crowd = Crowd::default();
                     crowd.set_ease(f1.map_or(STARTUP_EASE, desk::F1Settings::ease));
+                    // Which family each body id belongs to. Without it every
+                    // group number is chosen by the body-id range rule, which
+                    // calls every wolf, bear and cougar a monster and plays
+                    // group numbers those creatures' files do not have.
+                    crowd.set_mob_types(mob_types);
                     crowd
                 },
                 combat_log:            combat_log::CombatLog::default(),

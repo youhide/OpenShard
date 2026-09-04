@@ -50,6 +50,7 @@ use openshard_uofiles::font::{
     FONT_COUNT,
 };
 use openshard_uofiles::image::Image;
+use openshard_uofiles::mobtypes::MobTypes;
 use openshard_uofiles::texmaps::{
     TexMapError,
     TexMaps,
@@ -1965,10 +1966,11 @@ impl AnimAtlas {
     /// ordinary case rather than a failure.
     pub fn build(
         anim: &mut Anim,
+        mob_types: &MobTypes,
         wanted: impl IntoIterator<Item = AnimationKey>,
     ) -> Result<Self, AtlasError> {
         let mut atlas = Self::empty();
-        atlas.add(anim, wanted)?;
+        atlas.add(anim, mob_types, wanted)?;
         atlas.dirty.take();
         Ok(atlas)
     }
@@ -2033,9 +2035,15 @@ impl AnimAtlas {
     /// view, not when the camera moves. A body that arrives mid-frame therefore
     /// costs one seek into `anim.mul` and a few hundred rows of upload, where it
     /// used to cost re-reading every animation on screen.
+    ///
+    /// `mob_types` is the install's own table of which block each body's frames
+    /// sit in. It travels with the request rather than living in [`Anim`]
+    /// because it is the *client's* copy of one file, and a second owner of it
+    /// beside the animation reader is a second thing to keep in step.
     pub fn add(
         &mut self,
         anim: &mut Anim,
+        mob_types: &MobTypes,
         wanted: impl IntoIterator<Item = AnimationKey>,
     ) -> Result<(), AtlasError> {
         // Sorted and deduplicated, so the same request always packs the same
@@ -2051,7 +2059,7 @@ impl AnimAtlas {
         }
         let mut images = Vec::new();
         for animation in fresh.iter().copied() {
-            let Some(frames) = anim.frames(animation)? else {
+            let Some(frames) = anim.frames(animation, mob_types.layout_of(animation.body))? else {
                 continue;
             };
             for (index, frame) in frames.into_iter().enumerate() {

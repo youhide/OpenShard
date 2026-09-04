@@ -480,6 +480,29 @@ The balance data comes from the SphereServer scriptpack (`Scripts-X`): `items/`,
 `skills/`, `spells/`, `npcs/`, `crafting/`. Numbers taken, arithmetic audited —
 the same bargain as everywhere else Sphere is read.
 
+## A worn layer can vanish for the same reason a mounted horse did
+
+Fixed for the mount: a rider and its mount share one server-side frame index
+(`Mobile::frame`), but the mount plays its own, separate animation group
+(`mobiles::mount_of`). A mounted attack's frame count (five or seven, see
+`crowd.rs`'s `action_on_mount`) can run past the mount's own — shorter — stand
+animation, and the atlas lookup for that exact `(body, group, direction,
+frame)` key then misses outright: no fallback frame is drawn, the whole mount
+quad is filtered out, and the horse disappears for exactly those frames.
+Fixed by `mobiles::mount_frame`, which wraps the shared index by the mount's
+own frame count before building its atlas key (`crates/client/render/src/mobiles.rs`).
+
+The same shape exists, unfixed, for worn equipment: a layer's picture is read
+under its own resolved graphic but the *rider's* `mobile.group`/`mobile.frame`
+(`push_quads`, `crates/client/render/src/mobiles.rs:762` and the equipment arm
+of `pick_iter_with_interior`). If some item's animation for a given group has
+fewer frames than the body wearing it, that one layer's atlas lookup misses on
+the frames past its own count and is silently dropped — already handled
+gracefully (the `AnimFrameSource::Frame(_)` filter drops just that layer, not
+the whole mobile), so it reads as a flickering piece of gear rather than a
+vanishing horse, and nobody has reported it. Worth the same `mount_frame`-style
+wrap if it ever is.
+
 ## A big multi's other anchored entities may still pop in and out at the view boundary
 
 `WorldState::refresh_around` (`state/src/runtime.rs`) tests every entity's
@@ -503,3 +526,80 @@ house did before this session's fix. Not fixed here: boats move every tick
 they are crewed, which changes the failure's shape (the anchor keeps sliding
 past the boundary rather than sitting near it), and nobody has reported it.
 Worth `design_reaches_view`-style treatment if it ever is.
+
+## ~~An animal below body 200 is animated out of the monster table~~ — the table is read
+
+`BodyKind::of` (`crates/common/uofiles/src/anim.rs`) decides which of the three
+animation-group numberings a body uses from its id alone: below 200 monster,
+below 400 animal, above human. That is the reference client's *fallback*, used
+only when it has no `mobtypes.txt` — and the shipped file disagrees for **47
+bodies under 200 that are `ANIMAL`**, among them the wolves (23, 25, 27, 34,
+37, 97–100), the bears (167, 211-family) and the cougar/panther trio (63, 64,
+65). ServUO's own `Data/bodyTable.cfg` says the same thing (`63 Animal`), so
+both sides of the wire classify these bodies from the same table and we
+classify them from a range.
+
+For 40 of the 47 the *pictures* still come out right, because `Body.def`
+redirects them into the animal range before a frame is read (63 → 214, 25 →
+225, …) and `App::apply_body_def` translates the group across the families.
+What does not come out right is everything that numbering decides:
+
+- **Attack.** `Action::classic_action` (`state/src/runtime.rs:3214`) picks
+  group 4 — `HighAnimationGroup.Attack1` — for a non-humanoid body, and
+  `redirected_group` (`client/app/src/presentation.rs:1359`) deliberately does
+  not translate combat poses, so group 4 arrives at animal body 214. In the low
+  numbering 4 is `Unknown`, and for the cougar the file has *no* index entry for
+  it in four of the five directions; the fifth decodes to three blank frames
+  (its header says `width 8, height -258`). An attacking cougar therefore has
+  no frame to draw and is dropped from the scene for the length of the swing.
+  Its real `Attack1` is group 5, five frames in every direction.
+- **Running.** `Tracked::moving_group` asks `BodyKind::of(63).running()`, which
+  is `None` for a monster, so a running cougar is given the walk group; the
+  redirect then maps walk to walk. `LowAnimationGroup.Run` (group 1, five
+  frames per direction) never plays for any of these bodies.
+- **Casting.** `classic_action` sends 12 for a non-humanoid cast, which is
+  `Cast` in the high numbering and `Die2` in the low one. Nothing in this set
+  casts today, so it is latent rather than visible.
+
+The seven that `Body.def` does not redirect (5, 6, 29, 52, 81, 95, 169) are the
+harder half of the same fact: `mobtypes.txt` gives them
+`CalculateOffsetLowGroupExtended`, which is *low group numbering stored in a
+high, 22-slot block* — the shape of their index confirms it, groups 0–12
+populated inside a 110-entry block. `BodyKind` used to conflate the numbering
+with the block layout, and those bodies need the two to disagree.
+
+**Fixed** by reading the file the reference client reads.
+`openshard_uofiles::mobtypes` parses `mobtypes.txt` into a body-to-family
+table; `BodyKind` is now the *numbering* only and the new `IndexLayout` is the
+*block shape*, which is what lets a body be animal-numbered inside a
+monster-shaped block. The client holds the table on `Crowd`, where group
+numbers are chosen, and lends it to the renderer to address the index with; the
+shard holds its own on `WorldState::mob_types`, because `classic_action`
+chooses group numbers server-side — ServUO reads `Data/bodyTable.cfg` for the
+same reason. Every creature branch of `classic_action` and of the client's
+`modern_action` now goes through `BodyKind::attacking`/`casting` rather than a
+literal, which is what also took the animal cast off group 12 (`Die2`: a
+casting animal used to fall over and stay down). An install with no
+`mobtypes.txt` keeps the range rule, which is what the reference does too.
+
+Three things this turned up and did not fix:
+
+- **A mount is drawn through neither table.** `mobiles::mount_of`
+  (`crates/client/render/src/mobiles.rs`) resolves the saddle layer to a body
+  and asks `BodyKind::of` for its stand/walk/run. Nine of the thirty rideable
+  bodies are numbered below 200 (116, 117, 122, 132, 144, 169, 187, 188, 190),
+  so they get the monster numbering — and they get no `Body.def` redirect
+  either, which `apply_body_def` performs on `mobile.body` alone and never on
+  an equipment layer. Both tables have to reach that seam together: fixing the
+  numbering without the redirect just asks a body with no frames for a
+  different group it also does not have.
+- **Bodies 95 and 826 lose their pictures.** `mobtypes.txt` calls them animals
+  with no extended flag, which is the low layout applied to a body below its
+  own first id. The reference subtracts anyway and reads whatever it lands on
+  in another family's region; `IndexLayout::base` answers `None` instead, so
+  those two draw nothing rather than a stranger's frames. Worth a look at what
+  the client actually shows for them before deciding which is less wrong.
+- **Equipment in the animal id range moved.** 55 bodies gain an index block
+  they did not have — mostly `EQUIPMENT` rows between 318 and 340, which the
+  range rule read at the animal stride and the table reads at the human one.
+  Nothing checks those visually yet.

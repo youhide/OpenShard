@@ -1083,8 +1083,11 @@ impl App {
                 ServerPacket::AddToContainer(added) => {
                     match hand.pending_drop() {
                         Some(crate::hand::PendingDrop::Container { .. }) => added.item.serial == held,
-                        // A successful merge redraws the surviving target; the
-                        // source was held and is consumed without a Remove.
+                        // A successful merge redraws the surviving target and,
+                        // separately, sends a `Remove` for the serial this
+                        // dropped — the `Remove` arm above confirms the same
+                        // transaction independently, so either packet alone is
+                        // enough and their order does not matter here.
                         Some(crate::hand::PendingDrop::Item { target }) => added.item.serial == target,
                         _ => false,
                     }
@@ -1134,6 +1137,7 @@ impl App {
                     Footstep {
                         who:     Some(moved.serial),
                         body:    moved.body,
+                        kind:    self.world.presentation.crowd.mob_types().kind_of(moved.body),
                         at:      moved.position,
                         running: moved.facing.running,
                         mounted: mounted(&previous.equipment),
@@ -1255,6 +1259,12 @@ impl App {
                 Footstep {
                     who: self.world.me(),
                     body: self.world.presentation.player.body,
+                    kind: self
+                        .world
+                        .presentation
+                        .crowd
+                        .mob_types()
+                        .kind_of(self.world.presentation.player.body),
                     at: body.predicted.position,
                     running: body.predicted.facing.running,
                     mounted: is_mounted,
