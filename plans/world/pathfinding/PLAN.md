@@ -163,7 +163,16 @@ finding 28 and P3's problem rather than this one's.
 **What is not touched.** The bare facet's ring bands are the same reading with
 noise on it, which is the whole reason the houses case had to be measured
 separately. And band 32 stays at 13%: a 42-step route against 37 on open ground
-is not a region crossed at its corner, and no spacing moves it.
+is not a region crossed at its corner, no spacing moves it, and nobody has
+looked at what it *is*.
+
+**What this leaves behind, for whoever changes the spacing next.** Nodes grow
+with the spacing and **edges grow faster than nodes**: +34% nodes bought +78%
+edges at sixteen, and +102% nodes bought +337% at eight. That is intra-region
+routing, which is all-pairs between a region's own nodes, and it is what makes
+the artifact and the bake grow the way they do. A future option 3 —
+representatives where the border's own cost changes — is attractive for exactly
+this reason: it is the one that adds a node only where a node says something.
 
 **What this reading is one of.** One building, in one place, on one facet —
 `--design` and `--design-at` take another, and nobody has run one yet. What
