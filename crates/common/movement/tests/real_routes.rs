@@ -22,6 +22,7 @@
 //!   --test real_routes -- --nocapture --ignored
 //! ```
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use openshard_map::grid::Tile;
@@ -59,6 +60,10 @@ const UPSTAIRS: Point = Point::new(1340, 1676, 52);
 const ALONG: Point = Point::new(1356, 1669, 52);
 /// The height of the street under that building.
 const STREET_Z: i8 = 30;
+/// Where the route journal's first recorded session was walked: the tile the
+/// body stood on, twenty-five tiles south of the castle roof it was clicked at,
+/// when its route began to oscillate — see `docs/world/README.md`'s finding 23.
+const SOUTH: Point = Point::new(1345, 1918, 0);
 /// What a client's click-to-walk plan may spend, from `client/app`'s `steer.rs`.
 ///
 /// Copied rather than imported: `openshard-movement` is below the client and
@@ -311,5 +316,340 @@ fn a_second_storey_route_survey() {
         at,
         Point::new(ground.x, ground.y, STREET_Z),
         "the way down does not end on the street it was planned to",
+    );
+}
+
+/// Every place a route stands on, walked by the shipped step rule.
+///
+/// The directions are trusted for nothing: a plan is a claim about the ground
+/// and this is the ground answering it, which is the same walk `report` makes
+/// and the same one `steer.rs` makes of its own plan before drawing it.
+fn walked(
+    footing: &Footing<'_>,
+    from: Point,
+    route: &[openshard_protocol::direction::Direction],
+) -> Vec<Point> {
+    let mut at = from;
+    let mut places = vec![at];
+    for &direction in route {
+        at = step_allowed(footing, at, direction).expect("the plan named a step the rule refuses");
+        places.push(at);
+    }
+    places
+}
+
+/// The first place a route stands on twice, and how many steps that costs.
+fn loop_in(places: &[Point]) -> Option<(Point, usize, usize)> {
+    let mut seen = HashMap::new();
+    for (index, &place) in places.iter().enumerate() {
+        if let Some(first) = seen.insert(place, index) {
+            return Some((place, first, index));
+        }
+    }
+    None
+}
+
+/// A long route may not visit one place twice.
+///
+/// The report is `docs/world/README.md`'s finding 23: a click twenty-five tiles
+/// away planned a route that began by stepping **off** the tile it then walked
+/// straight back onto, and the plan made from that neighbouring tile began by
+/// stepping back again. The body walked between the two until the window closed,
+/// and the stall patience never saw it — `STUCK_STEPS` compares the body's
+/// position, and the body was moving.
+///
+/// The assertion is not about which way a route goes, which is the facet's own
+/// business. It is that a walk which stands somewhere twice has a shorter walk
+/// inside it: whatever the corridor decided, the steps between the two visits
+/// are steps that lead nowhere, and two neighbouring starts each stepping onto
+/// the other is exactly what that looks like from a body's point of view.
+///
+/// The destinations are far enough to be answered by the coarse graph rather
+/// than the bounded search ([`COARSE_MIN_DISTANCE`]), because refinement is what
+/// this is about, and the starts are a square of tiles rather than one, because
+/// the report is about *neighbouring* starts disagreeing.
+#[test]
+#[ignore = "reads a client install and plans a few hundred long routes — see the doc comment"]
+fn a_long_route_never_visits_a_place_twice() {
+    let Some((facet, coarse)) = real_facet() else {
+        eprintln!("OPENSHARD_CLIENT is unset — nothing to walk");
+        return;
+    };
+    let Some(graph) = coarse else {
+        eprintln!("no coarse graph — a long route cannot be planned at all");
+        return;
+    };
+    let terrain = facet.terrain();
+    let nothing_placed = Overlay::default();
+    let footing = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
+
+    // Where the journal's session was walked, and the storey this file already
+    // knows about: two neighbourhoods of the same landmass rather than one, so a
+    // loop that is a property of one building is told from a property of the
+    // refinement.
+    let (mut planned, mut looped, mut worst) = (0u32, 0u32, 0usize);
+    let mut first_report = None;
+    for centre in [SOUTH, UPSTAIRS] {
+        for to in [
+            Point::new(1828, 2745, 0),
+            Point::new(1345, 1830, 0),
+            Point::new(1420, 1960, 0),
+            Point::new(1290, 1750, 0),
+        ] {
+            for dy in -2i32..=2 {
+                for dx in -2i32..=2 {
+                    let x = centre.x.saturating_add_signed(dx as i16);
+                    let y = centre.y.saturating_add_signed(dy as i16);
+                    // A start nothing stands on plans nothing, and a square of
+                    // tiles around a body is bound to hold a few.
+                    let Some(from) = terrain.can_step(Point::new(x, y, centre.z), Point::new(x, y, centre.z))
+                    else {
+                        continue;
+                    };
+                    let Some(route) = find_long_path(
+                        &footing,
+                        &footing,
+                        &graph,
+                        from,
+                        to,
+                        PLAN_BUDGET,
+                        Weight::PLANNING,
+                    ) else {
+                        continue;
+                    };
+                    planned += 1;
+                    let places = walked(&footing, from, &route);
+                    let Some((place, first, again)) = loop_in(&places) else {
+                        continue;
+                    };
+                    looped += 1;
+                    worst = worst.max(again - first);
+                    first_report.get_or_insert((from, to, place, first, again, places.clone()));
+                }
+            }
+        }
+    }
+    println!(
+        "long routes planned: {planned}, of which {looped} stand somewhere twice (worst loop {worst} steps)"
+    );
+    if let Some((from, to, place, first, again, places)) = first_report {
+        println!(
+            "  ({}, {}, {}) -> ({}, {}, {}): at ({}, {}, {}) as step {first} and step {again}; first eight {:?}",
+            from.x,
+            from.y,
+            from.z,
+            to.x,
+            to.y,
+            to.z,
+            place.x,
+            place.y,
+            place.z,
+            &places[..places.len().min(8)],
+        );
+    }
+    assert_eq!(
+        looped, 0,
+        "a long route walks a loop that leads nowhere — see the printed route",
+    );
+}
+
+/// The castle the journal's session was walked at, as the shard holds it: a
+/// custom design of 2196 components, its origin at `(1333, 1882, 0)` on Felucca.
+///
+/// A file and not a constant, because it is a *building somebody built* — the
+/// `house_designs` rows of the shard this repository is developed against,
+/// exported once. What it buys is the one scene the report cannot be reproduced
+/// without: a roof at z 88 reachable only by the stairs its owner drew, which no
+/// arrangement of a floor or two stands in for.
+const CASTLE_DESIGN: &str = include_str!("data/castle-1333-1882.csv");
+const CASTLE_AT: Point = Point::new(1333, 1882, 0);
+/// The click that started the recorded session: a tile of that castle's roof.
+const CASTLE_ROOF: Point = Point::new(1345, 1894, 88);
+
+/// The castle laid into an overlay the way a client lays a house it is shown.
+///
+/// `client/app`'s `clutter::fill`, in the one form this crate can reach: each
+/// drawn component becomes the covers its art carries, based at the height the
+/// component stands at, and every component of one tile goes in together.
+fn place_castle(overlay: &mut Overlay, tiles: &openshard_tiles::TileData, origin: Point) {
+    let mut covers: HashMap<Tile, Vec<openshard_map::overlay::Cover>> = HashMap::new();
+    for line in CASTLE_DESIGN.lines().filter(|line| !line.is_empty()) {
+        let mut fields = line.split(',').map(|field| field.trim());
+        let mut next = || fields.next().expect("a design row has five fields");
+        let dx: i32 = next().parse().expect("dx");
+        let dy: i32 = next().parse().expect("dy");
+        let dz: i32 = next().parse().expect("dz");
+        let graphic: u16 = next().parse().expect("graphic");
+        let flags: u64 = next().parse().expect("flags");
+        // The same skip the client makes: a component the house does not draw is
+        // not in anybody's way either. See `multi::Component::drawn`.
+        if flags == 0 {
+            continue;
+        }
+        let Ok(x) = u16::try_from(i32::from(origin.x) + dx) else {
+            continue;
+        };
+        let Ok(y) = u16::try_from(i32::from(origin.y) + dy) else {
+            continue;
+        };
+        let Ok(z) = i8::try_from(i32::from(origin.z) + dz) else {
+            continue;
+        };
+        let tile = tiles.static_tile(graphic);
+        let laid = openshard_map::overlay::Cover::of_static(tile).based_at(z);
+        // A leaf is marked as one, because a client plans its own route through
+        // a shut door it is going to open — `Doors::AllOpen`, and the whole
+        // reason the session's plans reached a roof behind one. The tiledata
+        // flag rather than `client/render`'s open/shut table: which of a pair a
+        // graphic is does not matter to a step that opens either.
+        let laid = match tile.flags.has(openshard_tiles::TileFlags::DOOR) {
+            true => laid.as_door(),
+            false => laid,
+        };
+        covers.entry(Tile::new(x, y)).or_default().extend(laid);
+    }
+    for (tile, covers) in covers {
+        overlay.set(tile, covers);
+    }
+}
+
+/// The report itself: the castle, the click on its roof, and the two
+/// neighbouring tiles whose plans each began by stepping onto the other.
+///
+/// `docs/world/README.md`'s finding 23, reproduced. The session's journal has
+/// the plan from `(1345, 1918)` starting south west and the plan from
+/// `(1344, 1919)` starting north east, for 126 plans on one click, and the stall
+/// patience never ended the order because the body was moving the whole time.
+#[test]
+#[ignore = "reads a client install and lays a castle over it — see the doc comment"]
+fn a_route_onto_a_castle_roof_never_visits_a_place_twice() {
+    let Some((facet, coarse)) = real_facet() else {
+        eprintln!("OPENSHARD_CLIENT is unset — nothing to walk");
+        return;
+    };
+    let Some(graph) = coarse else {
+        eprintln!("no coarse graph — a long route cannot be planned at all");
+        return;
+    };
+    let terrain = facet.terrain();
+    let mut overlay = Overlay::default();
+    place_castle(&mut overlay, &facet.tiles, CASTLE_AT);
+    // The reading the session's own steps were decided by: a living player with
+    // the auto-door setting on walks its route through a shut leaf, because
+    // `walk` sends the use before the step. See `client/app`'s `walking_doors`.
+    let live = Footing::new(Some(terrain), &overlay, Doors::AllOpen);
+    let nothing_placed = Overlay::default();
+    let guide = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
+    // The scene is the reported one only while the roof is really up there: a
+    // castle laid at the wrong origin resolves the click to the street, and the
+    // whole test would then pass about nothing.
+    assert_eq!(
+        destination_place(&live, SOUTH, CASTLE_ROOF),
+        CASTLE_ROOF,
+        "the castle was not laid where the click landed on it",
+    );
+
+    // What the corridor is measured against: the same walk asked of an exact
+    // search with a budget nobody plays at. A hierarchy is allowed to be longer
+    // than the exact answer — that is what buys the speed — and how much longer
+    // is the number this prints rather than pins.
+    let started = std::time::Instant::now();
+    let exact = search_path(&live, SOUTH, CASTLE_ROOF, 200_000, Weight::PLANNING);
+    let exact_ms = started.elapsed().as_secs_f64() * 1_000.0;
+    let started = std::time::Instant::now();
+    let corridor = find_long_path(
+        &guide,
+        &live,
+        &graph,
+        SOUTH,
+        CASTLE_ROOF,
+        PLAN_BUDGET,
+        Weight::PLANNING,
+    );
+    let corridor_ms = started.elapsed().as_secs_f64() * 1_000.0;
+    println!(
+        "from ({}, {}): exact arrived={} nodes={} steps={} in {exact_ms:.1} ms; corridor steps={} in \
+         {corridor_ms:.1} ms",
+        SOUTH.x,
+        SOUTH.y,
+        exact.arrived,
+        exact.explored,
+        exact.route.len(),
+        corridor.as_ref().map_or(0, Vec::len),
+    );
+
+    let (mut planned, mut looped) = (0u32, 0u32);
+    let mut reports = Vec::new();
+    // Where each start's route goes first, which is the whole of what a walking
+    // body ever acts on: it takes one step and plans again.
+    let mut first_step: HashMap<Point, Point> = HashMap::new();
+    for dy in -1i32..=1 {
+        for dx in -1i32..=1 {
+            let x = SOUTH.x.saturating_add_signed(dx as i16);
+            let y = SOUTH.y.saturating_add_signed(dy as i16);
+            let Some(from) = terrain.can_step(Point::new(x, y, SOUTH.z), Point::new(x, y, SOUTH.z)) else {
+                println!("  ({x}, {y}): nothing stands here");
+                continue;
+            };
+            let (route, exit) = openshard_movement::search_long_path(
+                &guide,
+                &live,
+                &graph,
+                from,
+                CASTLE_ROOF,
+                PLAN_BUDGET,
+                Weight::PLANNING,
+            );
+            let Some(route) = route else {
+                println!("  ({x}, {y}): no route onto the roof — {exit:?}");
+                continue;
+            };
+            planned += 1;
+            let places = walked(&live, from, &route);
+            println!(
+                "  from ({}, {}, {}): {} steps, first four {:?}",
+                from.x,
+                from.y,
+                from.z,
+                route.len(),
+                &places[..places.len().min(5)],
+            );
+            if let Some(&next) = places.get(1) {
+                first_step.insert(from, next);
+            }
+            if let Some((place, first, again)) = loop_in(&places) {
+                looped += 1;
+                reports.push(format!(
+                    "from ({}, {}, {}): at ({}, {}, {}) as step {first} and step {again}",
+                    from.x, from.y, from.z, place.x, place.y, place.z,
+                ));
+            }
+        }
+    }
+    println!("routes onto the roof: {planned}, of which {looped} stand somewhere twice");
+    for report in &reports {
+        println!("  {report}");
+    }
+    assert_eq!(looped, 0, "a route onto the roof walks a loop that leads nowhere",);
+
+    // And the report as a body meets it: an order is walked one step at a time,
+    // replanning from wherever that step landed. Two starts whose plans each
+    // begin by stepping onto the other is a walk that never ends and never
+    // stalls — the patience cannot see it, because the body is moving.
+    let mut swapped = Vec::new();
+    for (&from, &next) in &first_step {
+        if first_step.get(&next) == Some(&from) {
+            swapped.push(format!(
+                "({}, {}, {}) steps onto ({}, {}, {}) and back",
+                from.x, from.y, from.z, next.x, next.y, next.z,
+            ));
+        }
+    }
+    for report in &swapped {
+        println!("  {report}");
+    }
+    assert!(
+        swapped.is_empty(),
+        "two neighbouring starts plan onto each other, which is a walk with no end",
     );
 }

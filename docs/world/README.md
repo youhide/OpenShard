@@ -243,15 +243,42 @@ still, twenty-five tiles away: the same shape as the anchor-only view range this
 domain has already been bitten by. Until it settles, no plan for that click is
 stable, and the switch is invisible to a player — both routes draw green.
 
-**23. A route to that destination oscillates, and nothing ends the order.** With
-the goal at z 88, the plan from `(1344, 1919)` starts `NE` — onto
-`(1345, 1918)` — and the plan from `(1345, 1918)` starts `SW`, back again. The
-body walked between those two tiles for the rest of the session. The stall
-patience cannot see it (`STUCK_STEPS` compares the body's position, and the body
-*is* moving), and the destination is never reached, so the order never ends: 126
-plans on one click and still walking when the window closed. Two neighbouring
-starts whose long routes each begin by stepping onto the other is a property of
-the corridor join, not of the ground.
+The repair this is getting is not a wider view range but a **memory**: what a
+client has been shown stays on its own map after the shard stops sending it,
+drawn in grey to say *this was here and may not be now*, and interaction goes on
+being refused for it. A destination then stops changing height because a body
+walked a tile.
+
+**23. ~~A route to that destination oscillates~~ — closed: refinement spliced a
+loop into its own route.** With the goal at z 88, the plan from `(1344, 1919)`
+started `NE` — onto `(1345, 1918)` — and the plan from `(1345, 1918)` started
+`SW`, back again; the body walked between those two tiles for the rest of the
+session, and the stall patience could not see it (`STUCK_STEPS` compares the
+body's position, and the body *was* moving).
+
+The cause was not the ground and not the abstract route. **A corridor is a
+splice, and each piece of it is optimal only on its own** — the region routes,
+the portal crossings, the live join's prefix and suffix — so a query whose start
+stands *past* the portal its corridor begins at walks back to that portal, and
+the piece after it walks straight over the start again. The plan from
+`(1345, 1918)` was literally `SW` then `NE`: one step off the tile and one step
+back onto it, then the ninety-four the plan from the neighbour had.
+`NavigationGraph::refine` now takes every loop out of the route it assembled
+(`without_loops`), which cannot lengthen a route and cannot make an unwalkable
+one: standing somewhere twice means the steps between the two visits changed
+nothing.
+
+The scene is a test — `real_routes.rs`'s
+`a_route_onto_a_castle_roof_never_visits_a_place_twice`, which lays the session's
+own castle (a 2196-component custom design, kept beside the test) over the real
+facet and asks the nine starts around that tile. Three of the nine looped before
+the repair and none after, and it asserts the report in the shape a body meets
+it as well: no two neighbouring starts may plan onto each other.
+
+What is *not* closed is the patience: a walk that never arrives and never stands
+still is still an order nothing ends. `STUCK_STEPS` measures the wrong thing for
+it, and what would measure the right one is the places an order has already
+stood on.
 
 **24. A long plan costs 56–130 ms, and there are two or three per step.** Median
 61 ms over those 143 plans, every one of them with `explored = 701`: the bounded
@@ -260,6 +287,15 @@ corridor. That is the client's own frame budget several times over, on the walk
 path, while a player is moving — and the preview and the step ask for it
 separately. The node budget bounds the *bounded* search only; nothing bounds
 what the fallback costs in milliseconds.
+
+The castle test above now measures the *other* half of that, and it is the
+uncomfortable half: over that same click, an **exact** search arrives in 7,119
+nodes and 4.2 ms, and the corridor pays 30.5 ms to return a route of exactly the
+same length. So on this destination the hierarchy is seven times the price of
+the answer it is standing in for, and the whole of what makes it necessary is a
+budget of 700 — a number measured against tiles, which finding 13 is already
+about. What that asks for is a measurement of where the crossover really is,
+over a spread of destinations rather than one, before either number moves.
 
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change

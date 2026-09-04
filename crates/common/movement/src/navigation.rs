@@ -1722,7 +1722,7 @@ impl NavigationGraph {
             };
             append(footing, at, &segment, &mut route).ok_or(last)?;
         }
-        Ok(route)
+        Ok(without_loops(footing, from, route))
     }
 
     fn forbid_portal(&self, node: NodeId, forbidden: &mut [bool]) {
@@ -2436,6 +2436,60 @@ fn region_route(
     let segment = find_path_within(footing, at, to, rigour, effort, Some(region))?;
     append(footing, at, &segment, &mut route)?;
     Some(route)
+}
+
+/// The same walk with every loop taken out of it: a route that stands somewhere
+/// twice is cut back to the first visit.
+///
+/// **Refinement is a splice and a splice can double back.** Each piece of a
+/// corridor is optimal on its own — the region routes, the portal crossings, the
+/// live join's prefix and suffix — and nothing before this compares one piece
+/// against another. So a query whose start stands *past* the portal its corridor
+/// begins at walks to that portal, and the piece after it walks straight back
+/// over the start: `docs/world/README.md`'s finding 23, where a click on a
+/// castle roof planned a first step onto the neighbouring tile and a plan from
+/// that tile stepped back again. The body walked between the two until the
+/// window closed, because each plan's first step was the loop's.
+///
+/// Correct whatever the pieces were: standing in the same place twice means the
+/// steps between the two visits changed nothing, so removing them leaves a
+/// shorter route to the same destination over the same ground. It cannot turn a
+/// walkable route into an unwalkable one — every step that survives is a step
+/// the pieces already walked, from the same place it was walked from.
+///
+/// One pass, and the walk it makes is the one a caller makes anyway to draw the
+/// route: about a hundred steps against the tens of thousands of node
+/// expansions the corridor behind it cost.
+fn without_loops(footing: &Footing<'_>, from: Point, route: Vec<Direction>) -> Vec<Direction> {
+    let mut kept: Vec<Direction> = Vec::with_capacity(route.len());
+    let mut places = vec![from];
+    let mut seen: FxHashMap<Point, usize> = FxHashMap::default();
+    seen.insert(from, 0);
+    let mut at = from;
+    for direction in route {
+        let Some(next) = step_allowed(footing, at, direction) else {
+            // A step the rule refuses ends the walk here rather than silently
+            // dropping the rest: refinement approved every one of these against
+            // this footing, so reaching this is a bug elsewhere, and a truncated
+            // route is what a caller can still walk.
+            break;
+        };
+        at = next;
+        match seen.get(&next).copied() {
+            Some(first) => {
+                for gone in places.drain(first + 1..) {
+                    seen.remove(&gone);
+                }
+                kept.truncate(first);
+            }
+            None => {
+                seen.insert(next, places.len());
+                places.push(next);
+                kept.push(direction);
+            }
+        }
+    }
+    kept
 }
 
 fn append(
