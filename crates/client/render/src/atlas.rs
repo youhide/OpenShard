@@ -2059,7 +2059,7 @@ impl AnimAtlas {
         }
         let mut images = Vec::new();
         for animation in fresh.iter().copied() {
-            let Some(frames) = anim.frames(animation, mob_types.layout_of(animation.body))? else {
+            let Some(frames) = anim.frames(animation, mob_types.get(animation.body))? else {
                 continue;
             };
             for (index, frame) in frames.into_iter().enumerate() {

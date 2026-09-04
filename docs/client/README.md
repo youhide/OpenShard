@@ -57,7 +57,7 @@ network service on port 2593 — under the stock client, or ClassicUO.
 | `client/net`: a sans-io `Connection`, the two-socket login machine, `WorldView`, the walk's acks | ✅ shipping | a lost shard is a restart — row 8 | the same |
 | The transport is a parameter at both ends — `Dial` for the client, `Gate` for the gateway | ✅ shipping | a third `Dial` (WebSocket, for a browser) is expected and unscheduled | the same |
 | One word stops a shard, level-triggered, and `run_shard` returns with the world on disk | ✅ shipping | — `SIGTERM`, the outbox and the goodbye landed; what is left is the server's, [`server/README.md`](../server/README.md) rows 2 and 6 | the same, and [`server/design_shutdown.md`](../server/design_shutdown.md) |
-| The client's own data files in `common/uofiles` | 🟡 most of them | `unifont`, `Bodyconv.def`, `Sound.def`, `TexTerr.def`, `anim2`–`anim5` addressing and the UOP animations are each an absence with a visible symptom — rows 3, 10 and 17 below | [`design_picture.md`](design_picture.md) |
+| The client's own data files in `common/uofiles` | 🟡 most of them | `Bodyconv.def` and the `anim2`–`anim6` addressing landed; `unifont`, `Sound.def`, `TexTerr.def` and the UOP animations are each an absence with a visible symptom — rows 3, 10 and 17 below | [`design_picture.md`](design_picture.md) |
 | The picture: ground stretched over four corner heights, textured from `texmaps`, statics and mobiles, one CPU ordering all three passes share | ✅ shipping | the ground is not screen-culled; a normal is computed nowhere, so nothing is lit off the terrain | the same |
 | A pass that blends | ⬜ | one pass, and five features behind it — row 2 below | the same |
 | The camera's geometry: two pixel spaces with a type each, an exact inverse pair, a zoom ladder applied once | ✅ shipping | — | [`design_camera_shell.md`](design_camera_shell.md) |
@@ -114,17 +114,28 @@ that lets a player behind a wall see themselves. It is also what a ghost is
 waiting for: the reference draws one translucent and here a ghost and a living
 player are the same picture.
 
-**3. Every body that lives only in `anim2`–`anim5` draws nothing at all.**
-`Bodyconv.def` is the lookup that says which file holds a body, and it is not
-read; on the Felucca spawn set that is bodies 752 and 764–794 among others, tens
-of spawn points, each of them a creature that hits a player from an empty tile.
-`Body.def` redirects *are* applied. This is a file-reader gap and not a renderer
-change; the UOP animations are the same gap on the install people actually have.
-Body 826, the Stygian Dragon, is a verified instance and not a guess:
-`Bodyconv.def:486` reads `826	-1	-1	-1	826	-1`, its fourth column is
-`anim5.mul`, and the stock `anim.idx`/`anim.mul` this reader does open has
-zero frames for body 826 across all 22 high groups and 5 directions —
-confirmed by opening the install directly, not inferred from the table alone.
+**3. A body whose frames are only in the UOP containers still draws nothing at
+all.** The `.mul` half of this row landed: `Bodyconv.def` is read, all six
+`anim`/`anim2`–`anim6` pairs are opened, and a lookup carries the file it is in
+(`openshard_uofiles::anim::AnimSource`). The stock install moves 875 bodies that
+way and 460 of them gain a standing animation the first file has none for —
+including the Felucca spawn set's 752 and 764–794, each of which was a creature
+hitting a player from an empty tile. Body 752 is the shape of all of them: its
+whole existence is one row saying "id 29 of `anim2`".
+
+What is left is the other half of the same gap, and it is the half a modern
+install actually uses. `mobtypes.txt` flags 342 of those rows
+`UseUopAnimation`, and the reference takes the `AnimationFrame1–6.uop` path for
+such a body before it ever consults `Bodyconv.def`; this reader opens no UOP
+container, so where the legacy files have kept a copy the body draws and where
+they have not it does not. Twelve bodies now draw nothing that used to draw the
+block sitting under their own id in `anim.mul` — that block is not theirs, and
+following the row is what the file says to do, so the fix for those twelve is
+the UOP reader rather than a fallback. **Body 826, the Stygian Dragon, is one of
+the twelve and not an instance of the closed half**: `Bodyconv.def:486` sends it
+to `anim5` at id 826, `anim5.idx` holds 79,275 blocks and the high layout needs
+block 90,860, so the legacy pair has nothing for it either — its row is a stub
+and its frames exist only in the UOP.
 
 **4. Saying "buy" opens a shelf a player cannot buy from.** The shop draws as an
 ordinary container window over gump `0x0030` with the stock icons in it — no

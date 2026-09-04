@@ -226,6 +226,11 @@ pub struct Resources {
     pub ttf_font:      Option<TtfFont>,
     /// The animations, open but not read: `anim.mul` is 195MB and frames come
     /// out of it a body at a time. `&mut` because reading one seeks the file.
+    ///
+    /// All six pairs the install ships, not just the first — which body is in
+    /// which is `Bodyconv.def`'s answer and the reader's own to give. Their
+    /// indexes together are about 6MB held; the 700MB of frames behind them
+    /// stays on disk.
     pub anim:          Anim,
     /// Visual body redirects from the install's optional `Body.def`.
     ///

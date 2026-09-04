@@ -28,6 +28,8 @@ use openshard_tiles::{
 };
 use openshard_uofiles::anim::{
     Anim,
+    AnimFile,
+    AnimSource,
     AnimationDirection,
     AnimationGroup,
     AnimationKey,
@@ -37,6 +39,7 @@ use openshard_uofiles::anim::{
     IndexLayout,
 };
 use openshard_uofiles::art::Art;
+use openshard_uofiles::bodyconv::BodyConv;
 use openshard_uofiles::equipconv::EquipConv;
 use openshard_uofiles::font::{
     AsciiFonts,
@@ -737,9 +740,15 @@ fn a_humans_standing_animation_is_where_the_index_says() {
         return;
     };
     let mut anim = Anim::open(&dir).expect("a client ships anim.idx and anim.mul");
+    let table = MobTypes::open(&dir).expect("a readable optional mobtypes.txt");
 
     // 400 is the male human body, whose standing group is
     // `PeopleAnimationGroup.Stand`.
+    assert_eq!(
+        anim.source(Graphic(400), table.get(Graphic(400))).layout,
+        IndexLayout::People,
+        "the male human body is in the people block",
+    );
     for direction in 0..DIRECTIONS {
         let frames = anim
             .frames(
@@ -748,7 +757,7 @@ fn a_humans_standing_animation_is_where_the_index_says() {
                     BodyKind::Human.standing(),
                     AnimationDirection::new(direction),
                 ),
-                IndexLayout::People,
+                table.get(Graphic(400)),
             )
             .expect("a well-formed entry")
             .unwrap_or_else(|| panic!("body 400 has no standing animation facing {direction}"));
@@ -807,7 +816,7 @@ fn a_grey_wolf_redirect_reaches_its_animation() {
                 table.kind_of(appearance.body).standing(),
                 AnimationDirection::new(0),
             ),
-            table.layout_of(appearance.body),
+            table.get(appearance.body),
         )
         .expect("a well-formed wolf entry")
         .expect("the redirected grey wolf has a standing animation");
@@ -857,7 +866,7 @@ fn a_cougars_attack_is_the_animal_group_and_not_the_monster_one() {
         .body;
     assert_eq!(body, Graphic(214), "the stock cougar redirect");
     let kind = table.kind_of(body);
-    let layout = table.layout_of(body);
+    let named = table.get(body);
     assert_eq!(kind, BodyKind::Animal);
 
     // `LowAnimationGroup.Attack1`, which is what an attacking cougar must play.
@@ -867,7 +876,7 @@ fn a_cougars_attack_is_the_animal_group_and_not_the_monster_one() {
     for direction in 0..DIRECTIONS {
         let direction = AnimationDirection::new(direction);
         let frames = anim
-            .frames(AnimationKey::new(body, attack, direction), layout)
+            .frames(AnimationKey::new(body, attack, direction), named)
             .expect("a well-formed cougar entry")
             .unwrap_or_else(|| panic!("the cougar has no attack facing {direction}"));
         assert_eq!(frames.len(), 5, "the cougar's attack facing {direction}");
@@ -882,7 +891,7 @@ fn a_cougars_attack_is_the_animal_group_and_not_the_monster_one() {
     assert!(
         anim.has_frames(
             AnimationKey::new(body, monster_attack, AnimationDirection::new(0)),
-            layout
+            named
         ),
         "the stray south-east entry that made this look like a rendering fault",
     );
@@ -890,7 +899,7 @@ fn a_cougars_attack_is_the_animal_group_and_not_the_monster_one() {
         assert!(
             !anim.has_frames(
                 AnimationKey::new(body, monster_attack, AnimationDirection::new(direction)),
-                layout
+                named
             ),
             "the monster numbering's attack has an entry facing {direction}, so a cougar \
              swinging that way would not have vanished",
@@ -903,9 +912,173 @@ fn a_cougars_attack_is_the_animal_group_and_not_the_monster_one() {
     assert!(
         anim.has_frames(
             AnimationKey::new(body, running, AnimationDirection::new(0)),
-            layout
+            named
         ),
         "the cougar has a run animation",
+    );
+}
+
+/// A body `Bodyconv.def` moved is read out of the file it was moved to, and is
+/// in no other one.
+///
+/// Body 752 is on the Felucca spawn set and has no block in `anim.mul` at all:
+/// the whole of it is a row of `Bodyconv.def` saying "id 29 of `anim2`". A
+/// reader that opens only the first pair answers "no frames" for it — no error,
+/// no log, a creature hitting a player from an empty tile — which is exactly
+/// what this shard did until the table was read.
+///
+/// Both halves are asserted here because either alone is worthless: that the
+/// first file has nothing is what makes the redirect necessary, and that the
+/// second one has frames is what makes it right.
+#[test]
+fn a_body_moved_by_bodyconv_is_read_out_of_the_file_it_was_moved_to() {
+    let Some(dir) = client_dir() else {
+        return;
+    };
+    let table = MobTypes::open(&dir).expect("a readable optional mobtypes.txt");
+    let mut anim = Anim::open(&dir).expect("a client ships anim.idx and anim.mul");
+    // The same first pair, opened with no companions and no redirect table —
+    // which is what this reader was before `Bodyconv.def` was read.
+    let first_only =
+        Anim::from_files(dir.join("anim.idx"), dir.join("anim.mul")).expect("the first pair on its own");
+
+    // 752 is a monster in `mobtypes.txt`, so its actions are the high numbering
+    // and its frames a 22-group block — of `anim2`, at id 29.
+    let moved = Graphic(752);
+    assert_eq!(
+        anim.source(moved, table.get(moved)),
+        AnimSource {
+            file:   AnimFile::Second,
+            body:   Graphic(29),
+            layout: IndexLayout::High,
+        },
+        "the stock row for body 752",
+    );
+
+    let standing = AnimationKey::new(moved, table.kind_of(moved).standing(), AnimationDirection::new(0));
+    assert!(
+        !first_only.has_frames(standing, table.get(moved)),
+        "body 752 has a block in anim.mul after all, and the redirect is hiding it",
+    );
+    let frames = anim
+        .frames(standing, table.get(moved))
+        .expect("a well-formed entry in anim2")
+        .expect("body 752 stands, in the file Bodyconv.def sends it to");
+    assert!(
+        !frames.is_empty() && frames.iter().all(|frame| frame.image.width() > 0),
+        "body 752 decoded to frames with no pictures in them",
+    );
+
+    // And the id inside that file is not a coincidence of numbering: body 29 of
+    // the *first* file is a different creature, drawn at a different size.
+    assert!(
+        first_only.has_frames(
+            AnimationKey::new(
+                Graphic(29),
+                BodyKind::Monster.standing(),
+                AnimationDirection::new(0)
+            ),
+            table.get(Graphic(29)),
+        ),
+        "anim.mul has its own body 29, which is what makes reading the id in the wrong file silent",
+    );
+}
+
+/// An animal moved to `anim2` keeps the animal numbering and the animal block.
+///
+/// Body 794 is `ANIMAL` in `mobtypes.txt` with no extended flag, so its frames
+/// are in the 13-group region based at 22,000 — of `anim2`, at id 205. The
+/// table that decides the *numbering* is keyed by the body a shard names; the
+/// table that decides the *file* is keyed by the same id and answers about a
+/// different one. Getting them the wrong way round reads a real block of the
+/// wrong file, which decodes perfectly.
+#[test]
+fn a_moved_animal_keeps_the_numbering_its_own_row_gives_it() {
+    let Some(dir) = client_dir() else {
+        return;
+    };
+    let table = MobTypes::open(&dir).expect("a readable optional mobtypes.txt");
+    let mut anim = Anim::open(&dir).expect("a client ships anim.idx and anim.mul");
+
+    let moved = Graphic(794);
+    assert_eq!(table.kind_of(moved), BodyKind::Animal);
+    assert_eq!(
+        anim.source(moved, table.get(moved)),
+        AnimSource {
+            file:   AnimFile::Second,
+            body:   Graphic(205),
+            layout: IndexLayout::Low,
+        },
+    );
+    let running = table.kind_of(moved).running().expect("an animal runs");
+    let frames = anim
+        .frames(
+            AnimationKey::new(moved, running, AnimationDirection::new(0)),
+            table.get(moved),
+        )
+        .expect("a well-formed entry in anim2")
+        .expect("the moved animal has the run its numbering names");
+    assert!(!frames.is_empty());
+}
+
+/// How much of the world the table is worth, counted rather than argued.
+///
+/// The five files hold hundreds of bodies the first one does not, and the only
+/// thing that reaches them is this table. Pinned as a floor rather than an
+/// exact number: it is a statement about a shipped install, and a later one
+/// ships more bodies rather than fewer.
+#[test]
+fn the_redirect_table_is_what_reaches_hundreds_of_bodies_at_all() {
+    let Some(dir) = client_dir() else {
+        return;
+    };
+    let table = MobTypes::open(&dir).expect("a readable optional mobtypes.txt");
+    let conv = BodyConv::open(&dir).expect("a readable optional Bodyconv.def");
+    let anim = Anim::open(&dir).expect("a client ships anim.idx and anim.mul");
+    let first_only =
+        Anim::from_files(dir.join("anim.idx"), dir.join("anim.mul")).expect("the first pair on its own");
+
+    assert!(
+        conv.len() > 500,
+        "the stock Bodyconv.def moves {} bodies, which is not the shipped file",
+        conv.len(),
+    );
+
+    let mut gained = 0usize;
+    let mut lost = Vec::new();
+    for body in 0..u16::MAX {
+        let body = Graphic(body);
+        if conv.row(body).is_none() {
+            continue;
+        }
+        let standing = AnimationKey::new(body, table.kind_of(body).standing(), AnimationDirection::new(0));
+        match (
+            anim.has_frames(standing, table.get(body)),
+            first_only.has_frames(standing, table.get(body)),
+        ) {
+            (true, false) => gained += 1,
+            (false, true) => lost.push(body.0),
+            _ => {}
+        }
+    }
+    // 460 on client 7.0.116.0.
+    assert!(
+        gained > 400,
+        "only {gained} moved bodies gained a standing animation; the redirect is not being followed",
+    );
+    // The other direction: a body whose block in the first file the redirect
+    // walks away from. Twelve on this install, and every one of them carries
+    // `AnimationFlags.UseUopAnimation` in `mobtypes.txt` — a Stygian-Abyss body
+    // whose frames the reference reads out of `AnimationFrame*.uop` and out of
+    // no `.mul` at all, so the block sitting under its id in `anim.mul` is not
+    // it. Following the row is what the file says to do; falling back to that
+    // block would draw a stranger, which is the exact failure the table exists
+    // to prevent. Pinned so the number cannot grow unnoticed, not as a licence
+    // to fall back.
+    assert!(
+        lost.len() < 20,
+        "{} bodies lost their frames to the redirect: {lost:?}",
+        lost.len(),
     );
 }
 
@@ -931,7 +1104,7 @@ fn the_animation_index_is_sparse_but_the_bodies_that_exist_are_dense() {
             let body = Graphic(*body);
             anim.has_frames(
                 AnimationKey::new(body, table.kind_of(body).standing(), AnimationDirection::new(0)),
-                table.layout_of(body),
+                table.get(body),
             )
         })
         .count();

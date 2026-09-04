@@ -21,6 +21,18 @@
 //! id alone only approximates it ([`BodyKind::of`], [`IndexLayout::of`]), and
 //! the client falls back to that approximation only when it has no table.
 //!
+//! # And `anim.mul` is not the only file
+//!
+//! An install ships six pairs, `anim` and `anim2` through `anim6`, and a body
+//! added by a later expansion lives in one of the five rather than in the first
+//! — under an id of its own, re-numbered from zero. [`crate::bodyconv`] is the
+//! table that says which file and which id, so a lookup here is a body, a
+//! group, a direction *and* an [`AnimFile`]. The stock install moves 875 bodies
+//! that way, 460 of which have a standing animation the first file does not —
+//! and a reader that opens only the first pair draws every one of them as
+//! nothing at all: no error, no log, a creature hitting a player from an empty
+//! tile.
+//!
 //! # Five directions, eight facings
 //!
 //! Only five are stored. The other three are the mirror images of 1, 2 and 3 —
@@ -54,8 +66,10 @@ use openshard_protocol::wire::{
     Hue,
 };
 
+use crate::bodyconv::BodyConv;
 use crate::color::Color16;
 use crate::image::Image;
+use crate::mobtypes::MobType;
 
 /// Bytes per `anim.idx` entry: offset, length, extra.
 const IDX_ENTRY: usize = 12;
@@ -278,6 +292,40 @@ impl BodyKind {
         }
     }
 
+    /// Which kind a body id is by its number alone *inside one of the install's
+    /// animation files*.
+    ///
+    /// `CalculateTypeByGraphic(graphic, fileIndex)`, and the reason it takes the
+    /// file: the ranges are not the same in every one of them. `anim2` holds no
+    /// people at all — everything from 200 up is an animal there — and `anim3`
+    /// puts its animals *below* its monsters rather than above. The other four
+    /// use [`of`](Self::of)'s ranges.
+    ///
+    /// Reached for the same reason [`of`](Self::of) is, and only then: the
+    /// install's `mobtypes.txt` has no line for this body. Five of the stock
+    /// install's 875 redirected bodies are in that position.
+    pub const fn in_file(body: Graphic, file: AnimFile) -> Self {
+        match file {
+            AnimFile::Second => {
+                if body.0 < 200 {
+                    Self::Monster
+                } else {
+                    Self::Animal
+                }
+            }
+            AnimFile::Third => {
+                if body.0 < 300 {
+                    Self::Animal
+                } else if body.0 < 400 {
+                    Self::Monster
+                } else {
+                    Self::Human
+                }
+            }
+            AnimFile::First | AnimFile::Fourth | AnimFile::Fifth | AnimFile::Sixth => Self::of(body),
+        }
+    }
+
     /// How many actions this numbering names.
     ///
     /// Deliberately not [`IndexLayout::groups`], which counts the *slots* in a
@@ -488,6 +536,58 @@ impl BodyKind {
     }
 }
 
+/// Which of an install's six animation file pairs a body's frames are in.
+///
+/// `AnimationsLoader._files`, whose slots the reference fills from `anim.mul`,
+/// `anim2.mul` and so on. Not a property of a body id: which file holds a body
+/// is a row of [`crate::bodyconv`], and the same id means different creatures
+/// in different files — body 29 is one thing in `anim.mul` and the body 752 is
+/// drawn from in `anim2.mul`.
+///
+/// Six because that is what an install ships and what `Bodyconv.def` can name:
+/// its rows carry five columns, one per file after the first. The reference
+/// keeps ten slots and fills the four above these with nothing.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum AnimFile {
+    /// `anim.idx`/`anim.mul`, the one every body without a `Bodyconv.def` row
+    /// is read from.
+    First,
+    /// `anim2.idx`/`anim2.mul`.
+    Second,
+    /// `anim3.idx`/`anim3.mul`.
+    Third,
+    /// `anim4.idx`/`anim4.mul`.
+    Fourth,
+    /// `anim5.idx`/`anim5.mul`.
+    Fifth,
+    /// `anim6.idx`/`anim6.mul`.
+    Sixth,
+}
+
+impl AnimFile {
+    /// The five files a `Bodyconv.def` row can send a body to, in the order its
+    /// columns name them.
+    ///
+    /// [`First`](Self::First) is deliberately not here: a row exists to say the
+    /// body is somewhere *else*, and the reference's own columns start at
+    /// `_files[1]`.
+    pub const REDIRECTS: [Self; 5] = [Self::Second, Self::Third, Self::Fourth, Self::Fifth, Self::Sixth];
+
+    /// What both halves of this pair are called, without the extension:
+    /// `anim`, `anim2`, and so on.
+    #[must_use]
+    pub const fn stem(self) -> &'static str {
+        match self {
+            Self::First => "anim",
+            Self::Second => "anim2",
+            Self::Third => "anim3",
+            Self::Fourth => "anim4",
+            Self::Fifth => "anim5",
+            Self::Sixth => "anim6",
+        }
+    }
+}
+
 /// Which shape of `anim.idx` block a body's frames are stored in.
 ///
 /// The three cases of `AnimationsLoader.CalculateOffset`. Separate from
@@ -512,12 +612,23 @@ impl IndexLayout {
     /// [`BodyKind::of`]'s counterpart, and the same fallback: what to answer
     /// when the install ships no `mobtypes.txt`.
     pub const fn of(body: Graphic) -> Self {
-        if body.0 < 200 {
-            Self::High
-        } else if body.0 < 400 {
-            Self::Low
-        } else {
-            Self::People
+        Self::in_file(body, AnimFile::First)
+    }
+
+    /// Which layout a body id uses by its number alone *inside one of the
+    /// install's animation files*.
+    ///
+    /// [`BodyKind::in_file`]'s counterpart, and written in terms of it because
+    /// they are one question asked twice: with no flag word to steer it — and
+    /// there is none, since this is reached only when `mobtypes.txt` says
+    /// nothing about the body — the reference's `CalculateOffset` gives a
+    /// monster the high block, an animal the low one and a person the people
+    /// one.
+    pub const fn in_file(body: Graphic, file: AnimFile) -> Self {
+        match BodyKind::in_file(body, file) {
+            BodyKind::Monster => Self::High,
+            BodyKind::Animal => Self::Low,
+            BodyKind::Human => Self::People,
         }
     }
 
@@ -754,36 +865,57 @@ impl IdxEntry {
     }
 }
 
-/// The client's animations, indexed and ready to read from.
+/// Where one body's frames are actually read from.
 ///
-/// Which block a body's frames sit in is not this reader's to decide: it is a
-/// row of the install's `mobtypes.txt`, and every lookup here therefore takes
-/// the [`IndexLayout`] its caller resolved from [`crate::mobtypes::MobTypes`].
-/// Holding a copy of that table here instead would put a second owner of one
-/// file's contents beside the client's own.
+/// Three answers that a body id alone gives none of, and that no caller should
+/// have to assemble twice: [`crate::bodyconv`] says which file and which id
+/// inside it, and `mobtypes.txt` — or, where it is silent, the range rule for
+/// that file — says which block shape. Produced by [`Anim::source`] and
+/// consumed by the two lookups beside it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AnimSource {
+    /// Which of the install's pairs holds the frames.
+    pub file:   AnimFile,
+    /// The id the body carries *in that file*, which is its own id whenever
+    /// `Bodyconv.def` does not move it.
+    pub body:   Graphic,
+    /// Which block shape the index is addressed with.
+    pub layout: IndexLayout,
+}
+
+/// One `animN.idx`/`animN.mul` pair: the index held, the frames left on disk.
 #[derive(Debug)]
-pub struct Anim {
+struct AnimPair {
     entries:  Vec<IdxEntry>,
     mul:      File,
     mul_path: PathBuf,
     mul_len:  u64,
 }
 
-impl Anim {
-    /// Open the `anim.idx`/`anim.mul` pair in a client directory.
-    pub fn open(client_dir: impl AsRef<Path>) -> Result<Self, AnimError> {
-        let dir = client_dir.as_ref();
-        Self::from_files(dir.join("anim.idx"), dir.join("anim.mul"))
-    }
+/// The client's animations, indexed and ready to read from.
+///
+/// All six pairs an install can ship, and the `Bodyconv.def` that says which of
+/// them holds a body — that table is *this* reader's, because it answers a
+/// question about the files it opened and nothing else in the client asks it.
+///
+/// Which block a body's frames sit in is a different matter and is not decided
+/// here: it is a row of the install's `mobtypes.txt`, so every lookup takes the
+/// [`crate::mobtypes::MobType`] its caller looked up. Holding a copy of that
+/// table here would put a second owner of one file's contents beside the
+/// client's own, which chooses group *numbers* out of it.
+#[derive(Debug)]
+pub struct Anim {
+    first: AnimPair,
+    /// `anim2` through `anim6`, in [`AnimFile::REDIRECTS`] order. `None` is an
+    /// install that ships neither half of that pair, which every install below
+    /// the expansion that added it does.
+    later: [Option<AnimPair>; AnimFile::REDIRECTS.len()],
+    conv:  BodyConv,
+}
 
-    /// Open a named pair, for the other four `animN` files and for tests.
-    ///
-    /// Only the first file's index arithmetic is implemented — see
-    /// [`IndexLayout`] — so the others are openable and not yet addressable.
-    /// That is deliberate: `anim2` through `anim5` re-base the same three
-    /// layouts differently, and guessing which without a body that needs one
-    /// would put an unverified constant in the one place that must be right.
-    pub fn from_files(idx: impl AsRef<Path>, mul: impl AsRef<Path>) -> Result<Self, AnimError> {
+impl AnimPair {
+    /// Open one named `animN.idx`/`animN.mul` pair.
+    fn open(idx: impl AsRef<Path>, mul: impl AsRef<Path>) -> Result<Self, AnimError> {
         let idx_path = idx.as_ref();
         let raw = std::fs::read(idx_path).map_err(|source| {
             AnimError::Read {
@@ -834,43 +966,18 @@ impl Anim {
         })
     }
 
-    /// How many index entries the file holds. Most of them are empty.
-    pub fn entry_count(&self) -> usize {
+    /// How many index entries this file holds. Most of them are empty.
+    fn entry_count(&self) -> usize {
         self.entries.len()
     }
 
-    /// Whether one animation has any frames at all.
+    /// The frames of one animation, addressed as `source` says.
     ///
-    /// Cheap — it reads the index only — and worth having separately: most of
-    /// the index is empty, and "does this body exist" is a question a caller
-    /// asks far more often than it asks for pixels.
-    pub fn has_frames(&self, key: AnimationKey, layout: IndexLayout) -> bool {
-        self.entry(key, layout).is_some_and(IdxEntry::is_present)
-    }
-
-    /// The frames of one body, group and *stored* direction.
-    ///
-    /// `direction` is 0 to 4, which is what the file holds — pass a wire facing
-    /// through [`facing`] first, and mirror the sprite yourself if it says so.
-    /// Drawing is not this crate's business and the flip belongs where the
-    /// quad is built.
-    ///
-    /// `layout` is the install's answer for this body — see
-    /// [`crate::mobtypes::MobTypes::layout_of`]. It is a parameter rather than
-    /// something derived here because it is not derivable from the body id:
-    /// the range rule that looks like a derivation puts every wolf and cougar
-    /// in the wrong region, and a block read at the wrong stride decodes
-    /// another creature's frames perfectly.
-    ///
-    /// `None` means the client ships no animation there, which is the ordinary
-    /// answer for most of the index: a group a body does not have, or a body id
-    /// nothing uses.
-    pub fn frames(
-        &mut self,
-        key: AnimationKey,
-        layout: IndexLayout,
-    ) -> Result<Option<Vec<AnimFrame>>, AnimError> {
-        let Some(entry) = self.entry(key, layout) else {
+    /// `key` is the caller's own — the body it named, not the one the index is
+    /// read under — so a malformed entry is reported against the body a shard
+    /// put on the wire rather than against an id only this crate knows about.
+    fn frames(&mut self, key: AnimationKey, source: AnimSource) -> Result<Option<Vec<AnimFrame>>, AnimError> {
+        let Some(entry) = self.entry(source, key.group, key.direction) else {
             return Ok(None);
         };
         if !entry.is_present() {
@@ -897,14 +1004,196 @@ impl Anim {
     }
 
     /// The index entry for one animation.
-    fn entry(&self, key: AnimationKey, layout: IndexLayout) -> Option<IdxEntry> {
-        if key.group.index() >= layout.groups() || key.direction.index() >= DIRECTIONS {
+    fn entry(
+        &self,
+        source: AnimSource,
+        group: AnimationGroup,
+        direction: AnimationDirection,
+    ) -> Option<IdxEntry> {
+        if group.index() >= source.layout.groups() || direction.index() >= DIRECTIONS {
             return None;
         }
-        let block = layout.base(key.body.0)?
-            + usize::from(key.group.index()) * usize::from(DIRECTIONS)
-            + usize::from(key.direction.index());
+        let block = source.layout.base(source.body.0)?
+            + usize::from(group.index()) * usize::from(DIRECTIONS)
+            + usize::from(direction.index());
         self.entries.get(block).copied()
+    }
+}
+
+impl Anim {
+    /// Open every animation pair a client directory ships, and the
+    /// `Bodyconv.def` that says which of them holds what.
+    ///
+    /// The first pair is required — an install without it has no animations at
+    /// all — and the other five are taken when both halves are there. An
+    /// install below the expansion that added `anim6` is not a broken install.
+    pub fn open(client_dir: impl AsRef<Path>) -> Result<Self, AnimError> {
+        let dir = client_dir.as_ref();
+        let named = |file: AnimFile| {
+            (
+                dir.join(format!("{}.idx", file.stem())),
+                dir.join(format!("{}.mul", file.stem())),
+            )
+        };
+        let (idx, mul) = named(AnimFile::First);
+        let first = AnimPair::open(idx, mul)?;
+
+        let mut later = [None, None, None, None, None];
+        for (slot, file) in later.iter_mut().zip(AnimFile::REDIRECTS) {
+            let (idx, mul) = named(file);
+            // Half a pair is as unreadable as none of it, and the reference
+            // requires both too: an index with no data file behind it would
+            // name offsets into nothing.
+            if idx.is_file() && mul.is_file() {
+                *slot = Some(AnimPair::open(idx, mul)?);
+            }
+        }
+
+        Ok(Self {
+            first,
+            later,
+            conv: BodyConv::open(dir)?,
+        })
+    }
+
+    /// Open one named pair on its own, with no companions and no redirects.
+    ///
+    /// For a test that has built an index by hand, and for a tool pointed at a
+    /// single file. Every body then reads from that one pair under its own id,
+    /// which is what an install with no `Bodyconv.def` does anyway.
+    pub fn from_files(idx: impl AsRef<Path>, mul: impl AsRef<Path>) -> Result<Self, AnimError> {
+        Ok(Self {
+            first: AnimPair::open(idx, mul)?,
+            later: [None, None, None, None, None],
+            conv:  BodyConv::empty(),
+        })
+    }
+
+    /// How many index entries the first file holds. Most of them are empty.
+    pub fn entry_count(&self) -> usize {
+        self.first.entry_count()
+    }
+
+    /// Where this install reads a body's frames from.
+    ///
+    /// `mob_type` is what `mobtypes.txt` says about the body the *shard* named
+    /// — see [`crate::mobtypes::MobTypes::get`] — and `None` is the file saying
+    /// nothing about it, not a caller with no opinion: the range rule that
+    /// answers for it is the reference's own fallback and depends on which file
+    /// the body ends up in.
+    ///
+    /// Public because "which file is this creature in" is a question a test and
+    /// a tool both ask, and because the answer is otherwise invisible: a body
+    /// read out of the wrong file decodes another creature's frames perfectly.
+    ///
+    /// # Only half of the fallback is here
+    ///
+    /// Where `mobtypes.txt` is silent this resolves the *block shape* against
+    /// the file the body ends up in, as the reference does. The other half —
+    /// which numbering names the body's actions, and so which group number a
+    /// caller asks for — is chosen before a lookup reaches this crate, out of
+    /// [`crate::mobtypes::MobTypes::kind_of`], which knows nothing about the
+    /// redirect and answers from the id the shard named. The two agree for
+    /// every row the stock install has: its five redirected bodies with no
+    /// `mobtypes.txt` line all land in `anim3` above id 400, where the file's
+    /// own range rule and the general one say the same word. A later install
+    /// that breaks that tie is what would make the numbering worth threading
+    /// through the client as well.
+    #[must_use]
+    pub fn source(&self, body: Graphic, mob_type: Option<MobType>) -> AnimSource {
+        let mut file = AnimFile::First;
+        let mut read_as = body;
+        if let Some(row) = self.conv.row(body) {
+            for candidate in AnimFile::REDIRECTS {
+                // The last column naming a file this install actually ships
+                // wins, which is what the reference's loop leaves behind: it
+                // overwrites the body's entry as it walks the row and skips a
+                // column whose file is not open. No shipped row names two.
+                match (row.target(candidate), self.pair(candidate).is_some()) {
+                    (Some(target), true) => {
+                        file = candidate;
+                        read_as = target;
+                    }
+                    _ => continue,
+                }
+            }
+        }
+        AnimSource {
+            file,
+            body: read_as,
+            layout: mob_type.map_or_else(|| IndexLayout::in_file(read_as, file), |named| named.layout),
+        }
+    }
+
+    /// Whether one animation has any frames at all.
+    ///
+    /// Cheap — it reads the index only — and worth having separately: most of
+    /// the index is empty, and "does this body exist" is a question a caller
+    /// asks far more often than it asks for pixels.
+    pub fn has_frames(&self, key: AnimationKey, mob_type: Option<MobType>) -> bool {
+        let source = self.source(key.body, mob_type);
+        self.pair(source.file)
+            .and_then(|pair| pair.entry(source, key.group, key.direction))
+            .is_some_and(IdxEntry::is_present)
+    }
+
+    /// The frames of one body, group and *stored* direction.
+    ///
+    /// `direction` is 0 to 4, which is what the file holds — pass a wire facing
+    /// through [`facing`] first, and mirror the sprite yourself if it says so.
+    /// Drawing is not this crate's business and the flip belongs where the
+    /// quad is built.
+    ///
+    /// `mob_type` is [`source`](Self::source)'s: what the install's own table
+    /// says about this body. It is a parameter rather than something derived
+    /// here because the block shape is not derivable from the body id — the
+    /// range rule that looks like a derivation puts every wolf and cougar in
+    /// the wrong region, and a block read at the wrong stride decodes another
+    /// creature's frames perfectly.
+    ///
+    /// `None` means the client ships no animation there, which is the ordinary
+    /// answer for most of the index: a group a body does not have, or a body id
+    /// nothing uses.
+    pub fn frames(
+        &mut self,
+        key: AnimationKey,
+        mob_type: Option<MobType>,
+    ) -> Result<Option<Vec<AnimFrame>>, AnimError> {
+        let source = self.source(key.body, mob_type);
+        match self.pair_mut(source.file) {
+            Some(pair) => pair.frames(key, source),
+            // Unreachable through `source`, which only names a file this reader
+            // holds — and a cheaper answer than a panic if that ever stops
+            // being true: no frames is what every other absence here reads as.
+            None => Ok(None),
+        }
+    }
+
+    /// The pair one file's frames are in, or `None` for a file this install
+    /// does not ship.
+    fn pair(&self, file: AnimFile) -> Option<&AnimPair> {
+        let [second, third, fourth, fifth, sixth] = &self.later;
+        match file {
+            AnimFile::First => Some(&self.first),
+            AnimFile::Second => second.as_ref(),
+            AnimFile::Third => third.as_ref(),
+            AnimFile::Fourth => fourth.as_ref(),
+            AnimFile::Fifth => fifth.as_ref(),
+            AnimFile::Sixth => sixth.as_ref(),
+        }
+    }
+
+    /// [`pair`](Self::pair), for the half of the reader that seeks.
+    fn pair_mut(&mut self, file: AnimFile) -> Option<&mut AnimPair> {
+        let [second, third, fourth, fifth, sixth] = &mut self.later;
+        match file {
+            AnimFile::First => Some(&mut self.first),
+            AnimFile::Second => second.as_mut(),
+            AnimFile::Third => third.as_mut(),
+            AnimFile::Fourth => fourth.as_mut(),
+            AnimFile::Fifth => fifth.as_mut(),
+            AnimFile::Sixth => sixth.as_mut(),
+        }
     }
 }
 
@@ -1076,6 +1365,67 @@ mod tests {
         );
     }
 
+    /// The range rule is not one rule: two of the six files number their own
+    /// bodies differently, and the fallback has to ask which file it is in.
+    ///
+    /// Pinned because it is silent in the way everything about this index is:
+    /// body 250 read as a person in `anim2` lands at block 35,000 upward, which
+    /// is real data belonging to somebody else. `CalculateTypeByGraphic`'s two
+    /// special cases are the whole of it.
+    #[test]
+    fn two_of_the_files_number_their_bodies_on_their_own_ranges() {
+        // anim2: monsters below 200, animals all the way up — no people at all.
+        assert_eq!(
+            BodyKind::in_file(Graphic(199), AnimFile::Second),
+            BodyKind::Monster
+        );
+        assert_eq!(
+            BodyKind::in_file(Graphic(200), AnimFile::Second),
+            BodyKind::Animal
+        );
+        assert_eq!(
+            BodyKind::in_file(Graphic(400), AnimFile::Second),
+            BodyKind::Animal,
+            "a body that would be a person anywhere else",
+        );
+        assert_eq!(
+            IndexLayout::in_file(Graphic(400), AnimFile::Second),
+            IndexLayout::Low
+        );
+
+        // anim3: animals *below* monsters, and people above both.
+        assert_eq!(BodyKind::in_file(Graphic(299), AnimFile::Third), BodyKind::Animal);
+        assert_eq!(
+            BodyKind::in_file(Graphic(300), AnimFile::Third),
+            BodyKind::Monster
+        );
+        assert_eq!(BodyKind::in_file(Graphic(400), AnimFile::Third), BodyKind::Human);
+        assert_eq!(
+            IndexLayout::in_file(Graphic(150), AnimFile::Third),
+            IndexLayout::Low,
+            "and an animal below 200 there has no block of its own",
+        );
+
+        // The other four are the general rule, which is what `of` is.
+        for file in [
+            AnimFile::First,
+            AnimFile::Fourth,
+            AnimFile::Fifth,
+            AnimFile::Sixth,
+        ] {
+            for body in [0u16, 199, 200, 399, 400, 1000] {
+                assert_eq!(
+                    BodyKind::in_file(Graphic(body), file),
+                    BodyKind::of(Graphic(body))
+                );
+                assert_eq!(
+                    IndexLayout::in_file(Graphic(body), file),
+                    IndexLayout::of(Graphic(body)),
+                );
+            }
+        }
+    }
+
     /// A base below its own layout's first body is not a block at all. The
     /// reference subtracts anyway and lands in another family's region; the
     /// shipped table asks for exactly that for bodies 95 and 169.
@@ -1226,11 +1576,12 @@ mod tests {
             return;
         };
         let mut anim = Anim::open(&dir).expect("anim.idx and anim.mul");
+        let table = crate::mobtypes::MobTypes::open(&dir).expect("a readable optional mobtypes.txt");
         for ghost in [0x0192u16, 0x0193] {
             assert!(
                 anim.frames(
                     AnimationKey::new(Graphic(ghost), BodyKind::Human.standing(), AnimationDirection(0)),
-                    IndexLayout::People,
+                    table.get(Graphic(ghost)),
                 )
                 .expect("reading the index")
                 .is_none(),
@@ -1240,7 +1591,7 @@ mod tests {
             assert!(
                 anim.frames(
                     AnimationKey::new(drawn, BodyKind::Human.standing(), AnimationDirection(0)),
-                    IndexLayout::People,
+                    table.get(drawn),
                 )
                 .expect("reading the index")
                 .is_some_and(|frames| !frames.is_empty()),

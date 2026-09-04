@@ -803,7 +803,7 @@ pub fn run<D: Dial + Send + 'static>(
     let anim = match Anim::open(dir) {
         Ok(anim) => anim,
         Err(error) => {
-            eprintln!("opening anim.idx and anim.mul: {error}");
+            eprintln!("opening the animation files: {error}");
             return ExitCode::FAILURE;
         }
     };

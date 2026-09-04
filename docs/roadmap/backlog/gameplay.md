@@ -627,17 +627,73 @@ Three things this turned up. One is fixed, two are not:
   `_mobTypes[id] = ...` in `AnimationsLoader.cs`) lands it on `MONSTER`/`High`
   — `IndexLayout::base(826) = Some(826 * 110)`, never `None`. Opening the
   stock `anim.idx` and scanning all 22 high groups × 5 directions for body
-  826 confirms zero frames there too, but for a different reason:
-  `Bodyconv.def:486` reads `826\t-1\t-1\t-1\t826\t-1`, and the fourth column
-  is `anim5.mul` (`_files[4]` in `AnimationsLoader.cs`'s `Load`, filled from
-  `"anim" + (i + 1) + ".mul"`) — the Stygian Dragon's frames live in
-  `anim5.mul` at index 826, a file this reader does not open at all. That is
-  item 3 of [`docs/client/README.md`](../../client/README.md)'s "What is
-  open, ranked" (`Bodyconv.def` not read, every body that lives only in
-  `anim2`–`anim5` draws nothing), not this entry's bug — 826 is now that
-  item's concrete, verified example rather than a second instance of the
-  low-layout one.
+  826 confirms zero frames there too, and `Bodyconv.def:486` reads
+  `826\t-1\t-1\t-1\t826\t-1`, whose fourth column is `anim5.mul`.
+
+  **That row is a stub, and the reason is the flag word rather than the
+  table.** `anim5.idx` is 951,300 bytes — 79,275 blocks — and body 826 in the
+  high layout begins at block 90,860, so the legacy pair has nothing for it
+  either; `Bodyconv.def` and all six `anim*` pairs are read now and 826 still
+  draws nothing. Its own `mobtypes.txt` flags are `10008`, and `0x10000` is
+  `AnimationFlags.UseUopAnimation`: the reference takes the
+  `AnimationFrame*.uop` path for such a body *before* it consults
+  `Bodyconv.def` at all. So 826 is an example of the UOP half of item 3 of
+  [`docs/client/README.md`](../../client/README.md)'s "What is open, ranked",
+  which is the half still open — not of the `.mul` half, which landed, and not
+  of this entry's low-layout bug.
 - **Equipment in the animal id range moved.** 55 bodies gain an index block
   they did not have — mostly `EQUIPMENT` rows between 318 and 340, which the
   range rule read at the animal stride and the table reads at the human one.
   Nothing checks those visually yet.
+
+## ~~A body id names a file too, and five of the six were never opened~~ — read
+
+**Fixed: `Bodyconv.def` is read and all six `anim`/`anim2`–`anim6` pairs are
+opened.** A body added by a later expansion is not appended to `anim.mul`'s
+index — it is re-numbered from zero and put in one of the other files, and this
+table is the only thing that says which file and which id. The stock install
+moves 875 bodies that way, 460 of which have a standing animation the first pair
+has none for, so a reader that opened only `anim.idx`/`anim.mul` drew every one
+of them as nothing: no error, no log, a creature hitting a player from an empty
+tile. Body 752 is the whole shape of it — its entire existence in the client's
+files is one row saying "id 29 of `anim2`", and `anim.mul` has its own,
+different body 29 for a wrong reader to land on.
+
+A lookup now carries where it reads from (`openshard_uofiles::anim::AnimSource`:
+file, id-in-that-file, block shape), the reader owns the redirect table because
+it is a fact about the files it opened, and `mobtypes.txt` keeps deciding the
+block shape as before. Held by three tests against a real install in
+`crates/common/uofiles/tests/client_files.rs`, one of which counts the whole
+table both ways so that a redirect which *takes* frames away cannot hide among
+the ones that add them.
+
+Left open, each found while doing it:
+
+- **The numbering half of the fallback is still the general range rule.** Where
+  `mobtypes.txt` has no line for a body, the *block shape* is now resolved
+  against the file the body lands in (`BodyKind::in_file` — `anim2` has no
+  people at all, `anim3` puts animals below monsters), but which numbering names
+  its *actions* is chosen in `client/app`'s `Crowd` out of
+  `MobTypes::kind_of`, from the id the shard named and with no knowledge of the
+  redirect. The two agree for every row the stock install has: its five
+  redirected bodies with no `mobtypes.txt` line all land in `anim3` above id
+  400, where both rules say the same word. Threading `BodyConv` into the crowd
+  is what closing it would cost, and no shipped row asks for it yet.
+- **`Bodyconv.def`'s mount height is not ported.** The reference attaches a
+  vertical offset to a mounted body per redirect file (`-9` for most of `anim5`,
+  `+9` for one `anim3` body, `0` for two ids), and it reads those numbers out of
+  its own source rather than out of the file. Nothing here offsets a rider by
+  file, so a mount drawn from a redirected body sits where an unredirected one
+  would. Worth a look the next time a mount is measured against a screenshot.
+- **Three install-backed tests fail on client 7.0.116.0, and none of them is
+  about animations**: `a_real_fonts_mul_parses_to_ten_plausible_faces` (font 3's
+  CP1251 `А` has no ink), `a_real_tiledata_name_carries_the_plural_marker_the_client_resolves`
+  (`board%s` where it wants `boards`), and `the_two_multi_readers_agree_with_each_other`
+  (478 of 800 shared multis describe different buildings — the loudest of the
+  three by far). Not this work's: none of the three reaches the animation
+  reader. Not bisected either, so what they are is still open — a reader defect,
+  or a suite written against a different install than the one
+  `OPENSHARD_CLIENT` points at, and which of the two is itself the first
+  question. `crates/client/render`'s
+  `the_two_silhouette_layers_are_two_lines_and_a_frame_agrees_about_both` fails
+  beside them, on a scene with no mobile in it at all.

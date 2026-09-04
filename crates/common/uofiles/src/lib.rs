@@ -25,6 +25,7 @@
 pub mod anim;
 pub mod animdata;
 pub mod art;
+pub mod bodyconv;
 pub mod cliloc;
 pub mod color;
 pub mod equipconv;
