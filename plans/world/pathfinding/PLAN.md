@@ -124,6 +124,14 @@ without asking), so the reading is about the corridor and nothing else.
 player clicks from is 32%. What is still not settled is *which* of the three
 options below, and that is the four numbers named next — not a preference.
 
+**What this reading is one of.** One building, in one place, on one facet —
+`--design` and `--design-at` take another, and nobody has run one yet. What
+makes this castle worth gating on is that it is the building the report came
+from and it stands on the near crossing of its own region, which is the shape
+the defect needs; what it cannot say is how common that shape is. A second
+design somewhere with a different border would say whether 32% is the case or
+the worst case.
+
 **What must be measured before picking.** All three options move the same four
 numbers, and nothing here should be chosen by preference:
 
