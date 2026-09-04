@@ -160,6 +160,7 @@ openshard-map = { path = "crates/common/map", version = "0.0.1" }
 openshard-metrics = { path = "crates/common/metrics", version = "0.0.1" }
 openshard-movement = { path = "crates/common/movement", version = "0.0.1" }
 openshard-npc = { path = "crates/server/npc", version = "0.0.1" }
+openshard-pathlog = { path = "crates/common/pathlog", version = "0.0.1" }
 openshard-persistence = { path = "crates/server/persistence", version = "0.0.1" }
 openshard-plugins = { path = "crates/server/plugins", version = "0.0.1" }
 openshard-protocol = { path = "crates/common/protocol", version = "0.0.1" }

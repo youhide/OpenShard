@@ -198,6 +198,18 @@ impl Weight {
         }
     }
 
+    /// The ratio this weight is, for a report that has to name it.
+    ///
+    /// `map_path_probe` keeps the pair it parsed beside the weight it built,
+    /// with a note saying "a ratio is not recoverable from the search parameter
+    /// it becomes". This is that recovery: a route journal writes `5/4` into
+    /// its session line without a second copy of the number travelling beside
+    /// the weight to say what it was.
+    #[must_use]
+    pub const fn ratio(self) -> (u32, u32) {
+        (self.numerator, self.denominator)
+    }
+
     /// This weight applied to one estimate.
     ///
     /// `u64` in the middle: a facet's widest heuristic is 16 bits and the

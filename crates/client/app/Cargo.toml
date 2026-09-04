@@ -33,6 +33,10 @@ openshard-commands.workspace = true
 # than guessed at again here.
 openshard-movement.workspace = true
 openshard-map.workspace = true
+# The route journal: one line per click and per replan, into the file
+# `OPENSHARD_PATH_JOURNAL` names, and nothing at all when it names none. What
+# reads it back is `openshard-movement`'s `path_replay` example.
+openshard-pathlog.workspace = true
 openshard-tiles.workspace = true
 openshard-uofiles.workspace = true
 # The binary's command line, and the `.env` its options fall back to. Only

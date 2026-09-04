@@ -214,6 +214,8 @@ use openshard_movement::{
     RUN_HOLD,
     WALK_HOLD,
 };
+use openshard_pathlog::record;
+use openshard_pathlog::write::journal;
 use openshard_protocol::direction::{
     Direction,
     Facing,
@@ -458,10 +460,30 @@ impl Readings<'_> {
     /// already know and used to drop: `SearchExit` tells a goal nothing reaches
     /// from a budget that ran out, and `LongExit` tells a facet with no corridor
     /// from a query that ran out of effort.
-    fn path(&self, footing: &Footing<'_>, from: Point, to: Point) -> Result<Vec<Direction>, Refusal> {
+    ///
+    /// **And the search's own reading comes back beside the answer**, for the
+    /// journal — see [`plan`]. Neither half of a plan can be understood from
+    /// its route alone: "no way there" and "seven hundred nodes were not
+    /// enough" are one empty `Vec` at this seam, and which of the two it was is
+    /// the whole of what a person replaying the click needs to know. It is
+    /// assembled whether or not anybody is writing it down, because it is five
+    /// fields off a search that has already finished.
+    fn path(
+        &self,
+        footing: &Footing<'_>,
+        from: Point,
+        to: Point,
+    ) -> (Result<Vec<Direction>, Refusal>, record::Probe) {
         let local = search_path(footing, from, to, PLAN_BUDGET, Weight::PLANNING);
+        let mut probe = record::Probe {
+            arrived:  local.arrived,
+            exit:     recorded_exit(local.exit),
+            explored: local.explored,
+            written:  local.written,
+            long:     None,
+        };
         if local.arrived {
-            return Ok(local.route);
+            return (Ok(local.route), probe);
         }
         let distance = i32::from(from.x)
             .abs_diff(i32::from(to.x))
@@ -474,17 +496,18 @@ impl Readings<'_> {
         // eight tiles, and its storey join is precisely the fallback for that
         // shape.
         if distance <= COARSE_MIN_DISTANCE && local.exit == SearchExit::Exhausted {
-            return Err(Refusal::Nowhere);
+            return (Err(Refusal::Nowhere), probe);
         }
         let Some(coarse) = self.coarse else {
             // Far, and nothing to divide it with. Deliberately not `Nowhere`
             // however the local search ended: with no corridor to fall back on,
             // an exhausted 600-node search around a house says nothing at all
             // about whether the far side of the town is reachable.
-            return Err(match distance <= COARSE_MIN_DISTANCE {
+            let refusal = match distance <= COARSE_MIN_DISTANCE {
                 true => Refusal::TooFar,
                 false => Refusal::NoGraph,
-            });
+            };
+            return (Err(refusal), probe);
         };
         // The graph and ordinary endpoint joins are the bare map. An endpoint
         // inside a runtime house joins through its live floors to that graph;
@@ -498,7 +521,8 @@ impl Readings<'_> {
             PLAN_BUDGET,
             Weight::PLANNING,
         );
-        match route {
+        probe.long = Some(recorded_long(exit));
+        let answer = match route {
             Some(route) => Ok(route),
             // `NoCorridor` is the graph's own "there is no way": both endpoints
             // joined it and no chain of portals connects them, which on a facet
@@ -517,8 +541,56 @@ impl Readings<'_> {
                     | LongExit::Spent => Refusal::TooFar,
                 })
             }
-        }
+        };
+        (answer, probe)
     }
+}
+
+/// The journal's word for how a bounded search stopped.
+///
+/// Exhaustive, and that is the point: a search that grows a new way of stopping
+/// is a compile error here, where somebody has to decide what the file should
+/// call it, rather than a variant silently written down as one of the others.
+const fn recorded_exit(exit: SearchExit) -> record::Exit {
+    match exit {
+        SearchExit::Goal => record::Exit::Goal,
+        SearchExit::Exhausted => record::Exit::Exhausted,
+        SearchExit::Budget => record::Exit::Budget,
+    }
+}
+
+/// The journal's word for how a long-route query ended. Exhaustive for
+/// [`recorded_exit`]'s reason.
+const fn recorded_long(exit: LongExit) -> record::LongEnd {
+    match exit {
+        LongExit::Route => record::LongEnd::Route,
+        LongExit::NoCorridor => record::LongEnd::NoCorridor,
+        LongExit::OffGraph => record::LongEnd::OffGraph,
+        LongExit::NoJoin => record::LongEnd::NoJoin,
+        LongExit::PortalsExhausted => record::LongEnd::PortalsExhausted,
+        LongExit::Spent => record::LongEnd::Spent,
+    }
+}
+
+/// The journal's word for what a player was told. Exhaustive for
+/// [`recorded_exit`]'s reason.
+const fn recorded_refusal(refusal: Refusal) -> record::Refusal {
+    match refusal {
+        Refusal::Nowhere => record::Refusal::Nowhere,
+        Refusal::TooFar => record::Refusal::TooFar,
+        Refusal::Barred => record::Refusal::Barred,
+        Refusal::NoGraph => record::Refusal::NoGraph,
+    }
+}
+
+/// A route, written down.
+fn recorded_steps(steps: &[Direction]) -> Vec<record::Step> {
+    steps.iter().map(|&step| record::Step::of(step)).collect()
+}
+
+/// Where those steps landed, written down.
+fn recorded_places(points: &[Point]) -> Vec<record::Place> {
+    points.iter().map(|&point| record::Place::of(point)).collect()
 }
 
 /// A world with no coarse graph over it, where the guide is the ground itself.
@@ -986,6 +1058,16 @@ impl Steering {
         self.mouse = None;
         if self.goal != Some(at) {
             self.route.clear();
+            // A *new* destination, which is what a person means by "I clicked
+            // there". A drag restates the same one on every mouse-move and is
+            // not one of these — a journal that wrote a line per raw event
+            // would bury the click that matters under fifty copies of it.
+            if let Some(journal) = journal() {
+                journal.record(record::Event::Order(record::Order {
+                    from: record::Place::of(from),
+                    to:   record::Place::of(at),
+                }));
+            }
         }
         self.goal = Some(at);
         self.stalled = 0;
@@ -1177,6 +1259,15 @@ impl Steering {
                 _ => 0,
             };
             if self.stalled >= STUCK_STEPS {
+                if let Some(journal) = journal() {
+                    if let Some(goal) = self.goal {
+                        journal.record(record::Event::Abandoned(record::Abandonment {
+                            at:      record::Place::of(from),
+                            goal:    record::Place::of(goal),
+                            stalled: self.stalled,
+                        }));
+                    }
+                }
                 self.goal = None;
                 self.route.clear();
             } else if self.stalled > 0 {
@@ -1208,6 +1299,12 @@ impl Steering {
             // order.
             if from == destination_place(&ground.live, from, at) {
                 // Arrived — the ordinary way this ends.
+                if let Some(journal) = journal() {
+                    journal.record(record::Event::Arrived(record::Arrival {
+                        at:   record::Place::of(from),
+                        goal: record::Place::of(at),
+                    }));
+                }
                 self.goal = None;
                 self.route.clear();
             } else if self.route.is_empty() {
@@ -1670,7 +1767,8 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
     // the way go if the door were opened" means.
     let real = ground.live;
     let doors_open = ground.live.reading(Doors::AllOpen);
-    let refused = match ground.path(&real, from, goal) {
+    let (answer, live_probe) = ground.path(&real, from, goal);
+    let refused = match answer {
         Ok(open) => {
             let result = Some(Plan {
                 open_points: replay(&real, from, &open),
@@ -1680,11 +1778,24 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
                 refusal: None,
             });
             debug_plan(from, goal, started.elapsed(), result.as_ref());
+            record_plan(
+                &real,
+                from,
+                goal,
+                Answered {
+                    live:       &live_probe,
+                    doors_open: None,
+                    refused:    None,
+                    plan:       result.as_ref(),
+                    elapsed:    started.elapsed(),
+                },
+            );
             return result;
         }
         Err(refused) => refused,
     };
-    let Ok(through) = ground.path(&doors_open, from, goal) else {
+    let (through, open_probe) = ground.path(&doors_open, from, goal);
+    let Ok(through) = through else {
         // Not even with the doors open, so there is nothing to say about the
         // far side of anything: no route through this destination's own tile
         // is known, and drawing one would be inventing it. What is left is
@@ -1698,6 +1809,18 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
         // be too far" is the same answer said less usefully.
         let Some(open) = find_path_toward(&real, from, goal, PLAN_BUDGET, Weight::PLANNING) else {
             debug_plan(from, goal, started.elapsed(), None);
+            record_plan(
+                &real,
+                from,
+                goal,
+                Answered {
+                    live:       &live_probe,
+                    doors_open: Some(&open_probe),
+                    refused:    Some(refused),
+                    plan:       None,
+                    elapsed:    started.elapsed(),
+                },
+            );
             return None;
         };
         let result = Some(Plan {
@@ -1708,6 +1831,18 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
             refusal: Some(refused),
         });
         debug_plan(from, goal, started.elapsed(), result.as_ref());
+        record_plan(
+            &real,
+            from,
+            goal,
+            Answered {
+                live:       &live_probe,
+                doors_open: Some(&open_probe),
+                refused:    Some(refused),
+                plan:       result.as_ref(),
+                elapsed:    started.elapsed(),
+            },
+        );
         return result;
     };
     let mut open = Vec::new();
@@ -1752,7 +1887,84 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
         barred_points,
     });
     debug_plan(from, goal, started.elapsed(), result.as_ref());
+    record_plan(
+        &real,
+        from,
+        goal,
+        Answered {
+            live:       &live_probe,
+            doors_open: Some(&open_probe),
+            refused:    Some(refused),
+            plan:       result.as_ref(),
+            elapsed:    started.elapsed(),
+        },
+    );
     result
+}
+
+/// Write this plan to the path journal, when a session was started with one.
+///
+/// **Every plan, and not only the interesting ones.** A route is replanned
+/// whenever what is left of the last one runs out, and the thing a person is
+/// usually chasing is the *series*: the click that planned a good route, and the
+/// replan three steps later that did not. Filtering here would throw away the
+/// half of the report that says something changed.
+///
+/// The destination is resolved once more, against the same reading the search
+/// used — a click carries a picture's height and the search compares against a
+/// place to stand, and a replay that did not know which is which would go
+/// looking for a bug in the difference. See
+/// [`destination_place`](openshard_movement::destination_place).
+fn record_plan(footing: &Footing<'_>, from: Point, goal: Point, answered: Answered<'_>) {
+    let Some(journal) = journal() else {
+        return;
+    };
+    let plan = answered.plan;
+    journal.record(record::Event::Plan(record::Plan {
+        from:          record::Place::of(from),
+        to:            record::Place::of(goal),
+        resolved:      record::Place::of(destination_place(footing, from, goal)),
+        live:          answered.live.clone(),
+        doors_open:    answered.doors_open.cloned(),
+        open:          plan.map(|plan| recorded_steps(&plan.open)).unwrap_or_default(),
+        barred:        plan.map(|plan| recorded_steps(&plan.barred)).unwrap_or_default(),
+        open_points:   plan
+            .map(|plan| recorded_places(&plan.open_points))
+            .unwrap_or_default(),
+        barred_points: plan
+            .map(|plan| recorded_places(&plan.barred_points))
+            .unwrap_or_default(),
+        // A plan carries its own reason; a *missing* plan is a body with
+        // nowhere to walk at all, and the reason for that is the live search's
+        // — carried separately so the two do not both read as an empty route.
+        refusal:       match plan {
+            Some(plan) => plan.refusal.map(recorded_refusal),
+            None => answered.refused.map(recorded_refusal),
+        },
+        elapsed_us:    answered.elapsed.as_micros().min(u128::from(u64::MAX)) as u64,
+    }));
+}
+
+/// One plan as the journal sees it: what the two searches said, what came back,
+/// and what it cost.
+///
+/// Five values that travel together to one place, in the shape [`Rigour`] is in
+/// `common/movement`: separately they are five arguments on a function that
+/// already has three of its own, and every call site would have to remember
+/// their order.
+///
+/// [`Rigour`]: openshard_movement::Weight
+struct Answered<'a> {
+    /// The world as it stands, which is what the body walks.
+    live:       &'a record::Probe,
+    /// The same ground with the doors open — absent when the first search
+    /// arrived and this one was never asked.
+    doors_open: Option<&'a record::Probe>,
+    /// Why the live reading had no route, when it had none. Only read for a
+    /// plan that came back `None`; a plan carries its own.
+    refused:    Option<Refusal>,
+    plan:       Option<&'a Plan>,
+    elapsed:    Duration,
 }
 
 /// Replay a direction list over the ground it was planned on. The returned

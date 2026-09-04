@@ -1,0 +1,23 @@
+[package]
+name = "openshard-pathlog"
+description = "The journal a running client writes about the routes it planned, and the reader a replay takes them back out with."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+# **Two dependencies, and that is the point.** This crate is linked into a
+# client that is drawing frames, so it may not drag the map, the tile table or
+# the search itself along behind a debug switch. What a record holds are
+# coordinates and the shapes of an answer — everything else is named in words
+# and resolved by whoever replays it.
+[dependencies]
+openshard-protocol.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true

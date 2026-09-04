@@ -25,3 +25,8 @@ rustc-hash.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# The route journal a live client writes, read back by the `path_replay`
+# example. A dev dependency and not a real one: the search itself has nothing to
+# say to a journal — it is the client that writes one — and this crate only ever
+# *reads* the file, in a tool.
+openshard-pathlog.workspace = true

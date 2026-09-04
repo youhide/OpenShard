@@ -2574,6 +2574,7 @@ dependencies = [
  "openshard-commands",
  "openshard-map",
  "openshard-movement",
+ "openshard-pathlog",
  "openshard-protocol",
  "openshard-tiles",
  "openshard-uofiles",
@@ -2879,6 +2880,7 @@ dependencies = [
  "clap",
  "openshard-basemap",
  "openshard-map",
+ "openshard-pathlog",
  "openshard-protocol",
  "openshard-tiles",
  "openshard-uofiles",
@@ -2916,6 +2918,16 @@ dependencies = [
  "openshard-state",
  "openshard-tiles",
  "openshard-uofiles",
+]
+
+[[package]]
+name = "openshard-pathlog"
+version = "0.0.1"
+dependencies = [
+ "openshard-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

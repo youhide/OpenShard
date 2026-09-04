@@ -1071,6 +1071,33 @@ pub fn run<D: Dial + Send + 'static>(
         _ => diagnostics::Navigation::Absent,
     };
 
+    // The first line of the route journal, when a session was started with one:
+    // what every line after it is about. A replay reads this to open the same
+    // facet — and to know whether a long destination was refused because there
+    // was no graph rather than because there is no way.
+    //
+    // Said here rather than at the first click, because a session that plans
+    // nothing at all is still worth having a file for: "the journal is empty"
+    // and "the journal was never opened" are different reports.
+    if let Some(journal) = openshard_pathlog::write::journal() {
+        eprintln!("path journal: {}", journal.path().display());
+        journal.record(openshard_pathlog::record::Event::Session(
+            openshard_pathlog::record::Session {
+                facet:  facet.0,
+                world:  world_file
+                    .as_ref()
+                    .and_then(|path| path.file_name())
+                    .map(|name| name.to_string_lossy().into_owned()),
+                coarse: coarse.is_some(),
+                budget: steer::PLAN_BUDGET,
+                weight: {
+                    let (numerator, denominator) = openshard_movement::Weight::PLANNING.ratio();
+                    format!("{numerator}/{denominator}")
+                },
+            },
+        ));
+    }
+
     // The sound mixer opens before a window exists, but its values belong to
     // the HUD's persisted settings just like light tuning does.
     let mut desk = match desk::Desk::load(std::path::Path::new(desk::PATH)) {
