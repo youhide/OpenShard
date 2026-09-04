@@ -593,7 +593,6 @@ fn list(episodes: &[Episode]) {
 fn main() -> Result<(), openshard_pathlog::read::ReadError> {
     let cli = Cli::parse();
     let entries = openshard_pathlog::read::read(&cli.journal)?;
-    let session = openshard_pathlog::read::session(&entries);
     let episodes = openshard_pathlog::read::episodes(&entries);
     if episodes.is_empty() {
         println!("{}: no route was planned in that session", cli.journal.display());
@@ -609,6 +608,13 @@ fn main() -> Result<(), openshard_pathlog::read::ReadError> {
         .iter()
         .find(|episode| episode.number == number)
         .unwrap_or_else(|| panic!("there is no episode {number}; there are {}", episodes.len()));
+
+    // The session line **this episode** was planned under, which is not always
+    // the file's first: a client that bakes a graph when the world arrives says
+    // so with a second one, and every episode after that moment had a corridor
+    // to ask. Replaying an early episode under the late line — or the other way
+    // round — is exactly the wrong guess the field exists to prevent.
+    let session = openshard_pathlog::read::session_at(&entries, episode.seq_from);
 
     let facet = Facet(session.map_or(0, |session| session.facet));
     let budget = session.map_or(700, |session| session.budget);

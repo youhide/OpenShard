@@ -47,7 +47,7 @@ One JSON object per line, five kinds of them:
 
 | line | when |
 |---|---|
-| `session` | once, at startup: the facet, whether a coarse graph was loaded, the node budget, the weight |
+| `session` | in front of the first line, and again whenever what it says stops being true: the facet, whether a coarse graph was loaded, the node budget, the weight |
 | `order` | a destination was named — a Ctrl-click, or a drag that moved it somewhere new |
 | `plan` | one search answered that destination — **several per order**, because a route is replanned whenever what is left of the last one runs out |
 | `arrived` | the body reached the place the order named |
@@ -141,6 +141,15 @@ gives.
   destination into a refusal the session never made, so a run that differs there
   says so up front. Rebake before believing anything about a long route — see
   [`navigation_artifact.md`](navigation_artifact.md).
+
+  **And the line the replay reads is the one in force for the episode**, which
+  is not always the file's first. A world off the wire is baked *after* the
+  window opens, so a session that started with no graph acquires one in the
+  middle of the file; the client writes a fresh `session` line at that moment
+  rather than editing the header, because the lines already written are true of
+  themselves. A facet replaced mid-play loses its graph and writes one the other
+  way. `--list` numbers episodes across the whole file regardless: a session
+  line opens no episode and closes none.
 - **The resolved destination.** A click carries a picture's height and the
   search compares against a place to stand. Where this ground resolves the same
   click to a different height, the live layer had a surface on that column, and

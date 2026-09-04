@@ -189,14 +189,35 @@ impl Journal {
         self.header_due = true;
     }
 
-    /// Whether the coarse graph the session line names has since arrived.
+    /// The coarse graph the session line names has arrived — or gone.
     ///
     /// A world off the wire is baked after the client is already running, so a
-    /// session that started without a graph can acquire one — and a replay that
-    /// read the old line would call every long refusal a bug. Only ever moves
-    /// from absent to present within one session.
+    /// session that started without a graph acquires one; a facet replaced
+    /// mid-play loses the one it had. Either way a replay that read the old
+    /// line would call every long route planned after the change something the
+    /// client never did.
+    ///
+    /// **Which is why a change after the header has gone out is a fresh session
+    /// line rather than an edit.** The lines already on disk are true: those
+    /// routes really were planned without a graph. What the file owes a reader
+    /// is where that stopped being so, and that is a line — the same shape
+    /// [`Journal::take_up`] writes for a gap. A reader takes the session in
+    /// force for a line rather than the first one; see `read::session_at`.
+    ///
+    /// A journal that has not written its header yet simply tells the truth in
+    /// the line it still owes, and touches no disk: a client that plans no
+    /// route creates no file, bake or no bake.
     pub fn note_coarse(&mut self, coarse: bool) {
+        if self.session.coarse == coarse {
+            return;
+        }
         self.session.coarse = coarse;
+        // Set aside or stopped writes nothing at all, and the header still due
+        // carries the new value when it goes.
+        if self.writing && self.stopped.is_none() && !self.header_due {
+            let session = Event::Session(self.session.clone());
+            self.write_line(session);
+        }
     }
 
     /// Write one event, and flush it.
@@ -435,6 +456,91 @@ mod tests {
             "nothing is written while it is set aside"
         );
         assert!(text.contains("\"x\":3"), "and it writes again when taken up");
+        std::fs::remove_file(&path).expect("the test's own file");
+    }
+
+    /// A session line with no graph in it, for the two tests about a bake that
+    /// happens after the client is already running.
+    fn without_a_graph() -> Session {
+        Session {
+            facet:  0,
+            world:  None,
+            coarse: false,
+            budget: 700,
+            weight: "5/4".to_owned(),
+        }
+    }
+
+    /// The world arrives, the bake finishes, and the *first* click of the
+    /// session is still ahead: the only session line the file ever gets says
+    /// there was a graph, because there was one for every line under it.
+    ///
+    /// And nothing is on disk until that click, bake or no bake — a client
+    /// somebody opened to look at a gump still pushes nobody's evidence out of
+    /// `.prev`.
+    #[test]
+    fn a_graph_that_arrives_before_the_first_line_is_in_the_line_itself() {
+        let dir = scratch("coarse-before");
+        let path = dir.join(DEFAULT_PATH);
+        let mut journal = Journal::at(path.clone(), without_a_graph());
+        journal.note_coarse(true);
+        assert!(
+            !path.exists(),
+            "no route has been planned, so the bake wrote nothing"
+        );
+        journal.record(order(1));
+        let text = std::fs::read_to_string(&path).expect("the journal was just written");
+        let entries: Vec<Entry> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("every line is one record"))
+            .collect();
+        assert_eq!(entries.len(), 2, "the session line and the order");
+        assert!(
+            matches!(&entries[0].event, Event::Session(session) if session.coarse),
+            "the header went out after the bake and says so"
+        );
+        std::fs::remove_file(&path).expect("the test's own file");
+    }
+
+    /// The ordinary shape of a login: a click, *then* the graph. The header
+    /// already on disk is true of the lines under it and stays as it is; what
+    /// the change costs is a second session line, and everything after it is
+    /// read under that one.
+    #[test]
+    fn a_graph_that_arrives_after_the_header_writes_a_fresh_session_line() {
+        let dir = scratch("coarse-after");
+        let path = dir.join(DEFAULT_PATH);
+        let mut journal = Journal::at(path.clone(), without_a_graph());
+        journal.record(order(1));
+        journal.note_coarse(true);
+        // The same news twice is one line: a second `Update::Navigation` for a
+        // graph the journal already knows about says nothing new.
+        journal.note_coarse(true);
+        journal.record(order(2));
+        let text = std::fs::read_to_string(&path).expect("the journal was just written");
+        let entries: Vec<Entry> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("every line is one record"))
+            .collect();
+        let sessions: Vec<bool> = entries
+            .iter()
+            .filter_map(|entry| {
+                match &entry.event {
+                    Event::Session(session) => Some(session.coarse),
+                    _ => None,
+                }
+            })
+            .collect();
+        assert_eq!(
+            sessions,
+            vec![false, true],
+            "the header as it was, and one line where the graph arrived"
+        );
+        assert_eq!(entries.len(), 4, "two session lines and the two orders");
+        assert!(
+            matches!(&entries[2].event, Event::Session(_)),
+            "the new line stands between the order before the bake and the one after it"
+        );
         std::fs::remove_file(&path).expect("the test's own file");
     }
 }

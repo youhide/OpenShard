@@ -173,7 +173,7 @@ the case every replan already handles.
 the walk path's per-step planning is off the frame thread with the frame time to
 show for it.
 
-## P4 — The journal says `coarse: false` about a session that had one
+## P4 — The journal says `coarse: false` about a session that had one — ✅ done
 
 Finding 27, and the smallest thing here. The session line is written when the
 window opens; the graph a world arriving asks for is baked after that, so a
@@ -181,8 +181,28 @@ replay reads "facet 0 WITHOUT a coarse graph" over a session where every plan
 used one — the exact fact the field exists to stop a replay guessing at. Write
 it when the first line is written rather than when the journal is built.
 
+**Writing it late is only half of it**, which is what the work found: a
+session's first click routinely lands *before* the bake finishes, and then the
+header on disk is true of the lines under it and wrong about everything after.
+An edit cannot fix that — there is no one answer for the file. So the change is
+a **fresh `session` line** at the moment the graph arrives, the same shape the
+F1 switch already writes for a gap, and one the other way when a facet
+replacement drops the graph. A journal still owing its header just tells the
+truth in the line it owes, and creates no file for a bake nobody planned a route
+through.
+
+On the reading side `read::session_at` answers which session line is in force
+for a given line, and `path_replay` asks it for the episode it is about to
+replay instead of taking the file's first. Episode numbering is untouched: a
+session line opens none and closes none.
+
 **Done when.** A session that bakes at login says `coarse: true`, and
-`path_replay` says so too.
+`path_replay` says so too. — Both, in
+[`write.rs`](../../../crates/common/pathlog/src/write.rs)'s
+`a_graph_that_arrives_after_the_header_writes_a_fresh_session_line` and
+`a_graph_that_arrives_before_the_first_line_is_in_the_line_itself`, and
+[`read.rs`](../../../crates/common/pathlog/src/read.rs)'s
+`the_session_in_force_is_the_last_one_written_before_the_line`.
 
 ---
 
@@ -199,6 +219,7 @@ artifact and every abstract search for a number nobody can see.
 
 **P4 alongside it** — it is an hour, and it is the instrument every one of these
 findings was read with; an instrument that lies is not something to leave lying
-about. **P2 next**, because it is a decision more than a change and the answer
-is cheap once taken. **P3 last**, deliberately: it is the largest, none of the
+about. ✅ Done: the flag changes with a fresh session line, and a replay reads
+the one in force for the episode. **P2 next**, because it is a decision more
+than a change and the answer is cheap once taken. **P3 last**, deliberately: it is the largest, none of the
 others is blocked on it, and it is the one whose number no repair above moves.

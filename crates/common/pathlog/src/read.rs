@@ -83,6 +83,36 @@ pub fn session(entries: &[Entry]) -> Option<&Session> {
     })
 }
 
+/// What the session line **in force for line `seq`** said.
+///
+/// Not always the first one. A client that starts without a coarse graph and
+/// bakes one when the world arrives writes a second session line at that
+/// moment, and a plan after it was planned under the later line — see
+/// [`crate::write::Journal::note_coarse`]. A journal turned off and on again in
+/// the F1 window writes one too.
+///
+/// Falls back to the first session line for a `seq` in front of all of them: a
+/// journal can start mid-walk, and what a reader wants there is the file's own
+/// account of itself rather than nothing.
+#[must_use]
+pub fn session_at(entries: &[Entry], seq: u64) -> Option<&Session> {
+    entries
+        .iter()
+        .take_while(|entry| entry.seq <= seq)
+        .filter_map(|entry| {
+            match &entry.event {
+                Event::Session(session) => Some(session),
+                Event::Order(_)
+                | Event::Plan(_)
+                | Event::Arrived(_)
+                | Event::Abandoned(_)
+                | Event::Closed(_) => None,
+            }
+        })
+        .last()
+        .or_else(|| session(entries))
+}
+
 /// One destination, from the click that named it to whatever became of it.
 ///
 /// **A plan without an order in front of it still makes an episode.** A journal
@@ -320,6 +350,58 @@ mod tests {
             episodes.iter().all(|episode| episode.ending.is_none()),
             "neither destination was reached, and nothing pretends otherwise"
         );
+    }
+
+    /// A session that bakes its graph mid-file is read one way before that
+    /// moment and the other way after it — the whole point of writing a second
+    /// session line instead of editing the first.
+    ///
+    /// This is the reading finding 27 was about: the click the player
+    /// complained about came *after* the login bake, and a replay that took the
+    /// file's first line would have replayed it as a client with no corridor to
+    /// ask.
+    #[test]
+    fn the_session_in_force_is_the_last_one_written_before_the_line() {
+        let dir = std::env::temp_dir().join("openshard-pathlog-coarse-test");
+        std::fs::create_dir_all(&dir).expect("the test's own directory");
+        let path = dir.join(crate::write::DEFAULT_PATH);
+        let early = Point::new(120, 100, 0);
+        let late = Point::new(1_342, 1_893, 88);
+        {
+            let mut journal = Journal::at(
+                path.clone(),
+                Session {
+                    facet:  0,
+                    world:  None,
+                    coarse: false,
+                    budget: 700,
+                    weight: "5/4".to_owned(),
+                },
+            );
+            journal.record(Event::Plan(plan(early, vec![Step::East])));
+            journal.note_coarse(true);
+            journal.record(Event::Plan(plan(late, vec![Step::West])));
+        }
+        let entries = read(&path).expect("the journal was just written");
+        let episodes = episodes(&entries);
+        assert_eq!(episodes.len(), 2, "two destinations, one either side of the bake");
+        assert!(
+            !session(&entries).expect("the file says what it is").coarse,
+            "the file's first line is still true of the lines under it"
+        );
+        assert!(
+            !session_at(&entries, episodes[0].seq_from)
+                .expect("the plan before the bake has a session")
+                .coarse,
+            "the plan before the bake had no graph to ask"
+        );
+        assert!(
+            session_at(&entries, episodes[1].seq_from)
+                .expect("and so does the one after it")
+                .coarse,
+            "the plan after the bake was planned with a graph, and the file says so"
+        );
+        std::fs::remove_file(&path).expect("the test's own file");
     }
 
     /// A journal whose last line was cut off mid-write still reads: that is how

@@ -405,6 +405,19 @@ one — which is exactly the fact the field exists to keep a replay from guessin
 wrong about. The flag wants writing when the first line is written, not when the
 journal is built.
 
+**Repaired, and the repair is a line rather than an edit.** Writing the header
+late is only half of it: a session's first click routinely lands *before* the
+bake finishes, and then the flag on disk is honest about the lines under it and
+wrong about everything after. So `note_coarse` now writes a **fresh `session`
+line** at the moment the graph arrives — the same shape the F1 switch writes for
+a gap — and the graph being dropped under a facet replacement writes one the
+other way. Nothing before the change is rewritten, because those routes really
+were planned without a corridor. A journal that has not written its header yet
+still just tells the truth in the line it owes, and creates no file for a bake
+nobody planned a route through. On the reading side `read::session_at` answers
+which session line is in force for a line, and `path_replay` asks it for the
+episode it is about to replay rather than taking the file's first.
+
 **28. The client plans on the thread that draws.** Findings 24 and 26 are two
 readings of one number: three plans a step at 110–124 ms in the session's own
 build, ~30 ms for the corridor alone in `release`, on every step a body walks.

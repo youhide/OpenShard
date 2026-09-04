@@ -457,6 +457,14 @@ impl App {
                         "the coarse navigation graph was a graph of another world and has been \
                          dropped: long routes are the bounded search until one is baked"
                     );
+                    // And the journal's session line, for the same reason the
+                    // arrival of a graph writes one: every long route planned
+                    // from here on is refused for want of a corridor, and a
+                    // replay reading "with a coarse graph" would call that the
+                    // client's bug.
+                    if let Some(journal) = self.steer.journal_mut() {
+                        journal.note_coarse(false);
+                    }
                 }
             }
         }
