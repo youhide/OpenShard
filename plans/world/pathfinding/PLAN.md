@@ -92,16 +92,40 @@ what does not amortise it is a *short* route, which is the top row and still
 only 13%. And the click this track was opened by is now **1%** — 95 steps
 against 94 — because `without_folds` takes the detour back out.
 
-So the premise this section was written on is weaker than it looked: the corner
-rule is not costing the facet a route, it cost *one* route, on the day a castle
-stood on the only near crossing it had. **P1 is therefore gated on one more
-measurement rather than open for work**: the same detour reading over ground
-with houses on it, and over short destinations that fail the bounded search for
-a reason that is not distance — the case a player meets. If that stays inside a
-quarter, P1 closes as not needed and 71,545 nodes stay 71,545.
+So the premise this section was written on looked weaker than it was: on the
+bare facet the corner rule is not costing a route. **The gate was one more
+reading — over ground with houses on it — and it is in.** `coarse_bench
+--houses` lays the same castle finding 25 is about, live, over the bare facet
+the graph was baked over, and clicks it from a body standing at four distances.
+Every such click fails the bounded search for a reason that is not distance, so
+the corridor answers it however near it is; the detour is read after
+`without_folds`, exactly as above:
 
-**What must be measured before picking, if it does open.** All three options
-move the same four numbers, and nothing here should be chosen by preference:
+| a body standing | pairs | detour p50 | p95 | worst |
+|---|---|---|---|---|
+| 16 tiles out | 48 | 8% | **32%** | 35% — 99 steps against 73 |
+| 24 tiles out | 48 | 10% | 18% | 20% — 111 against 92 |
+| 32 tiles out | 48 | 0% | 3% | 3% |
+| 48 tiles out | 48 | 0% | 4% | 4% |
+
+```sh
+cargo run --release -p openshard-movement --example coarse_bench -- \
+  --client "$OPENSHARD_CLIENT" --houses --rings false
+```
+
+**The detour is worst exactly where the player is standing.** The far rings are
+cheap for the same reason the bare facet is — a long route amortises a corner —
+and the near ring, which is where a body is when it clicks on the building in
+front of it, pays a third. All 192 pairs reached the graph (none answered by the
+bounded search, none refused by the corridor, none near enough to be refused
+without asking), so the reading is about the corridor and nothing else.
+
+**P1 is therefore open**: the gate was a p95 inside a quarter and the ring a
+player clicks from is 32%. What is still not settled is *which* of the three
+options below, and that is the four numbers named next — not a preference.
+
+**What must be measured before picking.** All three options move the same four
+numbers, and nothing here should be chosen by preference:
 
 - node and edge count on facet 0 (today: 71,545 nodes, 416,122 edges over 28,672
   regions) — the artifact's size and `abstract_path`'s open list both scale with
@@ -112,13 +136,16 @@ move the same four numbers, and nothing here should be chosen by preference:
   more abstract search and this repair is worthless if it costs what it saves;
 - the **detour distribution** itself: over a spread of starts and destinations,
   corridor steps against exact steps. That is the number the defect is, and no
-  measurement of the others is a substitute for it.
+  measurement of the others is a substitute for it. It is now a reading anybody
+  can repeat — `coarse_bench --houses` for the ground it is worst on, and the
+  ring bands for the ground it must not get worse on.
 
 **Done when.** The detour distribution's p95 is inside a quarter of the exact
 answer — the ratio
 `a_route_onto_a_castle_roof_does_not_walk_away_from_the_castle` already asserts
-for one click — with bake time and long-query p95 no worse than today's by more
-than the measurement's own noise.
+for one click — **on the houses reading's near ring**, which is the 32% above
+and the only band that fails today, with bake time and long-query p95 no worse
+than today's by more than the measurement's own noise.
 
 ## P2 — One click, two standing answers
 
@@ -208,14 +235,16 @@ session line opens none and closes none.
 
 ## Order, and why
 
-**P1's own gate first, and it is a measurement rather than a change.** It was
+**P1's own gate first, and it was a measurement rather than a change.** It was
 written to be taken first — it is the cause, and everything about where a
 corridor may cross is downstream of it — and then its first reading said the
-facet does not have the problem: 0–3% at the median and 13% at the worst, with
-the click that opened this track down to 1%. So what P1 gets next is the one
-reading that can still condemn the rule, over ground with houses on it. Adding
-nodes to a graph that is not costing routes would be paying the bake, the
-artifact and every abstract search for a number nobody can see.
+bare facet does not have the problem: 0–3% at the median and 13% at the worst,
+with the click that opened this track down to 1%. The one reading that could
+still condemn the rule was ground with houses on it, and it did: **32% at the
+p95 from sixteen tiles out**, which is where a body stands when it clicks on the
+building in front of it. So P1 is open, and what it now needs is the choice
+between its three options made on the four numbers above rather than on
+preference.
 
 **P4 alongside it** — it is an hour, and it is the instrument every one of these
 findings was read with; an instrument that lies is not something to leave lying

@@ -437,11 +437,42 @@ the next is asked for, which is what the plan cache is, and an answer that
 arrives a frame late is a plan from a tile the body has just left, which is the
 case refinement already handles on every replan.
 
-Findings 25 to 28 are one track and are held as one:
+**29. The corner rule costs the bare facet nothing and a house a third.** P1
+was gated on one reading and it is in. `coarse_bench --houses` lays the same
+castle finding 25 is about, live, over the bare facet the graph was baked over,
+and clicks it from a body standing at four distances — the case a player is in,
+because a click on a roof fails the bounded search for a reason that is not
+distance and therefore reaches the corridor however near it is. The detour is
+the corridor's route against the shortest one the ground holds, and it is read
+after `without_folds`:
+
+| a body standing | pairs | detour p50 | p95 | worst |
+|---|---|---|---|---|
+| 16 tiles out | 48 | 8% | **32%** | 35% — 99 steps against 73 |
+| 24 tiles out | 48 | 10% | 18% | 20% — 111 against 92 |
+| 32 tiles out | 48 | 0% | 3% | 3% |
+| 48 tiles out | 48 | 0% | 4% | 4% |
+
+The bare facet's own reading over six distance bands is 0–3% at the median and
+13% at the worst, and the difference between the two tables is the whole point:
+**the detour is worst exactly where the player is standing.** Sixteen tiles out,
+a third of the route is the walk to a crossing — and the far ring is cheap for
+the reason the bare facet is, that a long route amortises a corner. Every one of
+the 192 pairs failed the bounded search, none was refused by the corridor, and
+none was near enough for the client to refuse without asking.
+
+So P1 opens: the p95 the plan set as its gate is a quarter, and the ring a body
+clicks from is 32%. What is *not* settled by this is which of the three ways to
+give a wide run intermediate representatives to take — that is four more numbers
+(nodes, edges, bake time, long-query p95) against this one, and the plan holds
+them.
+
+Findings 25 to 29 are one track and are held as one:
 [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md) is
-P1 to P4 — the corner-only crossing that causes 25, the two readings of one
-click in 26, the frame thread in 28, and 27 alongside them because a lying
-instrument is not a thing to leave lying about. The order there is argued;
+P1 to P4 — the corner-only crossing that causes 25 and is opened by 29, the two
+readings of one click in 26, the frame thread in 28, and 27 alongside them
+because a lying instrument is not a thing to leave lying about (27 is repaired).
+The order there is argued;
 finding 22 stays where it is, because what it waits on is the client's memory of
 what it has been shown rather than anything about a search.
 
