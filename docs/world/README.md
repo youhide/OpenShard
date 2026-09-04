@@ -306,6 +306,56 @@ budget of 700 — a number measured against tiles, which finding 13 is already
 about. What that asks for is a measurement of where the crossover really is,
 over a spread of destinations rather than one, before either number moves.
 
+The three below came out of the **second session the journal recorded**
+(2026-09-04, `path-journal.jsonl` episode 64 of 64: one click at
+`(1342, 1893, 88)` — the same castle's roof — from `(1350, 1890, 0)`, ten tiles
+away, 122 plans and the window closed before the body arrived):
+
+**25. A splice can double back without ever standing anywhere twice.** The route
+onto the roof begins by walking *south, away from the castle*, for thirty steps
+that lead nowhere: `(1350, 1890)` → south along the east wall to
+`(1350, 1900)` → south west to `(1344, 1919)`, nineteen tiles past the castle's
+south wall → back north east to `(1351, 1910)` → north west to the door at
+`(1341, 1900)`, which is nineteen steps from where it started. The return leg
+runs one tile beside the outward leg the whole way, so no place is stood on
+twice and `without_loops` (finding 23) cannot see it.
+
+Measured on the same scene the castle tests build — the 2196-component design
+over facet 0, `Doors::AllOpen` live and the bare map as the guide:
+
+| ask | corridor | exact |
+| --- | --- | --- |
+| `(1350, 1890, 0)` → roof `(1342, 1893, 88)` | 123 steps, 48.8 ms | 94 steps, 7,037 nodes, 16.6 ms |
+| `(1350, 1890, 0)` → door `(1341, 1900, 7)` | 48 steps, 57.7 ms | 19 steps, 63 nodes, 0.1 ms |
+
+The detour is the house's and not the graph's: with no castle placed, the
+corridor from that same tile to `(1341, 1900, 0)` is 19 steps against the exact
+10 and goes nowhere south. So the pieces are being spliced around a building the
+graph was baked without, and finding 24's crossover argument gets a second
+reading — here the hierarchy costs three times the exact search's milliseconds
+*and* returns a route 31% longer.
+
+**26. Every third plan answers a different question and calls the click
+barred.** The plans of that episode run in a fixed rhythm of two and one: two
+with `long = Route` onto the roof, then one with `long = NoJoin`, a
+`doors_open` probe and `refusal = Barred`, whose route is only the prefix as far
+as the castle door. Not the live layer flickering (finding 22) — the
+destination resolves to z 88 on all three — but the third caller reading the
+same ground with doors as they stand, where the roof's live join reaches no node
+of the graph and the answer becomes "the only way through is a shut door". One
+click therefore has two standing answers a third of a second apart, and the
+player is shown whichever the last one was. Three plans a step at 110–124 ms
+each is also the true figure behind finding 24's "two or three".
+
+**27. The journal's `coarse` flag is a startup snapshot, and a login bakes.**
+`client/app` writes the session line's `coarse: coarse.is_some()` when the
+window opens; the graph a world arriving asks for is baked after that. So this
+session's file says `coarse: false` while every plan in it used the graph, and
+`path_replay` prints "facet 0 WITHOUT a coarse graph" over a session that had
+one — which is exactly the fact the field exists to keep a replay from guessing
+wrong about. The flag wants writing when the first line is written, not when the
+journal is built.
+
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change
 the geometry, and not before) and **which validation blocks a publish**
