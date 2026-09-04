@@ -348,21 +348,32 @@ over facet 0, `Doors::AllOpen` live and the bare map as the guide:
 | `(1350, 1890, 0)` → roof `(1342, 1893, 88)` | 123 steps, 48.8 ms | 94 steps, 7,037 nodes, 16.6 ms |
 | `(1350, 1890, 0)` → door `(1341, 1900, 7)` | 48 steps, 57.7 ms | 19 steps, 63 nodes, 0.1 ms |
 
-**The cheap repair is a wider `without_loops`, and it is measured.** A route
-that comes back *within one tile* of a place it already stood on has the same
-nothing between the two visits that an exact revisit has, and the corridor's
-own steps are the proof it is walkable ground. Asked that way — one search
-between the two ends of the widest fold — this route's fold is steps 14..44,
-thirty steps between two places one tile apart, and re-asking it costs **2
-nodes** and returns **1** step: 123 steps become 94, which is exactly what the
-exact search answers. Asked the brute-force way instead — every pair of route
-places within sixteen tiles — the same 94 steps cost 1,571 searches and 415,271
-nodes, six times the corridor it is repairing. So the shortcut is free or
-ruinous depending entirely on where it is asked, and the fold is where. The
-search stays the oracle, not a heuristic: a switchback stair folds back the same
-way and simply fails to answer shorter, so nothing is spliced.
+**The symptom is repaired: `without_folds` cuts a loop the width of a tile.** A
+route that comes back *within one tile* of a place it already stood on, at that
+place's own height, has the same nothing between the two visits that an exact
+revisit has — and the difference is only that a step is needed to join them,
+which is why this costs a search where the loop cut costs none. `refine` runs it
+after `without_loops`, charged to the query's own wallet.
 
-That is a repair of the symptom. The cause is the two-representative rule, and
+Where it is asked is the whole of the price. Over this route the fold is steps
+14..44 — thirty steps between two places one tile apart — and re-asking it costs
+**2 nodes**; asked the brute-force way instead, every pair of route places within
+sixteen tiles, the same answer costs 1,571 searches and 415,271 nodes, six times
+the corridor it is repairing. The search stays the oracle rather than the
+neighbourhood: a switchback stair folds back the same way and simply fails to
+answer shorter, so nothing is spliced, and every step that replaces a fold is one
+the search has just approved against the same footing.
+
+The scene is `real_routes.rs`'s
+`a_route_onto_a_castle_roof_does_not_walk_away_from_the_castle`, and its oracle
+is a ratio rather than a route: a corridor is allowed to be longer than the
+exact answer, and half as long again is not that. The click goes from **123
+steps to 95** against the exact 94, and its southernmost place from `y = 1919`
+to `y = 1905`. The neighbouring castle tests are unchanged — 196 long routes and
+9 roof routes still loop nowhere, and the walked click still arrives in 94 steps
+and 94 plans.
+
+The cause is untouched. It is the two-representative rule, and
 **intermediate representatives on a wide run** bound the detour by the spacing
 chosen instead of by half a region, at the price of more nodes on open ground —
 a number to measure against the bake and against `abstract_path`, not to pick.

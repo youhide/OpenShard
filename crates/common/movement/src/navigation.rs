@@ -50,6 +50,7 @@ use crate::{
     destination_place,
     find_path_toward_within,
     find_path_within,
+    search_path,
     step_allowed,
 };
 
@@ -1722,7 +1723,8 @@ impl NavigationGraph {
             };
             append(footing, at, &segment, &mut route).ok_or(last)?;
         }
-        Ok(without_loops(footing, from, route))
+        let route = without_loops(footing, from, route);
+        Ok(without_folds(footing, from, route, rigour.weight, effort))
     }
 
     fn forbid_portal(&self, node: NodeId, forbidden: &mut [bool]) {
@@ -2490,6 +2492,123 @@ fn without_loops(footing: &Footing<'_>, from: Point, route: Vec<Direction>) -> V
         }
     }
     kept
+}
+
+/// Every place a route stands on, in order, starting with the place it starts
+/// from.
+///
+/// The walk stops where the step rule refuses, for the reason
+/// [`without_loops`] breaks there: refinement approved every one of these steps
+/// against this footing, so a refusal is a bug elsewhere and a truncated route
+/// is still something a caller can walk.
+fn route_places(footing: &Footing<'_>, from: Point, route: &[Direction]) -> Vec<Point> {
+    let mut places = Vec::with_capacity(route.len() + 1);
+    places.push(from);
+    let mut at = from;
+    for &direction in route {
+        let Some(next) = step_allowed(footing, at, direction) else {
+            break;
+        };
+        at = next;
+        places.push(at);
+    }
+    places
+}
+
+/// How far back along a route a fold has to reach before it is worth a search.
+///
+/// A fold of three steps or fewer can save at most two, and asking costs a
+/// search: the point of this pass is the corridor that walked thirty steps out
+/// and back, not a diagonal that could have been a step straighter.
+const FOLD_STEPS: usize = 4;
+
+/// What one shortcut search may spend.
+///
+/// The two ends of a fold are neighbouring places, so an answer shorter than
+/// the fold is a handful of expansions away when the ground between them is
+/// open — the measured case spends **two**. When it is not open — a wall, a
+/// storey, the far side of a stair — this must refuse quickly rather than take
+/// up the corridor's own job, and the budget is what makes it.
+const FOLD_BUDGET: usize = 64;
+
+/// The same walk with its folds taken out: where it comes back beside somewhere
+/// it has already stood, the steps between the two visits are re-asked and
+/// replaced when the answer is shorter.
+///
+/// **A corridor can double back without ever standing anywhere twice.**
+/// [`without_loops`] cuts the exact revisit, and the route that made this
+/// necessary never had one: onto a castle roof ten tiles away the corridor
+/// walked *south, away from the house*, nineteen tiles into open field to the
+/// only portal its region had left, and came back on a line one tile beside the
+/// one it went out on — 123 steps where an exact search answers 94. Between two
+/// places one tile apart there is the same nothing an exact revisit has, and the
+/// difference is only that a step is needed to join them, which is why this
+/// costs a search where the loop cut costs none.
+///
+/// **The search is the oracle, not the neighbourhood.** A switchback stair folds
+/// back on itself exactly the same way, and there the search either refuses or
+/// answers no shorter, and nothing is spliced. So this cannot shorten a route
+/// through ground a body cannot walk: every step that replaces a fold is a step
+/// the search just approved against this same footing.
+///
+/// **Where it is asked is the whole of the price.** Over that route this finds
+/// the fold at steps 14..44 and re-asks it for 2 nodes; the same 94 steps asked
+/// as every pair of places within sixteen tiles cost 1,571 searches and 415,271
+/// nodes — six times the corridor being repaired. So the question is put once
+/// per fold and charged to the query's own wallet.
+///
+/// Termination is the splice condition: a replacement is taken only when it is
+/// strictly shorter, so the route shrinks at every one.
+fn without_folds(
+    footing: &Footing<'_>,
+    from: Point,
+    route: Vec<Direction>,
+    weight: Weight,
+    effort: &mut Effort,
+) -> Vec<Direction> {
+    let mut steps = route;
+    let mut places = route_places(footing, from, &steps);
+    let mut seen: FxHashMap<Point, usize> = FxHashMap::default();
+    let mut index = 0;
+    while index < places.len() {
+        if effort.spent_out() {
+            break;
+        }
+        let here = places[index];
+        // The earliest visit in this place's own neighbourhood, at its own
+        // height: two storeys of a house pass over each other, and a route on
+        // one of them has not been on the other.
+        let mut fold = None;
+        for dx in -1i32..=1 {
+            for dy in -1i32..=1 {
+                let neighbour = Point::new(
+                    here.x.saturating_add_signed(dx as i16),
+                    here.y.saturating_add_signed(dy as i16),
+                    here.z,
+                );
+                let Some(&first) = seen.get(&neighbour) else {
+                    continue;
+                };
+                if index - first >= FOLD_STEPS {
+                    fold = Some(fold.map_or(first, |earliest: usize| earliest.min(first)));
+                }
+            }
+        }
+        if let Some(first) = fold {
+            let search = search_path(footing, places[first], here, FOLD_BUDGET, weight);
+            effort.spend(search.explored);
+            if search.arrived && search.route.len() < index - first {
+                steps.splice(first..index, search.route);
+                places = route_places(footing, from, &steps);
+                seen.retain(|_, at| *at < first);
+                index = first;
+                continue;
+            }
+        }
+        seen.entry(here).or_insert(index);
+        index += 1;
+    }
+    steps
 }
 
 fn append(

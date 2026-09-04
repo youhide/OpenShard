@@ -683,6 +683,109 @@ fn a_route_onto_a_castle_roof_never_visits_a_place_twice() {
     );
 }
 
+/// Where the body stood on the journal's second recorded click, and what it
+/// clicked: a tile of the same castle's roof, from just outside its east wall.
+const EAST_OF_CASTLE: Point = Point::new(1350, 1890, 0);
+const ROOF_FROM_THE_EAST: Point = Point::new(1342, 1893, 88);
+
+/// A corridor may not walk away from the house it was sent to.
+///
+/// `docs/world/README.md`'s finding 25. The click was ten tiles away and the
+/// route began by walking *south*, nineteen tiles past the castle's south wall
+/// into open field, before coming back to the door it had started beside: 123
+/// steps where an exact search over the same ground answers 94.
+///
+/// Nothing about it was a loop. The way out and the way back ran one tile apart
+/// the whole distance, so no place was stood on twice and
+/// `NavigationGraph::refine`'s loop cut had nothing to take. The cause is the
+/// graph's own shape — an open 32-tile border is one run and `add_portal` gives
+/// a run two representatives, its ends, so a region is crossed at its corners
+/// and nowhere else — and what made it visible is the castle standing on the
+/// near pair of corners, which leaves the far one as the only crossing.
+///
+/// The assertion is a **ratio and not a route**. Which way round a facet a
+/// hierarchy goes is its own business, and a corridor is allowed to be longer
+/// than the exact answer — that is what buys the speed. Half as long again is
+/// not that; it is a body walking away from where it was sent.
+#[test]
+#[ignore = "reads a client install and lays a castle over it — see the doc comment"]
+fn a_route_onto_a_castle_roof_does_not_walk_away_from_the_castle() {
+    let Some((facet, coarse)) = real_facet() else {
+        eprintln!("OPENSHARD_CLIENT is unset — nothing to walk");
+        return;
+    };
+    let Some(graph) = coarse else {
+        eprintln!("no coarse graph — a long route cannot be planned at all");
+        return;
+    };
+    let terrain = facet.terrain();
+    let mut overlay = Overlay::default();
+    place_castle(&mut overlay, &facet.tiles, CASTLE_AT);
+    let live = Footing::new(Some(terrain), &overlay, Doors::AllOpen);
+    let nothing_placed = Overlay::default();
+    let guide = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
+    // The same guard the neighbouring test keeps: with the castle laid anywhere
+    // else the click resolves to the street and this would pass about nothing.
+    assert_eq!(
+        destination_place(&live, EAST_OF_CASTLE, ROOF_FROM_THE_EAST),
+        ROOF_FROM_THE_EAST,
+        "the castle was not laid where the click landed on it",
+    );
+
+    let exact = search_path(
+        &live,
+        EAST_OF_CASTLE,
+        ROOF_FROM_THE_EAST,
+        200_000,
+        Weight::PLANNING,
+    );
+    assert!(
+        exact.arrived,
+        "the roof has a way up, or this test is about nothing"
+    );
+    let corridor = find_long_path(
+        &guide,
+        &live,
+        &graph,
+        EAST_OF_CASTLE,
+        ROOF_FROM_THE_EAST,
+        PLAN_BUDGET,
+        Weight::PLANNING,
+    )
+    .expect("the client planned this click");
+    let places = walked(&live, EAST_OF_CASTLE, &corridor);
+    let south = places
+        .iter()
+        .max_by_key(|place| place.y)
+        .expect("a route has places");
+    println!(
+        "from ({}, {}) onto the roof: corridor {} steps, exact {} steps in {} nodes; the corridor's \
+         southernmost place is ({}, {}, {}), {} tiles past the destination",
+        EAST_OF_CASTLE.x,
+        EAST_OF_CASTLE.y,
+        corridor.len(),
+        exact.route.len(),
+        exact.explored,
+        south.x,
+        south.y,
+        south.z,
+        south.y.saturating_sub(ROOF_FROM_THE_EAST.y),
+    );
+
+    assert_eq!(
+        places.last().copied(),
+        Some(ROOF_FROM_THE_EAST),
+        "the corridor does not end on the roof it was planned to",
+    );
+    assert!(
+        corridor.len() * 4 <= exact.route.len() * 5,
+        "the corridor is {} steps against the exact {}: more than a quarter longer is a walk away \
+         from the destination, not a hierarchy's price",
+        corridor.len(),
+        exact.route.len(),
+    );
+}
+
 /// The click, walked: does the body actually get onto the roof?
 ///
 /// A plan is not the report. What a person saw was a *walk* — one step, then a
