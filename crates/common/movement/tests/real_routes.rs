@@ -40,6 +40,7 @@ use openshard_movement::{
     Footing,
     MapTerrain,
     NavigationGraph,
+    SearchExit,
     Weight,
     destination_place,
     find_long_path,
@@ -116,14 +117,42 @@ fn client_plan(
     from: Point,
     to: Point,
 ) -> Option<Vec<openshard_protocol::direction::Direction>> {
-    if let Some(local) = find_path(footing, from, to, PLAN_BUDGET, Weight::PLANNING) {
-        return Some(local);
+    coarse.and_then(|graph| walking_plan(footing, footing, graph, from, to))
+}
+
+/// The plan a walking client makes, in the order it makes it: the bounded
+/// search first and the coarse graph after it, over two readings of one ground.
+///
+/// `steer.rs`'s `Readings::path`, written out — including the half a shorter
+/// copy of it here used to leave out, and which cost this file a false report of
+/// its own. **A near destination falls through to the graph unless the bounded
+/// search really looked everywhere.** A search that *exhausted* has settled
+/// every place a body can stand and its refusal is the whole answer; one that
+/// spent its budget has not, and eight tiles of ground can hold a whole castle
+/// whose roof is ninety steps away round the outside. Refusing there because the
+/// destination is close is how a body walks up to a house and is told there is
+/// no way in.
+///
+/// The two footings are the arrangement `steer.rs` describes: corridors are
+/// proposed over the bare map the graph was baked from, and every step of one is
+/// approved against the world as it stands. A bare facet passes the same reading
+/// twice, which is what [`client_plan`] does.
+fn walking_plan(
+    guide: &Footing<'_>,
+    live: &Footing<'_>,
+    graph: &NavigationGraph,
+    from: Point,
+    to: Point,
+) -> Option<Vec<openshard_protocol::direction::Direction>> {
+    let local = search_path(live, from, to, PLAN_BUDGET, Weight::PLANNING);
+    if local.arrived {
+        return Some(local.route);
     }
     let distance = u32::from(from.x.abs_diff(to.x)).max(u32::from(from.y.abs_diff(to.y)));
-    if distance <= COARSE_MIN_DISTANCE {
+    if distance <= COARSE_MIN_DISTANCE && local.exit == SearchExit::Exhausted {
         return None;
     }
-    coarse.and_then(|graph| find_long_path(footing, footing, graph, from, to, PLAN_BUDGET, Weight::PLANNING))
+    find_long_path(guide, live, graph, from, to, PLAN_BUDGET, Weight::PLANNING)
 }
 
 /// One search, reported the way a bug report needs it: whether it arrived, what
@@ -651,5 +680,100 @@ fn a_route_onto_a_castle_roof_never_visits_a_place_twice() {
     assert!(
         swapped.is_empty(),
         "two neighbouring starts plan onto each other, which is a walk with no end",
+    );
+}
+
+/// The click, walked: does the body actually get onto the roof?
+///
+/// A plan is not the report. What a person saw was a *walk* — one step, then a
+/// plan from wherever that step landed, over and over — and the session's 143
+/// plans for 25 tiles are what that looks like when every plan's first step is a
+/// loop's. So this is the loop the client runs, at its worst cadence: replanned
+/// on **every** step, which is what the flickering castle made it do (finding
+/// 22) and what a client does anyway whenever the live layer moves.
+///
+/// The arrival test is `steer.rs`'s own — the place the destination names,
+/// resolved against the world as it stands, rather than the height the click
+/// carried.
+///
+/// Three ways this can fail and each is the report: the body never arrives, it
+/// stands somewhere it has already stood too often (an oscillation, which is the
+/// thing the patience cannot see), or it takes far more steps than the route it
+/// was planning. The step ceiling is generous rather than tight: what is being
+/// asserted is that the walk *ends*, not the facet's own geometry.
+#[test]
+#[ignore = "reads a client install and walks a hundred steps of real ground — see the doc comment"]
+fn a_click_on_the_castle_roof_is_walked_to_the_end() {
+    let Some((facet, coarse)) = real_facet() else {
+        eprintln!("OPENSHARD_CLIENT is unset — nothing to walk");
+        return;
+    };
+    let Some(graph) = coarse else {
+        eprintln!("no coarse graph — a long route cannot be planned at all");
+        return;
+    };
+    let terrain = facet.terrain();
+    let mut overlay = Overlay::default();
+    place_castle(&mut overlay, &facet.tiles, CASTLE_AT);
+    let live = Footing::new(Some(terrain), &overlay, Doors::AllOpen);
+    let nothing_placed = Overlay::default();
+    let guide = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
+
+    // Well past the ninety-four steps the route is, and well short of a walk
+    // nobody would sit through: a body that has not arrived in four hundred
+    // steps is not going to.
+    const CEILING: usize = 400;
+    // A tile a walk stands on more often than this is not passing through it.
+    // Twice is ordinary — a corridor doubles back round a building — and a body
+    // that is on its fourth visit is going round.
+    const VISITS: u32 = 3;
+
+    let mut at = SOUTH;
+    let mut visits: HashMap<Point, u32> = HashMap::new();
+    let mut steps = 0usize;
+    let mut plans = 0u32;
+    let started = std::time::Instant::now();
+    let arrived = loop {
+        if at == destination_place(&live, at, CASTLE_ROOF) {
+            break true;
+        }
+        if steps == CEILING {
+            break false;
+        }
+        let Some(route) = walking_plan(&guide, &live, &graph, at, CASTLE_ROOF) else {
+            println!("  no plan at all from ({}, {}, {})", at.x, at.y, at.z);
+            break false;
+        };
+        plans += 1;
+        let Some(&direction) = route.first() else {
+            println!("  an empty plan at ({}, {}, {})", at.x, at.y, at.z);
+            break false;
+        };
+        at = step_allowed(&live, at, direction).expect("the plan named a step the rule refuses");
+        steps += 1;
+        let seen = visits.entry(at).or_default();
+        *seen += 1;
+        assert!(
+            *seen <= VISITS,
+            "the walk stood at ({}, {}, {}) for the {seen}th time after {steps} steps — it is going \
+             round rather than getting there",
+            at.x,
+            at.y,
+            at.z,
+        );
+    };
+    println!(
+        "walked from ({}, {}) to the roof: arrived={arrived} steps={steps} plans={plans} in {:.0} ms",
+        SOUTH.x,
+        SOUTH.y,
+        started.elapsed().as_secs_f64() * 1_000.0,
+    );
+    assert!(
+        arrived,
+        "the body never reached the roof it was clicked onto — {steps} steps, {plans} plans",
+    );
+    assert_eq!(
+        at, CASTLE_ROOF,
+        "the walk ended somewhere other than the place the click named",
     );
 }

@@ -268,12 +268,20 @@ back onto it, then the ninety-four the plan from the neighbour had.
 one: standing somewhere twice means the steps between the two visits changed
 nothing.
 
-The scene is a test — `real_routes.rs`'s
+The scene is two tests — `real_routes.rs`'s
 `a_route_onto_a_castle_roof_never_visits_a_place_twice`, which lays the session's
 own castle (a 2196-component custom design, kept beside the test) over the real
-facet and asks the nine starts around that tile. Three of the nine looped before
-the repair and none after, and it asserts the report in the shape a body meets
-it as well: no two neighbouring starts may plan onto each other.
+facet and asks the nine starts around that tile; and
+`a_click_on_the_castle_roof_is_walked_to_the_end`, which **walks** the click the
+way a body meets it: plan, step, plan again from where that step landed, at the
+worst cadence there is — a fresh plan on every step, which is what a flickering
+castle made the session do.
+
+That second one is the report's own shape and its own oracle. Without the repair
+it fails after seven steps, standing on `(1344, 1919)` for the fourth time; with
+it the body walks the ninety-four steps onto the roof, in ninety-four plans.
+Three of the nine starts looped before and none after, and no two neighbouring
+starts plan onto each other any more.
 
 What is *not* closed is the patience: a walk that never arrives and never stands
 still is still an order nothing ends. `STUCK_STEPS` measures the wrong thing for
@@ -288,10 +296,11 @@ path, while a player is moving — and the preview and the step ask for it
 separately. The node budget bounds the *bounded* search only; nothing bounds
 what the fallback costs in milliseconds.
 
-The castle test above now measures the *other* half of that, and it is the
+The castle tests above now measure the *other* half of that, and it is the
 uncomfortable half: over that same click, an **exact** search arrives in 7,119
 nodes and 4.2 ms, and the corridor pays 30.5 ms to return a route of exactly the
-same length. So on this destination the hierarchy is seven times the price of
+same length. Walking the whole click at one plan per step costs **2.1 s of
+planning for 94 steps** — around 22 ms a step, on the walk path. So on this destination the hierarchy is seven times the price of
 the answer it is standing in for, and the whole of what makes it necessary is a
 budget of 700 — a number measured against tiles, which finding 13 is already
 about. What that asks for is a measurement of where the crossover really is,
