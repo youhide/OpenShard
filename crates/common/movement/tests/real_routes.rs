@@ -29,12 +29,11 @@ use openshard_map::overlay::{
     Doors,
     Overlay,
 };
-use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::bake::{
-    FacetWorld,
+    OpenFacet,
     WorldSource,
+    open_facet,
 };
-use openshard_movement::spans::SpanIndex;
 use openshard_movement::{
     COARSE_MIN_DISTANCE,
     Footing,
@@ -73,28 +72,14 @@ fn client_dir() -> Option<PathBuf> {
     dir.join("tiledata.mul").exists().then_some(dir)
 }
 
-/// What an install owns, so a test can hold it and hand out views of it.
-struct Install {
-    snapshot: MapSnapshot,
-    tiles:    openshard_tiles::TileData,
-    spans:    SpanIndex,
-    /// The baked coarse graph, when one is beside the install and current.
-    ///
-    /// `None` is a real state and not a failure — a client with no bake plans
-    /// long routes with nothing but the bounded search, and says so on stderr —
-    /// so the survey reports which of the two it measured rather than skipping.
-    coarse:   Option<NavigationGraph>,
-}
-
-impl Install {
-    fn terrain(&self) -> MapTerrain<'_> {
-        MapTerrain::new(self.snapshot.map(), &self.tiles, &self.spans)
-    }
-}
-
-fn real_install() -> Option<Install> {
+/// The facet, and the coarse graph beside it.
+///
+/// The graph is `None` on a real state and not a failure — a client with no bake
+/// plans long routes with nothing but the bounded search, and says so on
+/// stderr — so the survey reports which of the two it measured rather than
+/// skipping.
+fn real_facet() -> Option<(OpenFacet, Option<NavigationGraph>)> {
     let dir = client_dir()?;
-    let facet = Facet(0);
     // The world a *shard* is running, when one is named: `world.base_sets` in
     // `openshard.toml` replaces the install's map and statics, and the artifacts
     // move with it — beside the base set rather than beside the install. A
@@ -106,22 +91,12 @@ fn real_install() -> Option<Install> {
         Some(path) => WorldSource::BaseSet(path),
         None => WorldSource::Install,
     };
-    let world = FacetWorld::read(&dir, source, facet).expect("the facet should load");
-    let tiles =
-        openshard_uofiles::tiledata::load_tiles(dir.join("tiledata.mul")).expect("tiledata should load");
-    let spans = SpanIndex::build(world.snapshot.map(), &tiles);
-    let navigation = world.navigation_path(&dir);
-    let coarse = world
-        .stamp(&dir, facet)
-        .and_then(|stamp| openshard_movement::bake::load(&navigation, &stamp))
+    let facet = open_facet(&dir, source, Facet(0)).expect("the facet should load");
+    let coarse = facet
+        .coarse()
         .map_err(|error| eprintln!("no coarse graph: {error}"))
         .ok();
-    Some(Install {
-        snapshot: world.snapshot,
-        tiles,
-        spans,
-        coarse,
-    })
+    Some((facet, coarse))
 }
 
 /// The client's own plan, in the client's own order: the bounded search, and
@@ -211,16 +186,16 @@ fn picture(terrain: &MapTerrain<'_>, centre: Point, radius: u16) {
 #[test]
 #[ignore = "reads a client install and surveys one building — see the doc comment"]
 fn a_second_storey_route_survey() {
-    let Some(install) = real_install() else {
+    let Some((facet, coarse)) = real_facet() else {
         eprintln!("OPENSHARD_CLIENT is unset — nothing to survey");
         return;
     };
-    let terrain = install.terrain();
+    let terrain = facet.terrain();
     let nothing_placed = Overlay::default();
     let footing = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
     println!(
         "coarse graph: {}",
-        match &install.coarse {
+        match &coarse {
             Some(graph) => {
                 let (regions, nodes, edges) = graph.counts();
                 format!("{regions} regions, {nodes} nodes, {edges} edges")
@@ -271,7 +246,7 @@ fn a_second_storey_route_survey() {
             // that column really has.
             let to = Point::new(x, y, STREET_Z);
             let local = find_path(&footing, UPSTAIRS, to, PLAN_BUDGET, Weight::PLANNING).is_some();
-            let plan = client_plan(&footing, install.coarse.as_ref(), UPSTAIRS, to).is_some();
+            let plan = client_plan(&footing, coarse.as_ref(), UPSTAIRS, to).is_some();
             if plan && !local {
                 coarse_saved += 1;
             }
@@ -313,7 +288,7 @@ fn a_second_storey_route_survey() {
         ("Trinsic, the same landmass", Point::new(1828, 2745, 0)),
     ] {
         let started = std::time::Instant::now();
-        let plan = client_plan(&footing, install.coarse.as_ref(), UPSTAIRS, to);
+        let plan = client_plan(&footing, coarse.as_ref(), UPSTAIRS, to);
         println!(
             "  {label:<26} ({:4}, {:4}) planned={:<5} steps={:<6} {:8.3} ms",
             to.x,
@@ -327,8 +302,7 @@ fn a_second_storey_route_survey() {
     // The claim this file is for: a body on that storey has a way down, and the
     // shipped client plans it. The route is walked by the step rule rather than
     // trusted, because a plan the rule refuses is worse than no plan.
-    let down =
-        client_plan(&footing, install.coarse.as_ref(), UPSTAIRS, ground).expect("the storey has a way down");
+    let down = client_plan(&footing, coarse.as_ref(), UPSTAIRS, ground).expect("the storey has a way down");
     let mut at = UPSTAIRS;
     for &direction in &down {
         at = step_allowed(&footing, at, direction).expect("the plan named a step the rule refuses");

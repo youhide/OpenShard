@@ -483,6 +483,133 @@ impl FacetWorld {
     }
 }
 
+/// A facet could not be opened off an install.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum OpenError {
+    /// The world could not be read from the source it was named from.
+    World {
+        /// Why.
+        source: SourceError,
+    },
+    /// `tiledata.mul` could not be read, so nothing can say what a tile *is*.
+    ///
+    /// A separate arm from [`Self::World`] because it is a separate file and a
+    /// separate failure: a base set can be perfectly readable in an install
+    /// whose tile table is missing, and a caller told only "the facet did not
+    /// open" would go looking at the base set.
+    TileData {
+        /// Why.
+        source: openshard_uofiles::tiledata::TileDataError,
+    },
+}
+
+impl fmt::Display for OpenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::World { source } => source.fmt(f),
+            Self::TileData { source } => source.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for OpenError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::World { source } => Some(source),
+            Self::TileData { source } => Some(source),
+        }
+    }
+}
+
+/// One facet opened off an install: the world, the tables a search over it
+/// reads, and the way to the graph baked beside it.
+///
+/// The value exists to say that those are **the same install**. Every tool that
+/// wanted a real facet used to derive its own subset of the four — world, tile
+/// table, spans, graph — and each derivation is a place where the tile table can
+/// come from one directory and the world from another, or where an artifact is
+/// looked for beside the install while the world came out of a base set. Those
+/// are not hypothetical: they are exactly what [`FacetWorld::stamp`] and
+/// [`FacetWorld::navigation_path`] exist to decide once, and a caller holding
+/// this value cannot make either decision for itself.
+#[derive(Debug)]
+pub struct OpenFacet {
+    /// The world, at the revision its source resolved to, and where it came
+    /// from.
+    pub world:      FacetWorld,
+    /// What a tile *is*: always the install's `tiledata.mul`, whatever the
+    /// world's own source — a base set holds the map and nothing else.
+    pub tiles:      openshard_tiles::TileData,
+    /// The span bake over the two, because a terrain borrows one — see
+    /// [`crate::MapTerrain::new`]. Around 0.07 s and 16.5 MiB for a whole facet,
+    /// which is why every caller can have its own rather than sharing one.
+    pub spans:      crate::spans::SpanIndex,
+    /// The install all of this was read out of.
+    ///
+    /// Kept because it is half of where a derived artifact lives — the other
+    /// half being the world's source — and a caller that had to pass it back in
+    /// could pass a different one.
+    pub client_dir: PathBuf,
+}
+
+impl OpenFacet {
+    /// A walker's view of this facet: the map, the tile table and the spans, as
+    /// the one thing a step rule reads.
+    #[must_use]
+    pub fn terrain(&self) -> crate::MapTerrain<'_> {
+        crate::MapTerrain::new(self.world.snapshot.map(), &self.tiles, &self.spans)
+    }
+
+    /// The coarse graph baked over *this* world, validated against it.
+    ///
+    /// Not a field: loading it is a second decision, a facet is useful without
+    /// one, and the callers that want one disagree about what its absence
+    /// means — a survey reports it and carries on, a benchmark of the graph has
+    /// nothing to measure. So the answer is the error, and each caller says what
+    /// it does with it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error`] — there is no artifact beside this world, it does not match the
+    /// inputs the world was read from, or it cannot be read.
+    pub fn coarse(&self) -> Result<NavigationGraph, Error> {
+        // The facet is the snapshot's own, for `navigation_path`'s reason: a
+        // world knows which facet it is, and a second opinion could name the
+        // artifact of another one.
+        let facet = self.world.snapshot.facet();
+        let stamp = self.world.stamp(&self.client_dir, facet)?;
+        load(&self.world.navigation_path(&self.client_dir), &stamp)
+    }
+}
+
+/// Open `facet` off an install, with everything a search over it needs.
+///
+/// The twenty-five lines every tool over a real facet used to write out for
+/// itself — see [`OpenFacet`] for why they are one function. The graph is not
+/// read here: it is [`OpenFacet::coarse`], one call away, because a facet is
+/// useful without one.
+///
+/// `client_dir` is the install, and it is required whatever `source` is: a base
+/// set holds the map, and `tiledata.mul` still holds what a tile is.
+///
+/// # Errors
+///
+/// [`OpenError`] — the world could not be read from that source, or the
+/// install's tile table could not be read.
+pub fn open_facet(client_dir: &Path, source: WorldSource<'_>, facet: Facet) -> Result<OpenFacet, OpenError> {
+    let world = FacetWorld::read(client_dir, source, facet).map_err(|source| OpenError::World { source })?;
+    let tiles = openshard_uofiles::tiledata::load_tiles(client_dir.join("tiledata.mul"))
+        .map_err(|source| OpenError::TileData { source })?;
+    let spans = crate::spans::SpanIndex::build(world.snapshot.map(), &tiles);
+    Ok(OpenFacet {
+        world,
+        tiles,
+        spans,
+        client_dir: client_dir.to_owned(),
+    })
+}
+
 /// Build the coarse graph over one world — the one construction every baker
 /// uses.
 ///

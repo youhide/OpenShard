@@ -53,12 +53,11 @@ use openshard_map::overlay::{
     Doors,
     Overlay,
 };
-use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::bake::{
-    FacetWorld,
+    OpenFacet,
     WorldSource,
+    open_facet,
 };
-use openshard_movement::spans::SpanIndex;
 use openshard_movement::{
     COARSE_MIN_DISTANCE,
     Footing,
@@ -126,47 +125,22 @@ struct Cli {
     radius:   u16,
 }
 
-/// A facet opened off an install, with everything a search over it needs.
-struct Ground {
-    snapshot: MapSnapshot,
-    tiles:    openshard_tiles::TileData,
-    spans:    SpanIndex,
-    /// The baked coarse graph, when one is beside the world and current.
-    ///
-    /// `None` is a real state and not a failure — a client without one refuses
-    /// every long destination — and the report says which of the two it
-    /// replayed under, because the session's own line says which the session
-    /// had.
-    coarse:   Option<NavigationGraph>,
-}
-
-impl Ground {
-    fn terrain(&self) -> MapTerrain<'_> {
-        MapTerrain::new(self.snapshot.map(), &self.tiles, &self.spans)
-    }
-}
-
-fn open(cli: &Cli, facet: Facet) -> Ground {
+/// The facet this replay walks, and the coarse graph beside it.
+///
+/// The graph is `None` on a real state and not a failure — a client without one
+/// refuses every long destination — and the report says which of the two it
+/// replayed under, because the session's own line says which the session had.
+fn open(cli: &Cli, facet: Facet) -> (OpenFacet, Option<NavigationGraph>) {
     let source = match &cli.base_set {
         Some(path) => WorldSource::BaseSet(path),
         None => WorldSource::Install,
     };
-    let world = FacetWorld::read(&cli.client, source, facet).expect("the facet should load");
-    let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))
-        .expect("tiledata should load");
-    let spans = SpanIndex::build(world.snapshot.map(), &tiles);
-    let navigation = world.navigation_path(&cli.client);
-    let coarse = world
-        .stamp(&cli.client, facet)
-        .and_then(|stamp| openshard_movement::bake::load(&navigation, &stamp))
+    let ground = open_facet(&cli.client, source, facet).expect("the facet should load");
+    let coarse = ground
+        .coarse()
         .map_err(|error| eprintln!("no coarse graph: {error}"))
         .ok();
-    Ground {
-        snapshot: world.snapshot,
-        tiles,
-        spans,
-        coarse,
-    }
+    (ground, coarse)
 }
 
 /// The client's own plan, in the client's own order: the bounded search, and the
@@ -243,7 +217,8 @@ fn picture(terrain: &MapTerrain<'_>, centre: Point, radius: u16) {
 
 /// One recorded plan, asked again.
 fn replay_plan(
-    ground: &Ground,
+    ground: &OpenFacet,
+    coarse: Option<&NavigationGraph>,
     footing: &Footing<'_>,
     seq: u64,
     plan: &record::Plan,
@@ -318,7 +293,7 @@ fn replay_plan(
 
     // What the same client plan does over the bare facet.
     let bare = search_path(footing, from, to, budget, Weight::PLANNING);
-    let planned = client_plan(footing, ground.coarse.as_ref(), from, to, budget);
+    let planned = client_plan(footing, coarse, from, to, budget);
     println!(
         "  replayed: live       arrived={} exit={:?} explored={} written={}",
         bare.arrived, bare.exit, bare.explored, bare.written,
@@ -385,7 +360,13 @@ struct Answers {
 }
 
 /// What the two answers, side by side, say about the world the session was in.
-fn verdict(ground: &Ground, footing: &Footing<'_>, plan: &record::Plan, replayed: &[Step], answers: Answers) {
+fn verdict(
+    ground: &OpenFacet,
+    footing: &Footing<'_>,
+    plan: &record::Plan,
+    replayed: &[Step],
+    answers: Answers,
+) {
     let Answers {
         from,
         to,
@@ -631,8 +612,8 @@ fn main() -> Result<(), openshard_pathlog::read::ReadError> {
             },
         );
     }
-    let ground = open(&cli, facet);
-    if session.is_some_and(|session| session.coarse) && ground.coarse.is_none() {
+    let (ground, coarse) = open(&cli, facet);
+    if session.is_some_and(|session| session.coarse) && coarse.is_none() {
         println!(
             "! the session had a coarse graph and this replay has none: every long destination \
              will be refused here for a reason the session did not have"
@@ -682,7 +663,7 @@ fn main() -> Result<(), openshard_pathlog::read::ReadError> {
         if cli.plan.is_some_and(|wanted| wanted != index + 1) {
             continue;
         }
-        replay_plan(&ground, &footing, *seq, plan, cli.radius, budget);
+        replay_plan(&ground, coarse.as_ref(), &footing, *seq, plan, cli.radius, budget);
     }
     Ok(())
 }

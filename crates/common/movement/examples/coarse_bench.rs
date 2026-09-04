@@ -34,7 +34,6 @@ use openshard_map::overlay::{
     Doors,
     Overlay,
 };
-use openshard_map::snapshot::MapSnapshot;
 use openshard_movement::reach::Reach;
 use openshard_movement::{
     Footing,
@@ -234,20 +233,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         synthetic();
     }
     let facet = Facet(cli.facet);
-    let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
-    let map: MapSnapshot = openshard_uofiles::map::load_facet(&cli.client, facet)?;
+    let ground = bake::open_facet(&cli.client, bake::WorldSource::Install, facet)?;
     // The artifact the shard loads, validated the way the shard validates it: a
     // graph that no longer matches its inputs is not a slower answer, it is a
     // different world's answer.
-    let stamp = bake::stamp_of(&cli.client, facet, map.revision())?;
-    let graph = bake::load(&bake::artifact_path(&cli.client, None, facet), &stamp)?;
+    let graph = ground.coarse()?;
     let (regions, nodes, edges) = graph.counts();
-    let index = openshard_movement::spans::SpanIndex::build(map.map(), &tiles);
-    let terrain = MapTerrain::new(map.map(), &tiles, &index);
+    let terrain = ground.terrain();
     // The map and nothing over it: a facet's numbers have to be about the facet.
     let nothing_placed = Overlay::default();
     let footing = Footing::new(Some(terrain), &nothing_placed, Doors::AsTheyStand);
-    let (width, height) = (map.map().width(), map.map().height());
+    let map = ground.world.snapshot.map();
+    let (width, height) = (map.width(), map.height());
 
     let origin = standable(&terrain, cli.x, cli.y).ok_or("nothing stands at the origin")?;
     println!(

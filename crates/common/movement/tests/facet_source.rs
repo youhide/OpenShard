@@ -15,7 +15,10 @@ use std::path::{
     PathBuf,
 };
 
-use openshard_map::grid::BlockExtent;
+use openshard_map::grid::{
+    BlockExtent,
+    Tile,
+};
 use openshard_map::map::{
     LandCell,
     WorldMap,
@@ -32,8 +35,10 @@ use openshard_map::snapshot::{
 };
 use openshard_movement::bake::{
     FacetWorld,
+    OpenError,
     SourceError,
     WorldSource,
+    open_facet,
 };
 use openshard_protocol::world::Facet;
 use openshard_tiles::LandTileId;
@@ -198,4 +203,84 @@ fn a_committed_patch_is_part_of_the_world_the_source_resolves_to() {
     );
 
     clean(&path, &log);
+}
+
+/// An install directory holding a `tiledata.mul` of the right shape and nothing
+/// in it.
+///
+/// A tile table is what a tile *means*, and every zero means "no flags", which
+/// is exactly what a synthetic world of one land tile wants. The size is the
+/// whole of the format detection in `openshard_uofiles::tiledata`: the land
+/// table is 512 groups of a 4-byte header and 32 entries of 26 bytes, and the
+/// statics table is one or more groups of a header and 32 entries of 37 — the
+/// pre-High-Seas layout, because it is the one a shorter file can be.
+fn install_with_tile_table(tag: &str) -> PathBuf {
+    const LAND_TABLE: usize = 512 * (4 + 32 * 26);
+    const STATIC_GROUP: usize = 4 + 32 * 37;
+
+    let dir = std::env::temp_dir().join(format!("openshard-open-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a writable temp dir");
+    std::fs::write(dir.join("tiledata.mul"), vec![0_u8; LAND_TABLE + STATIC_GROUP])
+        .expect("a writable temp dir");
+    dir
+}
+
+/// What a tool over a real facet asks for, in one call: the world, the tile
+/// table, the spans over the two, and where the graph beside it would be.
+#[test]
+fn opening_a_facet_carries_the_world_the_tables_and_the_place_its_graph_belongs() {
+    let (path, log) = base_set("opened", FACET);
+    let install = install_with_tile_table("opened");
+
+    let ground = open_facet(&install, WorldSource::BaseSet(&path), FACET).expect("the base set");
+
+    assert_eq!(ground.world.base_set.as_deref(), Some(path.as_path()));
+    assert_eq!(
+        ground.client_dir, install,
+        "the tile table came out of the install, and the value has to say which one"
+    );
+    // The spans are the layer a step reads, so the terrain over them is what
+    // proves they were baked over *this* world. Their *count* is not asserted:
+    // a span is a surface a static puts above the ground, and this world is bare
+    // land, whose surface the land grid answers on its own.
+    assert_eq!(
+        ground.terrain().ground_z(Tile::new(5, 6)),
+        Some(GROUND.z),
+        "the terrain stands on the world this was opened from"
+    );
+
+    // No bake has ever been written beside this base set, and the refusal has to
+    // name the file it looked for: beside the base set, under the base set's own
+    // name. An artifact looked for in the install would be another world's.
+    let error = ground
+        .coarse()
+        .expect_err("nothing has been baked over this world");
+    let named = ground.world.navigation_path(&install);
+    assert!(
+        error.to_string().contains(&named.display().to_string()),
+        "expected the refusal to name {}, got {error}",
+        named.display()
+    );
+
+    clean(&path, &log);
+    std::fs::remove_dir_all(&install).ok();
+}
+
+/// The tile table is the install's, whatever the world's source is — so an
+/// install without one is a refusal of its own, and not "the base set is bad".
+#[test]
+fn opening_a_facet_without_the_installs_tile_table_says_so() {
+    let (path, log) = base_set("no-tiles", FACET);
+    let install = std::env::temp_dir().join(format!("openshard-open-bare-{}", std::process::id()));
+    std::fs::create_dir_all(&install).expect("a writable temp dir");
+
+    let error = open_facet(&install, WorldSource::BaseSet(&path), FACET)
+        .expect_err("there is no tile table in there");
+    assert!(
+        matches!(&error, OpenError::TileData { .. }),
+        "expected the tile table's own arm, got {error}"
+    );
+
+    clean(&path, &log);
+    std::fs::remove_dir_all(&install).ok();
 }

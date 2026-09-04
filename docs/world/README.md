@@ -210,17 +210,7 @@ unaligned load and a shift. What this asks for is a *measurement* — the ground
 walk of a widest-zoom frame over a packed cell against the cell we have — and the
 same gate governs the packed four-byte static record.
 
-**20. Opening a facet off an install is written out seven times.** The same
-twenty-five lines — `FacetWorld::read`, `load_tiles`, `SpanIndex::build`, the
-stamp, `bake::load` — are in `tests/real_routes.rs`, `examples/path_replay.rs`,
-`coarse_bench.rs`, `span_check.rs`, `span_census.rs`, `step_cost.rs` and
-`map_path_probe.rs`, each with its own subset of the four and its own idea of
-what a missing artifact means. What it asks for is one `bake::open_facet` —
-world, tile table, spans and the graph, as the one value that says they are the
-same install — and it is the difference between a new tool being twenty-five
-lines of setup and one call.
-
-**21. A long query does not report what it spent.** `search_long_path` returns
+**20. A long query does not report what it spent.** `search_long_path` returns
 the route and a `LongExit` and drops `effort.spent()`, so the only node count a
 caller can quote for a long destination is the *bounded* search's — which stopped
 before the corridor was ever asked for. A route journal writes `explored=700,

@@ -34,18 +34,18 @@ use std::time::Instant;
 
 use clap::Parser;
 use openshard_map::grid::Tile;
-use openshard_map::map::WorldMap;
 use openshard_movement::reach::Reach;
-use openshard_movement::spans::{
-    SpanIndex,
-    Spans,
-};
+use openshard_movement::spans::Spans;
 use openshard_movement::{
     MapTerrain,
+    bake,
     step_from,
 };
 use openshard_protocol::direction::Direction;
-use openshard_protocol::world::Point;
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -143,18 +143,17 @@ fn expansion<F: FnMut(Point, Direction) -> Option<Point>>(at: Point, mut land: F
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
-    let map: WorldMap = openshard_uofiles::map::read_facet(&cli.client, cli.facet)?;
-    let (width, height) = (map.width(), map.height());
-
     let started = Instant::now();
-    let index = SpanIndex::build(&map, &tiles);
+    let ground = bake::open_facet(&cli.client, bake::WorldSource::Install, Facet(cli.facet))?;
+    let map = ground.world.snapshot.map();
+    let (width, height) = (map.width(), map.height());
+    let index = &ground.spans;
     // The terrain borrows the bake, because a step reads it — and this example
     // is what proves the two rules agree, so it reaches past `can_step` to
     // `MapTerrain::check` on one side and `Spans::check` on the other.
-    let terrain = MapTerrain::new(&map, &tiles, &index);
+    let terrain = ground.terrain();
     println!(
-        "facet {} {width}x{height}: baked in {:.2}s, {} spans, {} B resident",
+        "facet {} {width}x{height}: read and baked in {:.2}s, {} spans, {} B resident",
         cli.facet,
         started.elapsed().as_secs_f64(),
         index.span_count(),
@@ -171,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut disagreements = 0_u64;
     for swimming in [false, true] {
         let terrain = terrain.swimming(swimming);
-        let spans = Spans::new(&map, &index).swimming(swimming);
+        let spans = Spans::new(map, index).swimming(swimming);
         for y in (0..height as u16).step_by(usize::from(cli.stride.max(1))) {
             for x in (0..width as u16).step_by(usize::from(cli.stride.max(1))) {
                 for start in spans.surfaces(x, y) {
@@ -217,7 +216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         expansion(at, |at, direction| map_land(&terrain, at, direction))
     });
     let map_time = flooding.elapsed();
-    let spans = Spans::new(&map, &index);
+    let spans = Spans::new(map, index);
     let flooding = Instant::now();
     let by_spans = Reach::by(origin, width, height, |at| {
         expansion(at, |at, direction| span_land(&terrain, &spans, at, direction))

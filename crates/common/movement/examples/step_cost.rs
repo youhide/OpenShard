@@ -41,21 +41,22 @@ use openshard_map::overlay::{
     Doors,
     Overlay,
 };
-use openshard_movement::spans::{
-    SpanIndex,
-    Spans,
-};
+use openshard_movement::spans::Spans;
 use openshard_movement::{
     Footing,
     MapTerrain,
     SearchExit,
     Weight,
+    bake,
     search_path,
     step_allowed,
     steps_out_of,
 };
 use openshard_protocol::direction::Direction;
-use openshard_protocol::world::Point;
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -90,17 +91,17 @@ fn measure(repeat: usize, tiles: usize, label: &str, mut pass: impl FnMut() -> u
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let tiledata = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
-    let map = openshard_uofiles::map::read_facet(&cli.client, 0)?;
     let baking = Instant::now();
-    let index = SpanIndex::build(&map, &tiledata);
+    let ground = bake::open_facet(&cli.client, bake::WorldSource::Install, Facet(0))?;
+    let map = ground.world.snapshot.map();
+    let index = &ground.spans;
     println!(
-        "baked {} spans in {:.2}s, {} B resident",
+        "read and baked {} spans in {:.2}s, {} B resident",
         index.span_count(),
         baking.elapsed().as_secs_f64(),
         index.resident_bytes(),
     );
-    let terrain = MapTerrain::new(&map, &tiledata, &index);
+    let terrain = ground.terrain();
     // The map and nothing over it: this probe is about what the *ground* costs
     // to ask, so the live world is empty on purpose.
     let nothing_placed = Overlay::default();
@@ -132,8 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // neighbour mask hangs on a span, and 92% of the facet's columns have no
     // span to hang one on. What that entry is worth is this split times the gap
     // between the two rows below, so the split is measured rather than assumed.
-    let (stored, bare): (Vec<Point>, Vec<Point>) =
-        standing.iter().partition(|p| index.stores(&map, p.x, p.y));
+    let (stored, bare): (Vec<Point>, Vec<Point>) = standing.iter().partition(|p| index.stores(map, p.x, p.y));
     println!(
         "  of which {} stand on a stored column ({:.1}%) and {} on bare land ({:.1}%)",
         stored.len(),
@@ -310,7 +310,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // carries where a body stands and not the crest of the art under it, which
     // is what `start_surface` returns, and N3 measured that half at a seventh of
     // an expansion and left it there.
-    let spans = Spans::new(&map, &index);
+    let spans = Spans::new(map, index);
     measure(cli.repeat, n, "the same, landings off the bake", || {
         standing.iter().map(|&p| span_expand(&terrain, &spans, p)).sum()
     });

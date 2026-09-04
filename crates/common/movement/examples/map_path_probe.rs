@@ -38,10 +38,14 @@ use openshard_movement::{
     PathSearch,
     SearchExit,
     Weight,
+    bake,
     search_path,
     step_allowed,
 };
-use openshard_protocol::world::Point;
+use openshard_protocol::world::{
+    Facet,
+    Point,
+};
 
 /// `N/D` off the command line, as the pair the run then prints back.
 ///
@@ -453,13 +457,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cli.budget.is_empty() {
         cli.budget = vec![400, 600];
     }
-    let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
-    let map = openshard_uofiles::map::read_facet(&cli.client, 0)?;
-    // The layer a step actually reads, since `navigation_spans.md`'s N3: this
-    // probe's node-expansion cost is the number that plan is argued from, so it
-    // has to be the same ground the shard walks.
-    let index = openshard_movement::spans::SpanIndex::build(&map, &tiles);
-    let terrain = MapTerrain::new(&map, &tiles, &index);
+    // The spans `open_facet` bakes are the layer a step actually reads, since
+    // `navigation_spans.md`'s N3: this probe's node-expansion cost is the number
+    // that plan is argued from, so it has to be the same ground the shard walks.
+    let ground = bake::open_facet(&cli.client, bake::WorldSource::Install, Facet(0))?;
+    let map = ground.world.snapshot.map();
+    let terrain = ground.terrain();
     // The map and nothing over it. This probe measures the *ground*: a shard's
     // doors and crates are its own, and a facet's numbers have to be about the
     // facet to be comparable between runs.

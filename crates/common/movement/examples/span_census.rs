@@ -20,8 +20,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::Parser;
-use openshard_map::map::WorldMap;
+use openshard_movement::bake;
 use openshard_movement::surfaces::stand_surfaces;
+use openshard_protocol::world::Facet;
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -62,8 +63,9 @@ const BLOCK: u32 = 8;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let tiles = openshard_uofiles::tiledata::load_tiles(cli.client.join("tiledata.mul"))?;
-    let map: WorldMap = openshard_uofiles::map::read_facet(&cli.client, cli.facet)?;
+    let ground = bake::open_facet(&cli.client, bake::WorldSource::Install, Facet(cli.facet))?;
+    let tiles = &ground.tiles;
+    let map = ground.world.snapshot.map();
     let (width, height) = (map.width(), map.height());
     let columns = u64::from(width) * u64::from(height);
 
@@ -83,9 +85,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Walking twice is what separates the two populations: the walker's
             // surfaces, and the ones only a swimmer stands on.
             surfaces.clear();
-            surfaces.extend(stand_surfaces(&map, &tiles, x, y, false));
+            surfaces.extend(stand_surfaces(map, tiles, x, y, false));
             let walkable = surfaces.len();
-            let swimming = stand_surfaces(&map, &tiles, x, y, true).len();
+            let swimming = stand_surfaces(map, tiles, x, y, true).len();
             water_spans += (swimming - walkable) as u64;
             spans += walkable as u64;
             histogram[walkable.min(cli.buckets + 1)] += 1;
