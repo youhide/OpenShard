@@ -1232,6 +1232,40 @@ pub(crate) const fn walking_doors(dead: bool, auto_open_doors: bool) -> openshar
     }
 }
 
+/// Which reading of the shut doors the route *drawn* for the player is planned
+/// under — the one the walk is planned under, and that identity is the whole
+/// answer.
+///
+/// **Why the question has its own name when the answer is another function.**
+/// It used to have its own answer: the HUD passed `auto_open_doors = false`
+/// whatever the setting said, on the argument that the setting is an intention
+/// and a picture of a walk is no place for intentions. `docs/world/README.md`'s
+/// finding 26 is what that cost. One click ran three plans a step in a rhythm
+/// of two and one — two under [`walking_doors`], routing onto a castle roof,
+/// and a third under the doors as they stand, whose live join reached no node
+/// of the coarse graph and which therefore called the same click `Barred` with
+/// a route stopping at the door. Both were journalled, both were drawn, and
+/// which one the player saw was decided by whether a step happened to fall due
+/// in that frame — the walk and its preview share one plan per frame
+/// (`Steering::plan_for`), so whichever asked first set the reading for both.
+///
+/// The argument was wrong on its own terms, and the ghost beside it is the
+/// proof: a dead body is passed here precisely because its *step* goes through
+/// the leaf, and drawing that route stopped at the door would be a picture of
+/// a refusal that is not going to happen. An auto-door body's step goes
+/// through the leaf too — `App::walk` sends the use before the step, which is
+/// what makes the promise good — so the same sentence convicts the same
+/// picture. What is left for `Barred` is a door the body really will not open:
+/// alive, with the setting off.
+///
+/// So the name stays and the answer delegates. A call site that reverted this
+/// would be one line in a HUD function nobody reads twice; a function is
+/// something the argument can be written on and a test can ask for — see
+/// `steer.rs`'s `one_click_has_one_verdict_whether_it_is_walked_or_drawn`.
+pub(crate) const fn drawn_route_doors(dead: bool, auto_open_doors: bool) -> openshard_map::overlay::Doors {
+    walking_doors(dead, auto_open_doors)
+}
+
 /// Every shut leaf one step this way has to get past: the tile it lands on and,
 /// for a diagonal, the two cardinals it squeezes between.
 ///

@@ -233,7 +233,7 @@ the originating click is 95 steps against the exact 94, its 9 neighbouring
 starts and 196 long routes loop nowhere, and the walked click still arrives in
 95 steps and 95 plans.
 
-## P2 — One click, two standing answers
+## P2 — One click, two standing answers — ✅ done
 
 **What is wrong.** Finding 26. The plans of one order run in a rhythm of two and
 one: two read the ground with doors as a walking body opens them and route onto
@@ -250,8 +250,44 @@ shape is that the preview borrows the walk's own reading and the `Barred`
 refusal is reserved for a door the body will not open — but that is a decision
 about what a player is told, and it belongs with whoever owns the cursor.
 
+**Decided, and it is the likely shape.** The third caller is the HUD's own
+route, and the divergence was one argument in one comment: it passed
+`auto_open_doors = false` whatever the setting said, because "the setting is an
+intention to open a leaf and a picture of a walk is no place for intentions".
+The ghost passed in the same call refutes it. A dead body is read `AllOpen`
+there precisely because its *step* goes through the leaf, and a route drawn
+stopped at that leaf would be a picture of a refusal that is not going to
+happen; an auto-door body's step goes through the leaf too, because `App::walk`
+sends the use before the step, which is what makes the promise good. So the same
+sentence convicts the same picture, and what is left for `Barred` is a door the
+body really will not open — alive, with the setting off.
+
+**And the reading was already inconsistent inside one function.**
+`route_shown`'s hover branch *resolves* its destination through
+`walk_destination`, which reads `App::walking_doors` — the walk's setting
+included — and then planned the route to that place under a different reading.
+
+**What was built.** `world::drawn_route_doors`, which delegates to
+`walking_doors`. The question keeps a name of its own because it used to have an
+answer of its own: reverted at the call site it would be one line in a HUD
+function nobody reads twice, and a function is something the argument can be
+written on and a test can ask for.
+
+**What this leaves behind.** `Steering::plan_for` calls `remember_refusal`, so
+the *hover* preview — the branch that plans toward whatever tile the cursor is
+over when there is no destination at all — writes into the refusal the HUD strip
+reads and `say_refusal` speaks. A tile nobody clicked on can set the sentence a
+player is told about the order they did give. It is the same shape as this
+finding and not the same bug, and nothing above moves it.
+
 **Done when.** One order has one answer, and a test asks the same click twice in
-the two readings and gets one verdict.
+the two readings and gets one verdict. — Both, in
+[`steer.rs`](../../../crates/client/app/src/steer.rs)'s
+`one_click_has_one_verdict_whether_it_is_walked_or_drawn`: the same destination
+behind a shut leaf, asked under the walk's rule and under the drawn route's, in
+the one state of the four they used to answer differently. Reverting
+`drawn_route_doors` fails all three of its assertions, and each is something the
+player sees — the sentence, the green line, and the red one.
 
 ## P3 — Planning off the thread that draws
 
@@ -339,3 +375,10 @@ about. ✅ Done: the flag changes with a fresh session line, and a replay reads
 the one in force for the episode. **P2 next**, because it is a decision more
 than a change and the answer is cheap once taken. **P3 last**, deliberately: it is the largest, none of the
 others is blocked on it, and it is the one whose number no repair above moves.
+
+**P2 was a decision and then two lines.** ✅ Done: the drawn route is planned the
+way the walked one is, and `Barred` is left for a door the body will not open.
+It moves no number P3 is about — the three plans a step are three *frames*, not
+a walk and a preview racing inside one, since the per-frame cache was already
+shared. What it changes is that the plan they share is now an answer to the
+question both of them are asking.

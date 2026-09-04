@@ -397,6 +397,29 @@ click therefore has two standing answers a third of a second apart, and the
 player is shown whichever the last one was. Three plans a step at 110–124 ms
 each is also the true figure behind finding 24's "two or three".
 
+**Repaired: the picture is planned the way the walk is.** The third caller is
+the HUD's own route, and it was passing `auto_open_doors = false` whatever the
+setting said — on the argument that the setting is an intention to open a leaf
+and a picture of a walk is no place for intentions. The ghost passed in the
+same call is what refutes it: a dead body is read `AllOpen` there precisely
+because its *step* goes through the leaf, and a route drawn stopped at that
+leaf would be a picture of a refusal that is not going to happen. An auto-door
+body's step goes through the leaf too — `App::walk` sends the use before the
+step, which is what makes the promise good — so the same sentence convicts the
+same picture. `world::drawn_route_doors` is the rule now, it delegates to
+`walking_doors`, and what is left for `Barred` is a door the body really will
+not open: alive, with the setting off. Which answer the player got had been
+decided by whether a step fell due in the frame, since the walk and its preview
+share one plan per frame (`Steering::plan_for`) and whichever asked first set
+the reading for both; with one reading that cache is honest rather than
+first-come.
+
+Not repaired, and adjacent: `Steering::plan_for` calls `remember_refusal`, so
+the hover preview — which plans toward whatever tile the cursor is over when
+there is no destination at all — writes into the refusal the HUD strip reads and
+`say_refusal` speaks. A tile nobody clicked on can therefore set the sentence a
+player is shown about the order they did give.
+
 **27. The journal's `coarse` flag is a startup snapshot, and a login bakes.**
 `client/app` writes the session line's `coarse: coarse.is_some()` when the
 window opens; the graph a world arriving asks for is baked after that. So this

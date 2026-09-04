@@ -790,18 +790,19 @@ impl App {
         // client is not going to take.
         let ground = steer::Readings {
             // The route the HUD draws is the one a step would take, so it reads
-            // the doors as they stand whatever the auto-door setting is — the
-            // setting is an intention to open one, and a picture of a walk is
-            // not the place for intentions.
+            // the doors the way a step reads them — the body's own state, the
+            // auto-door setting included. This end plans through a shut leaf
+            // only where it is going to open one (`App::walk` sends the use
+            // before the step), so a route drawn stopped at that leaf would be a
+            // picture of a refusal that is not going to happen, which is
+            // `docs/render/design_frame_assembly.md`'s whole complaint and
+            // `docs/world/README.md`'s finding 26 in the field.
             //
-            // Being dead is not an intention, which is why it is passed and the
-            // setting is not: a ghost's route runs through the shut leaf because
-            // its step does (`crate::world::walking_doors`). Drawing that route
-            // stopped at the door would be a picture of a refusal that is not
-            // going to happen — `docs/render/design_frame_assembly.md`'s whole complaint.
+            // The question has its own name because it used to have its own
+            // answer; the argument is on `crate::world::drawn_route_doors`.
             live:   footing(
                 &self.resources,
-                crate::world::walking_doors(self.world.dead(), false),
+                crate::world::drawn_route_doors(self.world.dead(), self.auto_open_doors),
             )
             .among(openshard_movement::Bodies::standing(&self.world.bodies)),
             guide:  guide(&self.resources),

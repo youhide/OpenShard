@@ -3021,6 +3021,78 @@ mod tests {
         );
     }
 
+    /// **One click, one verdict** — `docs/world/README.md`'s finding 26.
+    ///
+    /// The episode it was read off ran three plans a step in a rhythm of two
+    /// and one: two under the reading a walking body opens doors with, routing
+    /// onto a castle roof, and a third under the doors as they stand, whose
+    /// live join reached no node of the coarse graph and which therefore called
+    /// the same click `Barred` with a route stopping at the castle door. Both
+    /// halves of that were true of their own reading, and neither is a bug in
+    /// [`plan`]: the bug was that one order was asked two questions, because the
+    /// walk read the ground one way and the picture of it read the ground
+    /// another. Which answer the player got was then decided by whether a step
+    /// happened to fall due in the frame, since the two share one plan per frame
+    /// ([`Steering::plan_for`]).
+    ///
+    /// So the two rules are asked here, over the one destination a shut leaf
+    /// stands in the way of, in the one state of the four they used to answer
+    /// differently — a living body whose auto-door is on — and they have to
+    /// answer with the same plan. `crate::world::drawn_route_doors` is the
+    /// answer under test; reverting it to the doors as they stand fails all
+    /// three of the assertions below, and each of the three is something the
+    /// player sees: the sentence, the green line, and the red one.
+    #[test]
+    fn one_click_has_one_verdict_whether_it_is_walked_or_drawn() {
+        let doorwall = doorwall();
+        let shut = over(&doorwall);
+        // The guide is the bare map in the client and a map has no shut leaves
+        // in it, so it is the same for both and is not what is under test.
+        let guide = shut.reading(Doors::AllOpen);
+        let verdict = |doors| {
+            plan(
+                Readings {
+                    live: shut.reading(doors),
+                    guide,
+                    coarse: None,
+                },
+                here(),
+                BEYOND,
+                None,
+            )
+            .expect("the map itself has a doorway")
+        };
+        let walked = verdict(crate::world::walking_doors(false, true));
+        let drawn = verdict(crate::world::drawn_route_doors(false, true));
+
+        assert_eq!(
+            walked.refusal, None,
+            "the premise: a body that opens the leaf on its way is not barred by it",
+        );
+        assert_eq!(
+            drawn.refusal, walked.refusal,
+            "one click, two standing answers: the picture called it barred and the walk did not",
+        );
+        assert_eq!(
+            drawn.open, walked.open,
+            "the green line is the route being walked, not a second opinion about it",
+        );
+        assert_eq!(
+            drawn.barred, walked.barred,
+            "and there is no far side of a door the body walks through",
+        );
+
+        // The refusal is not thrown away with the disagreement. With the
+        // setting off the body really will stop at the leaf, and both readings
+        // still say so — which is what `Barred` is left for.
+        let shut_out = verdict(crate::world::drawn_route_doors(false, false));
+        assert_eq!(
+            shut_out.refusal,
+            Some(Refusal::Barred),
+            "a door the body will not open is still a door in the way",
+        );
+    }
+
     /// A destination nothing can walk to is a *reason*, and the reason is not
     /// the same as the one a budget gives.
     ///
