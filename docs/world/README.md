@@ -311,14 +311,34 @@ The three below came out of the **second session the journal recorded**
 `(1342, 1893, 88)` — the same castle's roof — from `(1350, 1890, 0)`, ten tiles
 away, 122 plans and the window closed before the body arrived):
 
-**25. A splice can double back without ever standing anywhere twice.** The route
-onto the roof begins by walking *south, away from the castle*, for thirty steps
-that lead nowhere: `(1350, 1890)` → south along the east wall to
-`(1350, 1900)` → south west to `(1344, 1919)`, nineteen tiles past the castle's
-south wall → back north east to `(1351, 1910)` → north west to the door at
-`(1341, 1900)`, which is nineteen steps from where it started. The return leg
-runs one tile beside the outward leg the whole way, so no place is stood on
-twice and `without_loops` (finding 23) cannot see it.
+**25. An open border is crossed at its corners and nowhere else, so a body
+walks away from the house it was sent to.** The route onto the roof begins by
+walking *south, away from the castle*: `(1350, 1890)` → south along the east
+wall to `(1350, 1900)` → south west to `(1344, 1919)`, nineteen tiles past the
+castle's south wall → back north east and north west to the door at
+`(1341, 1900)`, which was nineteen steps from where it started. Nothing here is
+a splice doubling back — finding 23's loop cut has nothing to take out, and both
+legs are optimal on their own. The corridor is *one node*, and it is that one:
+
+```text
+start  (1350, 1890, 0)  region 13258 [1344..1375] x [1888..1919]
+roof   (1342, 1893, 88) region 13257 [1312..1343] x [1888..1919]
+corridor: 35228 (1344, 1919, 0)   source 29 + target 94 = 123 steps
+```
+
+The start's region has **five nodes and all of them are corners** —
+`(1344, 1888)`, `(1375, 1888)`, `(1344, 1919)`, `(1345, 1919)`,
+`(1375, 1919)` — because `add_portal` gives a run of `WIDE_PORTAL` (6) or more
+crossings exactly two representatives, `run[0]` and `run[len - 1]`. A 32-tile
+border of open ground is one such run, so the only places to cross it are its
+two ends, and a body in the middle of a region pays up to sixteen tiles to reach
+one. That is structural and has nothing to do with any house.
+
+What the castle adds is that it **stands on the near pair**: the roof's live
+join reaches no cost at all for `(1344, 1888)` or for its partner
+`(1343, 1888)` across the border — the castle covers both — so the north
+crossing does not exist for this query and the south corner is the only one
+left. Hence 29 steps out to it and 94 back through the door.
 
 Measured on the same scene the castle tests build — the 2196-component design
 over facet 0, `Doors::AllOpen` live and the bare map as the guide:
@@ -328,12 +348,14 @@ over facet 0, `Doors::AllOpen` live and the bare map as the guide:
 | `(1350, 1890, 0)` → roof `(1342, 1893, 88)` | 123 steps, 48.8 ms | 94 steps, 7,037 nodes, 16.6 ms |
 | `(1350, 1890, 0)` → door `(1341, 1900, 7)` | 48 steps, 57.7 ms | 19 steps, 63 nodes, 0.1 ms |
 
-The detour is the house's and not the graph's: with no castle placed, the
-corridor from that same tile to `(1341, 1900, 0)` is 19 steps against the exact
-10 and goes nowhere south. So the pieces are being spliced around a building the
-graph was baked without, and finding 24's crossover argument gets a second
-reading — here the hierarchy costs three times the exact search's milliseconds
-*and* returns a route 31% longer.
+Two repairs, and they are independent. **Intermediate representatives on a wide
+run** bound the detour by the spacing chosen instead of by half a region, at the
+price of more nodes on open ground — the number wants measuring against the bake
+and against `abstract_path`, not picking. And **a near destination whose bounded
+search stopped on budget should buy a bigger search rather than a corridor**:
+`COARSE_MIN_DISTANCE` only short-circuits when that search *exhausted*, and here
+the exact answer is three times cheaper in milliseconds and 31% shorter than the
+hierarchy standing in for it — finding 24's crossover, met from the other side.
 
 **26. Every third plan answers a different question and calls the click
 barred.** The plans of that episode run in a fixed rhythm of two and one: two
