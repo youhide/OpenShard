@@ -82,6 +82,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "the same `--facet` argument on the span step rule's own oracle, span_index's shape and beside it",
     ),
     (
+        "crates/common/pathlog/src/record.rs",
+        1,
+        "the route journal's session line, which is a file format rather than a field: a replay reads back sessions written by older clients, so the number on disk is the wire's own and is widened to Facet by whoever acts on it",
+    ),
+    (
         "crates/client/render/examples/shard/mod.rs",
         1,
         "a standalone diagnostic tool reading a SQL column directly, the record.rs shape, in a crate with no protocol dependency",
