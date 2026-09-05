@@ -1335,6 +1335,57 @@ impl App {
         }
     }
 
+    /// Somebody in view moved: drop what they are standing on, and only that.
+    ///
+    /// **The invalidation this replaces was total.** Any mobile that moved
+    /// anywhere in view voided the plan cache, the drawn route and the steps
+    /// left of the order — on a packet that arrives several times a second in a
+    /// town. It was affordable while a search ran inline, because the replan it
+    /// forced answered in the same call; against a worker (`planner.rs`) each
+    /// one is a body that stops and waits a frame or two for an answer, and a
+    /// drawn line that starts again from nothing. That is
+    /// `docs/world/README.md`'s finding 30.
+    ///
+    /// What is asked instead is the question the old code assumed the answer to:
+    /// is anybody now standing on what this end is holding. Both things it holds
+    /// are asked, because they can differ — the drawn route is a picture of an
+    /// order the walk may already have replanned, and a hover preview is a route
+    /// nobody is walking at all.
+    ///
+    /// A mobile that has moved *out* of the way is not a reason to do anything.
+    /// The route round where they stood is longer than it now needs to be and is
+    /// still a route; replanning for every bystander who wanders off is the same
+    /// defect with the sign flipped.
+    fn mobiles_moved_over_the_route(&mut self) {
+        let in_the_way = {
+            // The crowd as it now stands, sorted by `(x, y)` — `Bodies`
+            // requires that and `clutter::project` above is what guarantees it.
+            let crowd = openshard_movement::Bodies::standing(&self.world.bodies);
+            let over_the_drawn_line = self
+                .route_cache
+                .as_ref()
+                .and_then(|cached| cached.route.as_ref())
+                .is_some_and(|route| route.open.iter().any(|&at| crowd.blocks(at)));
+            // The walk's own remaining steps, replayed against the ground as it
+            // stands with that crowd in it — the reading a step is decided by,
+            // so that "somebody is there" and "that is a wall now" are one
+            // answer rather than two policies.
+            let ground = crate::world::readings(&self.resources, &self.world.bodies, self.walking_doors());
+            let origin = self.world.motion.route_origin();
+            over_the_drawn_line || !self.steer.route_still_walkable(&ground.live, origin)
+        };
+        if !in_the_way {
+            return;
+        }
+        // The route, the plan behind it and the picture of it, together: the
+        // sight line goes with them because `SightCache`'s own contract is that
+        // it is cleared wherever the route cache is, both being readings of one
+        // ground.
+        self.steer.clear_route();
+        self.route_cache = None;
+        self.sight_cache = None;
+    }
+
     /// Redraw from what the server has shown us.
     ///
     /// A projection of the whole [`WorldView`], rebuilt each time rather than
@@ -1361,23 +1412,20 @@ impl App {
                         .is_none_or(|mobile| mobile.position != old_mobile.position)
                 })
         });
-        if items_changed || mobile_obstacles_changed {
+        if items_changed {
             self.steer.clear_plan_cache();
             self.route_cache = None;
             // A door that has just opened or shut is the live half of a look,
             // and the only half of it this client keeps.
             self.sight_cache = None;
-        }
-        if items_changed {
             self.terrain_cache = None;
             self.occluder_cache = None;
         }
-        // NPCs are routing obstacles in the client. Discard any remainder of
-        // an order made before the latest mobile snapshot so it replans before
-        // sending the next step.
-        if mobile_obstacles_changed {
-            self.steer.clear_route();
-        }
+        // A mobile that moved is *not* handled here, and that is the repair
+        // rather than an omission: what it invalidates depends on where it
+        // moved to, and this end does not know the crowd's new places until
+        // `clutter::project` below has taken them from the view being folded.
+        // See `mobiles_moved_over_the_route`.
         // Movement has already been applied through `PlayerMotion` at the
         // mailbox boundary.  Rebuilding world presentation must not be a
         // second writer of either confirmed or predicted state.
@@ -1617,6 +1665,12 @@ impl App {
             &self.world.presentation.items,
             &self.resources.tiledata,
         );
+        // And now that the crowd's new places are in hand, what they are in the
+        // way of — which is the half of this function's invalidation that could
+        // not be decided before the projection above.
+        if mobile_obstacles_changed {
+            self.mobiles_moved_over_the_route();
+        }
         // The cutaway has already followed each locally valid prediction. An
         // acknowledgement repeats that answer; a correction is the one case
         // that has to replace it unconditionally.

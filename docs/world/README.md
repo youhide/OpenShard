@@ -571,6 +571,75 @@ done**; the order there is argued, and what each one left behind is written unde
 it. Finding 22 stays where it is, because what it waits on is the client's memory
 of what it has been shown rather than anything about a search.
 
+**30. A worker answers a question the client has already thrown away.** Reported
+from play after P3 landed: the walk is jerky and the drawn route appears every
+other frame. Read out of the code rather than measured, so each half names where
+it is:
+
+- **Any mobile that steps anywhere in view destroys the whole route and both
+  caches.** [`net_command.rs`](../../crates/client/app/src/net_command.rs)'s
+  `entered` runs on every mutation packet (its `apply_packet` caller) and
+  compares every mobile's position; a single one that moved calls
+  `clear_plan_cache`, nulls `route_cache` and — for the route itself —
+  `clear_route`. In a town that is several times a second. It was affordable
+  while the search ran inline, because the replan it forced answered in the same
+  call; against a worker it is a replan that answers a frame or two later, every
+  time, and the body waits out `AWAITING_A_PLAN` for each. What it should
+  invalidate is a route a body now stands *on*, not any route while any mobile
+  moves.
+- **The HUD caches "not back yet" as if it were a verdict.**
+  [`picking_query.rs`](../../crates/client/app/src/picking_query.rs)'s
+  `route_shown` stores `RouteCache { route: None }` whatever the `None` meant, so
+  a pair whose answer was merely outstanding is remembered as a pair with no
+  route and is never asked again until the pair itself changes. That is exactly
+  the distinction `Steering::plan_from`'s own docs draw and honour — a pending
+  answer must not reach `remember_refusal` — and the HUD's cache does not draw
+  it. It is why the line blinks.
+- **A stale answer is discarded rather than trimmed.**
+  [`steer.rs`](../../crates/client/app/src/steer.rs)'s `ask_elsewhere` compares
+  the answer's pair against the pair now being asked and drops it on a mismatch,
+  then asks again. The body walking one tile on is the ordinary mismatch, and the
+  route it discards is the route it is about to ask for with a one-step prefix
+  removed — which `route_shown`'s own cache already knows how to do. With one
+  question outstanding at a time and the invalidation above, the worker spends a
+  large share of its milliseconds on answers nobody keeps.
+
+None of this is the frame thread planning again — that is asserted against, and
+holds.
+
+**All three are repaired**, each where it was:
+
+- `net_command`'s `mobiles_moved_over_the_route` asks whether anybody now stands
+  on what this end is holding — the drawn line by its points, the walk's own
+  remaining steps by replaying them against the ground as it stands, crowd
+  included — and drops the route only then. A mobile that moved *out* of the way
+  is deliberately not a reason to replan: the route round where they stood is
+  longer than it needs to be and is still a route.
+- `route_shown` remembers nothing for an answer that has not arrived.
+  `Steering::awaiting` is what tells the two `None`s apart, and it existed
+  already — the walk has read it since P3 to know a body waiting for a plan from
+  a body with nowhere to walk.
+- `ask_elsewhere` trims an answer whose start the body has stepped off
+  (`walked_on`) instead of discarding it. What makes the trim sound is the third
+  thing this added: an answer planned over ground that has since moved is now
+  journalled and dropped rather than walked (`Steering::outdated`) — a hazard the
+  exact-pair case had too, and could not have had before there was a thread to
+  hold a plan on.
+
+The tests are `steer.rs`'s `an_answer_one_step_late_is_trimmed_rather_than_asked_again`
+(the oracle is the number of questions asked, since both behaviours end with a
+plan in hand), `a_plan_that_has_not_arrived_says_so_rather_than_that_there_is_no_route`,
+and `a_body_beside_the_route_leaves_it_alone_and_one_standing_on_it_does_not`.
+
+What is still not read is a frame-time trace from a running client: `jank.rs`'s
+`ui_route` pass is wired and nobody has walked a session with it open, which is
+the reading P3 already named as the natural next one. **And what none of this
+builds is a planner that keeps its answer between questions.** Every plan here is
+still a search from nothing; the shape that would not be is a worker holding the
+destination and repairing its route as the world moves under it (D\* Lite over
+the same A\*), which is worth deciding on the trace above rather than on this
+repair.
+
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change
 the geometry, and not before) and **which validation blocks a publish**

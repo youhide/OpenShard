@@ -261,6 +261,16 @@ impl Planner {
         }
     }
 
+    /// Whether a question is out with the worker right now.
+    ///
+    /// What it is for is the *ground* the outstanding question was asked over:
+    /// whoever invalidates that ground has to know whether an answer about it is
+    /// still coming, so that it can be journalled and dropped rather than walked
+    /// — see `Steering::clear_plan_cache`.
+    pub(crate) const fn working(&self) -> bool {
+        self.outstanding.is_some()
+    }
+
     /// Whatever the worker has finished, without waiting for it.
     pub(crate) fn collect(&mut self) -> Option<Answer> {
         match self.answered.try_recv() {

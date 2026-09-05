@@ -819,6 +819,20 @@ pub struct Steering {
     /// [`STUCK_STEPS`] of them; waiting for a plan is measured in frames and is
     /// no kind of stall, because nothing in the world has refused anything.
     awaiting:      bool,
+    /// Whether the answer being worked out is about ground that has since moved.
+    ///
+    /// **A question outstanding is a plan held on another thread**, and the rule
+    /// for a held plan is the one [`Steering::clear_plan_cache`] enforces on the
+    /// one held here: ground that changed under it makes it a route through a
+    /// blocker nobody has looked at. It could not be enforced on the outstanding
+    /// one before there was a thread to hold it, so it was not — and an answer
+    /// planned over the crate that has just been dropped in the doorway was
+    /// walked as if the doorway were clear.
+    ///
+    /// Set while a question is out and read once, when its answer arrives: the
+    /// answer is still written to the journal, because the search really did run
+    /// and a replay that could not see it would be missing the time it took.
+    outdated:      bool,
     /// How many searches this steering has run **on the thread that asked**.
     ///
     /// Test-only, and on the *caller* rather than on the ground: "did a search
@@ -833,6 +847,15 @@ pub struct Steering {
     /// `the_walk_path_runs_no_search_on_the_thread_that_asked`.
     #[cfg(test)]
     searched_here: std::cell::Cell<u32>,
+    /// How many questions this steering has *sent* to a worker.
+    ///
+    /// Test-only, and the oracle for one thing: an answer that came back about
+    /// a tile the body has already stepped off is trimmed and used rather than
+    /// dropped and asked for all over again. Both of those end with a plan in
+    /// hand and only the count tells them apart — see
+    /// `an_answer_one_step_late_is_trimmed_rather_than_asked_again`.
+    #[cfg(test)]
+    asked_away:    std::cell::Cell<u32>,
     /// The arrows, and shift.
     keys:          Held,
     /// What a held right button (with no modifier) is asking for, recomputed
@@ -1096,8 +1119,15 @@ impl Steering {
     }
 
     /// Drop the plan that was made against an older terrain snapshot.
+    ///
+    /// **Including the one that is not here yet.** A question out with the
+    /// worker was asked over the ground this call is saying has moved, so its
+    /// answer is a plan over a world that no longer exists — the same thing the
+    /// cached plan being dropped here is, one thread away. See
+    /// [`Steering::outdated`].
     pub(crate) fn clear_plan_cache(&mut self) {
         self.cached_plan = None;
+        self.outdated |= self.planner.as_ref().is_some_and(Planner::working);
     }
 
     /// Remember why a plan stopped short of what was asked for.
@@ -1150,6 +1180,52 @@ impl Steering {
     pub(crate) fn clear_route(&mut self) {
         self.route.clear();
         self.clear_plan_cache();
+    }
+
+    /// Whether every step left of the route still lands somewhere, read against
+    /// the ground as it stands *now* — the crowd in it included.
+    ///
+    /// **What asks, and why it is a question rather than an assumption.** A
+    /// mobile that moves is a mobile that may have stepped into this route, and
+    /// the client used to answer that by discarding the route whenever anybody
+    /// in view moved at all (`net_command`'s `entered`). That was affordable
+    /// while a replan answered in the same call; against a worker it is a body
+    /// that stops and waits for an answer several times a second in a busy town
+    /// — `docs/world/README.md`'s finding 30. So the question is asked properly
+    /// instead, and it is cheap: a replay of the directions already in hand.
+    ///
+    /// A body that has moved *out* of the way is deliberately not a reason to
+    /// replan. The route round where it stood is longer than it needs to be and
+    /// is still a route; re-asking for every bystander who wanders off is the
+    /// same defect wearing the opposite sign.
+    ///
+    /// `from` is where the body stands — the route's steps are directions and
+    /// mean nothing without it.
+    pub(crate) fn route_still_walkable(&self, footing: &Footing<'_>, from: Point) -> bool {
+        let mut at = from;
+        for &direction in &self.route {
+            // Refused rather than merely occupied, which is the same verdict
+            // for this caller: a footing that carries the crowd (and every one
+            // that decides a step does) answers "somebody is standing there"
+            // the same way it answers "that is a wall".
+            let Some(next) = step_allowed(footing, at, direction) else {
+                return false;
+            };
+            at = next;
+        }
+        true
+    }
+
+    /// Whether the answer to the last question asked is still being worked out
+    /// somewhere else.
+    ///
+    /// **What it is for is telling two `None`s apart.** A plan that came back
+    /// empty is a verdict — there is no route — and one that has not come back
+    /// is not an answer at all. A caller that remembers the second as the first
+    /// stops asking, and stays stopped: see `picking_query`'s `route_shown`,
+    /// which is where that cost a drawn route every other frame.
+    pub(crate) const fn awaiting(&self) -> bool {
+        self.awaiting
     }
 
     /// Start a new render frame. The movement step and the HUD may share one
@@ -1262,20 +1338,44 @@ impl Steering {
         if let Some(answer) = answer.as_ref() {
             self.wrote(answer.from, answer.goal, &answer.planned);
         }
-        // Stale answers fall through to a fresh question: the body walked on, or
-        // the destination moved, while this one was being worked out.
-        let mine = answer
-            .as_ref()
-            .is_some_and(|answer| answer.from == from && answer.goal == goal);
-        if mine {
-            return Asked::Answered(answer.expect("just checked").planned);
+        // Journalled above and dropped here: this one was planned over ground
+        // that has moved since the question left, and walking it is walking
+        // through whatever moved. See [`Steering::outdated`].
+        let answer = match std::mem::replace(&mut self.outdated, false) {
+            true => None,
+            false => answer,
+        };
+        if let Some(answer) = answer {
+            // The pair it was asked about, which is the answer outright.
+            if answer.from == from && answer.goal == goal {
+                return Asked::Answered(answer.planned);
+            }
+            // **The same order, from a tile further along it.** The ordinary
+            // mismatch while walking: the body took a step or two of the route
+            // it already had between the question and the answer, so what came
+            // back is this pair's route with a prefix the body has walked. Cut
+            // the prefix rather than throwing away the twenty-odd milliseconds
+            // that found it and asking the identical question again — which is
+            // the same trim `picking_query`'s route cache makes for the drawn
+            // line, and it is sound for the same reason: the ground it was
+            // planned over has not moved (the branch above is what that costs).
+            if answer.goal == goal {
+                if let Some(planned) = walked_on(answer.planned, from) {
+                    return Asked::Answered(planned);
+                }
+            }
         }
         let planner = self
             .planner
             .as_mut()
             .expect("the planner was here a statement ago");
         match planner.ask(question(shared, ground, from, goal)) {
-            Asking::Working | Asking::Busy => Asked::Waiting,
+            Asking::Working => {
+                #[cfg(test)]
+                self.asked_away.set(self.asked_away.get() + 1);
+                Asked::Waiting
+            }
+            Asking::Busy => Asked::Waiting,
             // Its thread is gone, so nothing is ever coming back and a caller
             // that waited would wait for ever. Let go of it and plan here, which
             // is what a client with no worker does.
@@ -2310,6 +2410,43 @@ struct Answered {
 
 /// Replay a direction list over the ground it was planned on. The returned
 /// points are immutable plan output, not a live query.
+/// What is left of a plan for a body that has already walked part of it.
+///
+/// **The repair for an answer thrown away for being one step late.** A plan
+/// asked for on another thread comes back tens of milliseconds later, and the
+/// ordinary thing to have happened in between is that the body took a step of
+/// the route it was already holding. That answer is not stale — it is this
+/// pair's route with a prefix already covered — and the only thing wrong with it
+/// is where it starts.
+///
+/// `None` is a plan that says nothing about where the body now stands: it left
+/// the route rather than walking along it, and the honest answer is to ask
+/// again. `None` also for a plan whose two halves are not the same length, which
+/// nothing produces today but which this cannot cut safely if anything ever
+/// does — the direction taken and the place it landed on have to be cut
+/// together.
+///
+/// The barred half and the refusal are untouched: both are about the far end of
+/// the route, and this cuts the near one.
+fn walked_on(planned: Planned, from: Point) -> Option<Planned> {
+    let Planned { plan, said } = planned;
+    let plan = plan?;
+    if plan.open.len() != plan.open_points.len() {
+        return None;
+    }
+    let walked = plan.open_points.iter().position(|at| *at == from)?;
+    Some(Planned {
+        plan: Some(Plan {
+            open:          plan.open[walked + 1..].to_vec(),
+            open_points:   plan.open_points[walked + 1..].to_vec(),
+            barred:        plan.barred,
+            barred_points: plan.barred_points,
+            refusal:       plan.refusal,
+        }),
+        said,
+    })
+}
+
 fn replay(footing: &Footing<'_>, from: Point, directions: &[Direction]) -> Vec<Point> {
     let mut at = from;
     directions
@@ -3853,6 +3990,138 @@ mod tests {
             steering.searched_here.get(),
             0,
             "and none of that ran a search on this thread"
+        );
+    }
+
+    /// An answer about the tile the body has just left is the route being asked
+    /// for, minus a step already taken.
+    ///
+    /// **The ordinary case while walking, and it used to be thrown away.** A
+    /// plan is twenty-odd milliseconds and a body steps every two hundred, so
+    /// the pair moves under a question often enough that discarding on any
+    /// mismatch spends a large share of the worker on answers nobody keeps —
+    /// `docs/world/README.md`'s finding 30, reported from play as a walk that
+    /// stutters. Both behaviours end with a plan in hand; what tells them apart
+    /// is how many questions it took to get one.
+    #[test]
+    fn an_answer_one_step_late_is_trimmed_rather_than_asked_again() {
+        let tiles = Arc::new(TileData::empty());
+        let facet = facet_with_a_wall(&tiles);
+        let goal = Point::new(104, 100, 0);
+        let reference =
+            routed(over_facet(&facet, &tiles), here(), goal).expect("there is a way round one tile");
+        let next = *reference
+            .open_points
+            .first()
+            .expect("a route of at least one step");
+
+        let mut steering = Steering::default();
+        steering.plan_elsewhere(Planner::start().expect("a thread to plan on"));
+        assert!(
+            steering
+                .plan_for(over_facet(&facet, &tiles), here(), goal)
+                .is_none(),
+            "the answer cannot already be here: the question has only just been asked"
+        );
+
+        // The body walks that first step while the answer is being worked out,
+        // so every question from here on is about `next` — and the one already
+        // outstanding is not.
+        let walked = wait_for_a_plan(&mut steering, &facet, &tiles, next, goal);
+
+        assert_eq!(
+            steering.asked_away.get(),
+            1,
+            "the answer to the only question asked was dropped for being one step late, and the \
+             identical search was paid for twice"
+        );
+        assert_eq!(
+            walked.open.as_slice(),
+            &reference.open[1..],
+            "the trimmed route is the one that was found, minus the step already taken"
+        );
+        assert_eq!(walked.open_points.as_slice(), &reference.open_points[1..]);
+        assert_eq!(
+            steering.searched_here.get(),
+            0,
+            "and none of that ran a search on this thread"
+        );
+    }
+
+    /// A question still being answered is not the answer "there is no route".
+    ///
+    /// The two are one `None` to a caller, which is deliberate — both mean
+    /// nothing to walk or draw this beat — and the difference is what
+    /// [`Steering::awaiting`] is for. `picking_query`'s route cache is the
+    /// reader that needs it: remembering a pending `None` as a verdict is a pair
+    /// it never asks about again, which is the drawn route appearing every other
+    /// frame in finding 30.
+    #[test]
+    fn a_plan_that_has_not_arrived_says_so_rather_than_that_there_is_no_route() {
+        let tiles = Arc::new(TileData::empty());
+        let facet = facet_with_a_wall(&tiles);
+        let goal = Point::new(104, 100, 0);
+
+        let mut steering = Steering::default();
+        steering.plan_elsewhere(Planner::start().expect("a thread to plan on"));
+        assert!(
+            steering
+                .plan_for(over_facet(&facet, &tiles), here(), goal)
+                .is_none()
+        );
+        assert!(
+            steering.awaiting(),
+            "a question outstanding was indistinguishable from a destination with no way to it"
+        );
+
+        let plan = wait_for_a_plan(&mut steering, &facet, &tiles, here(), goal);
+        assert!(!plan.open.is_empty(), "the premise: there is a route");
+        assert!(
+            !steering.awaiting(),
+            "the answer is in and the question is still reported as outstanding"
+        );
+    }
+
+    /// Somebody stepping *beside* the route leaves it alone; somebody stepping
+    /// *onto* it does not.
+    ///
+    /// The client used to void the route, the plan behind it and the picture of
+    /// it whenever any mobile in view moved at all — a packet that arrives
+    /// several times a second in a town, and each one a replan the body then
+    /// stands still waiting for now that a search runs elsewhere. This is the
+    /// question `net_command`'s `mobiles_moved_over_the_route` asks instead.
+    #[test]
+    fn a_body_beside_the_route_leaves_it_alone_and_one_standing_on_it_does_not() {
+        let tiles = Arc::new(TileData::empty());
+        let facet = Ground::new(None, &tiles);
+        let goal = Point::new(105, 100, 0);
+        let start = Instant::now();
+
+        let mut steering = Steering::default();
+        let facing = steering
+            .go_to(goal, here(), start, Direction::East, over_facet(&facet, &tiles))
+            .expect("a click on open ground sets off at once");
+        // Where the body stands once that first step lands, which is what the
+        // rest of the route is measured from.
+        let standing =
+            step_from(here(), facing.direction).expect("a step this end asked for lands somewhere");
+
+        let ground = Footing::of(&facet, &tiles, Doors::AsTheyStand);
+        assert!(
+            steering.route_still_walkable(&ground, standing),
+            "the premise: an untouched route over open ground is walkable"
+        );
+
+        let beside = [Point::new(103, 101, 0)];
+        assert!(
+            steering.route_still_walkable(&ground.among(Bodies::standing(&beside)), standing),
+            "a bystander one tile off the route voided it, which is a replan for every passer-by"
+        );
+
+        let across = [Point::new(103, 100, 0)];
+        assert!(
+            !steering.route_still_walkable(&ground.among(Bodies::standing(&across)), standing),
+            "somebody stepped into the route and the body would have walked into them"
         );
     }
 

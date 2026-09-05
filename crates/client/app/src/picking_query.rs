@@ -802,7 +802,20 @@ impl App {
             &self.world.bodies,
             crate::world::drawn_route_doors(self.world.dead(), self.auto_open_doors),
         );
-        let route = self.steer.plan_for(ground, from, goal).map(|plan| {
+        let planned = self.steer.plan_for(ground, from, goal);
+        // **A question still being answered is not an answer.** `plan_for` says
+        // `None` for both, and only the steering knows which — see
+        // `Steering::awaiting`. Written into the cache below, the pending one
+        // becomes "there is no route to that place", which this function then
+        // hands back on every later frame without ever asking again: the pair is
+        // unchanged, so the cache keeps hitting, and the answer that did arrive
+        // is never drawn. That is `docs/world/README.md`'s finding 30 and the
+        // reason the line blinked. Nothing is remembered for it — the next frame
+        // asks again, and the frame the answer lands on draws it.
+        if planned.is_none() && self.steer.awaiting() {
+            return None;
+        }
+        let route = planned.map(|plan| {
             // The body's own tile leads the open half, so a route of one step is a
             // line and not a dot. The barred half carries on from wherever the open
             // one stopped — the body's tile when nothing at all is walkable, which
