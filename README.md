@@ -126,6 +126,33 @@ browser stays a *constraint on the design* rather than a promise about a build,
 and nobody should read the WebGL2 discipline above as "it runs in a browser
 today". It does not.
 
+### Past the protocol, by extension
+
+**We have gone a little past what the UO protocol says, and it should be said
+plainly.** The shard streams *its own* map and the statics standing on it, opens
+a craft catalogue without a tool in hand, searches a house's inventory, reports
+the stages of a combat action, takes a turn as its own request, and edits the
+ground while it runs. The reference protocol has a packet for none of that.
+
+**All of it is one mechanism**: `0xBF` subcommands at or above `0xE000` —
+twenty-five of them today, and no private packet *id* anywhere. The range is the
+whole argument. Every subcommand a shipped client speaks is at or below `0x2B`
+and ClassicUO's own private one is `0xBEEF`, so `0xE000` is out of reach of both;
+a stock client reads `0xBF`'s length out of the envelope and **skips a subcommand
+it does not know**, where a private id would desynchronise its stream for good.
+Beyond that, only a client that asked is answered — a stock client never sends
+`ChunkRequest`, so nothing but two short notices ever reaches one, and it drops
+those.
+
+**What it costs, stated as plainly:** a stock client draws the world on its own
+disk. The shard still judges every step against *its* map, so where the two
+disagree the stock client is simply refused a step it thought was fine; an
+operator's `.setland` never reaches its screen, and a facet that never came out
+of an install has nothing there for it to draw at all. Ours sees the shard's
+world. That is the line, and it is drawn where a client that ignores an extension
+is a client with less in it — never one that breaks.
+→ [`design_chunks_to_the_client.md`](docs/world/design_chunks_to_the_client.md)
+
 ## Design
 
 - **Everything is an entity.** No inheritance trees. Players, NPCs, items, houses
