@@ -1,11 +1,11 @@
 (
-    tab: tile,
+    tab: admin,
     open: true,
     panel: Some((
-        x: 0.0,
-        y: 25.28125,
-        width: 118.5,
-        height: 34.6875,
+        x: 400.59375,
+        y: 62.34375,
+        width: 601.25,
+        height: 141.6875,
     )),
     zoom: 1.7,
     window_scale: 1.7,
