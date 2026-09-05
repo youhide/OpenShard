@@ -300,7 +300,7 @@ the one state of the four they used to answer differently. Reverting
 `drawn_route_doors` fails all three of its assertions, and each is something the
 player sees — the sentence, the green line, and the red one.
 
-## P3 — Planning off the thread that draws
+## P3 — Planning off the thread that draws — ✅ done
 
 **What is wrong.** Finding 28. Three plans a step at tens of milliseconds each,
 on the frame thread, for as long as anybody is moving. `without_folds` does not
@@ -395,9 +395,72 @@ plus a mirror to keep in step.
   read-only and the live half copied, there is nothing left for a lock to
   protect.
 
+### What was built
+
+**A worker, and a facet whose two layers are held as the two things they are.**
+
+- `common/movement`'s `Ground` used to hold an `openshard_map::World` (the base
+  *and* the live layer) with the span bake beside it — which grouped the two
+  layers that move apart and split the two that cannot. The pair the type exists
+  to guard is now a type: `Bedrock` is the base and the bake over it, `Ground` is
+  that behind an `Arc` with the live layer owned outright, and `Ground::share`
+  carries the `Arc` argument in the one place a reader will look for it. No
+  caller changed.
+- `client/app/src/planner.rs` is the thread. It is given a `Question` — the
+  shared halves and copies of the two that move — rebuilds a real `Ground` from
+  them and calls the same `steer::plan` the frame thread used to.
+- `Steering` holds the worker where it holds the journal, for the same reason:
+  it is the thing that runs a search. `plan()` no longer writes to the journal
+  either — it hands back the line and the journal's owner writes it, which is
+  what lets the search run on a thread that does not own a file.
+- `world::readings` is now the one place a `Readings` is built. That was P2's
+  own backlog note — four hand-built copies are why one of them could differ —
+  and a fourth field to forget is what finally made it worth writing.
+
+**Two things the frame thread owes the worker, and both are named at their
+seam.** `App::ground_moved` settles the planner before the map, the bake or the
+coarse graph are taken back exclusively; the writers panic on a share rather
+than quietly copying a hundred and forty megabytes, so a caller who forgets
+finds out. And **a body waiting for an answer is not a body walking on the
+spot**: it looks again next frame rather than next walking beat, and does not
+count toward the patience that ends an order. Sharing that branch with "there is
+nowhere to walk" cost 400 ms between a click and the character — the exact wait
+`steer.rs`'s queue rule exists to prevent — and abandoned the order four frames
+later.
+
 **Done when.** A decision is written down with the measurement behind it, and
 the walk path's per-step planning is off the frame thread with the frame time to
-show for it. — The decision and its measurement are above.
+show for it. — The decision and its measurement are above. The second half is
+met on the count and stated below on the time:
+
+- `steer.rs`'s `the_walk_path_runs_no_search_on_the_thread_that_asked` walks a
+  destination — the click, every beat of the walk, and the picture drawn beside
+  it — and asserts the asking thread ran **no search at all**. Take the worker
+  away and it is seven. A count and not a duration on purpose: a millisecond is
+  a property of the host and this is a property of the code.
+- What one of those seven costs is the `--handover` table above, on ground with
+  a real graph over it: **23.5 ms for the plan, 0.004 ms for the question that
+  replaces it on the frame.**
+- Beside it, `a_route_planned_on_another_thread_is_the_one_this_thread_would_have_found`
+  (the same order, the same route, whichever thread found it — the thing a
+  second policy about one question would break),
+  `settling_the_planner_gives_the_ground_back_to_be_written`, and
+  `a_click_waiting_on_another_thread_looks_again_next_frame_not_next_beat`.
+
+**What is not measured, and what would measure it.** Nobody has taken an
+end-to-end frame-time reading from a running client, before or after. The
+instrument exists and is already wired — `jank.rs`'s per-pass CPU log has a
+`ui_route` entry, which is the HUD's own route pass and therefore the line the
+picture's plan used to land on — but a before-and-after wants a session walked
+the same way twice, and this change is asserted on the count instead. That
+reading is the natural next one and it is cheap; what it would add is the
+context of the whole frame rather than the line item that moved.
+
+**What this leaves behind.** `openshard_map::world::World` has one user left in
+the whole workspace (an e2e chunk test): the regrouping above took the movement
+crate off it. It is public API rather than dead code, and whether it should stay
+is a question for whoever next opens that crate, not something to settle from
+here.
 
 ## P4 — The journal says `coarse: false` about a session that had one — ✅ done
 
@@ -459,3 +522,16 @@ It moves no number P3 is about — the three plans a step are three *frames*, no
 a walk and a preview racing inside one, since the per-frame cache was already
 shared. What it changes is that the plan they share is now an answer to the
 question both of them are asking.
+
+**P3 was a measurement and then a thread.** ✅ Done, and the measurement is what
+decided the shape: the plan named a cut of the ground per query as the cheap
+option, and the reading said the cut costs four times what copying the whole
+thing does. So the guide is shared, the live half is copied, and the frame
+thread runs no search at all on the walk path.
+
+All four are done. What the track leaves open is written where it belongs:
+finding 22's flickering destination stays where it was measured (it waits on the
+client's memory of what it has been shown, not on anything about a search), the
+hover preview still writes into the refusal a player is told about the order they
+*did* give (P2), and band 32's 13% detour on open ground is a shape nobody has
+looked at (P1).

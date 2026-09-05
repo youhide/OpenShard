@@ -25,14 +25,18 @@ from terrain — the span layer, the statics run, the coarse navigation graph �
 are carried over the chunks a publish named instead of being rebuilt or dropped.
 
 **The map is a matryoshka: ground, statics, and the live layer over them.** One
-type, held by both ends, and the invariant that makes it one type rather than
-three fields:
+type both ends hold (`movement`'s `Ground`), and the invariant that makes it one
+type rather than three fields:
 
 > **What may be baked is exactly what is below the live layer.** A navigation
 > graph, a span grid, a building flood, a minimap raster — every one of them is
 > derived from the ground and the statics, and none of them may contain a door, a
 > crate, a moored deck or a house. A reader takes the whole map; a bake takes a
 > revision of the two layers under the live one.
+
+That line is now the shape of the value as well as a rule about it: what is below
+the live layer is a `Bedrock`, and it is the half a client can hand to a thread
+that plans while the thread that draws goes on reading it.
 
 Which layer a new thing goes in is one question — *must a bake see it?* — and
 every answer taken so far is a row in [`design_layers.md`](design_layers.md).
@@ -66,7 +70,7 @@ every answer taken so far is a row in [`design_layers.md`](design_layers.md).
 | Interiors: the building index, the floor a person is on, a sealed room as a black area | 🟡 in the tree, unrecorded | `Buildings::bake`, `InteriorFrame` and `FloorView` exist in `client/render`; **the document carries no status marks at all**, and R3 (walls at knee height) has nothing in the tree | [`design_interiors.md`](design_interiors.md) |
 | The map editor's first usable cut | 🟡 partial | continuous drag strokes, art-composited static preview, smooth, stamps, rebase | [`plans/world/map_editor/PLAN.md`](../../plans/world/map_editor/PLAN.md) |
 | A corridor sends a body where the graph lets it cross — a wide border is crossed every 16 tiles, not at its corners | ✅ shipping | `ROUTING_VERSION` 5: 32% → 7% at the p95 on a click at a building, and the walk-path query 30.4 → 24.4 ms, for 34% more nodes and a 36% dearer bake | [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md), P1 |
-| One click still has two standing answers, and the client plans on the thread that draws | ⬜ | P2 and P3; P1 and P4 are done | the same |
+| One click has one standing answer, and a route is planned on a thread that is not the one drawing | ✅ shipping | — P1 to P4 are all done. The frame thread runs no search on the walk path; the guide is shared and the live layer copied, at 4 µs against the 23.5 ms plan it replaces. An end-to-end frame reading has not been taken | the same, P2 and P3 |
 | Every boot replays the whole log | ⬜ | S4 | [`plans/world/what_a_change_costs/PLAN.md`](../../plans/world/what_a_change_costs/PLAN.md) |
 | `revert` is a word no operator can type | ⬜ | S5 | the same |
 | `tiledata.mul` and the multis are still the player's install | ⬜ | S6 — a base set replaces `map` and `statics` and neither of those | the same |
@@ -449,17 +453,45 @@ A step is ~200 ms of walking, so planning is a large and permanent fraction of
 the frame while anybody is moving, and none of the repairs above changes that —
 `without_folds` shortens the *route*, not the search that proposed it.
 
-Moving it off the frame thread is the obvious answer and it is not free, so what
-it waits on is a decision rather than an implementation. The search reads two
-grounds: the guide, which is the bare facet and never changes, and the live
-overlay, which the network side rewrites as the world arrives. A worker cannot
-borrow the second and this repository does not share it behind a lock, so the
-shape to argue about is what the worker is *given* — an owned slice of the
-overlay around the query, cut on the frame thread — and what it costs to cut
-one. The latency it adds is already survivable: a walk holds its last plan while
-the next is asked for, which is what the plan cache is, and an answer that
-arrives a frame late is a plan from a tile the body has just left, which is the
-case refinement already handles on every replan.
+Moving it off the frame thread was the obvious answer and it was not free, so
+what it waited on was a decision rather than an implementation. The search reads
+two grounds: the guide, which is the bare facet and never changes, and the live
+overlay, which the network side rewrites as the world arrives.
+
+**Repaired, and the measurement inverted the question.** The shape to argue
+about was what the worker is *given*, and the cheap-sounding option was an owned
+slice of the overlay cut around the query. `coarse_bench --handover` measured
+both over the castle above: a house in view is 311 tiles of live layer and
+copying **all** of it is 4 µs — 0.02% of the 23.5 ms plan it rides with — while
+cutting a window around the endpoints is four times dearer and grows with the
+distance, because the overlay is O(what is placed) and a window is O(area).
+Sixteen tiles out the cut asked about six thousand tiles to keep three hundred,
+and it is a guess about where the answer will go where a copy is not a guess at
+all.
+
+So: **the guide is shared and the live half is copied whole.** `Ground` holds a
+facet's base and the span bake over it as one `Bedrock` behind an `Arc` — the
+case `docs/style.md`'s rule leaves open, a real second thread and a structure too
+large to copy — and the live overlay and the crowd travel by value in each
+question. Nothing is left for a lock to protect. The two things the frame thread
+owes are named at their seams: it settles the worker before the map, the bake or
+the coarse graph are taken back exclusively (a publish's chunks, a rebake), and a
+body waiting for an answer looks again next *frame* rather than next walking
+beat and is not counted as stalling — sharing that branch with "there is nowhere
+to walk" cost 400 ms between a click and the character.
+
+The oracle is a count rather than a duration, because a millisecond is a
+property of the host: `the_walk_path_runs_no_search_on_the_thread_that_asked`
+walks a destination — click, every beat, and the picture drawn beside it — and
+the asking thread runs **no search**. Without the worker it runs seven. What one
+of those costs is the handover table's other column. The latency it adds was
+already survivable: a walk holds its last plan while the next is asked for, and
+an answer that arrives a frame late is a plan from a tile the body has just left,
+which is the case refinement already handles on every replan.
+
+Not measured: an end-to-end frame-time reading from a running client, before or
+after. `jank.rs`'s `ui_route` is the instrument and it is already wired; what it
+wants is one session walked the same way twice.
 
 **29. The corner rule costs the bare facet nothing and a house a third.** P1
 was gated on one reading and it is in. `coarse_bench --houses` lays the same
@@ -534,10 +566,10 @@ Findings 25 to 29 are one track and are held as one:
 [`plans/world/pathfinding/PLAN.md`](../../plans/world/pathfinding/PLAN.md) is
 P1 to P4 — the corner-only crossing that causes 25 and is opened by 29, the two
 readings of one click in 26, the frame thread in 28, and 27 alongside them
-because a lying instrument is not a thing to leave lying about (27 is repaired).
-The order there is argued;
-finding 22 stays where it is, because what it waits on is the client's memory of
-what it has been shown rather than anything about a search.
+because a lying instrument is not a thing to leave lying about. **All four are
+done**; the order there is argued, and what each one left behind is written under
+it. Finding 22 stays where it is, because what it waits on is the client's memory
+of what it has been shown rather than anything about a search.
 
 Two questions this domain deliberately keeps open, and neither is waiting on
 work: **land height per tile or per corner** (closed the day we mean to change
