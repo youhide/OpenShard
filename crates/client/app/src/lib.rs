@@ -85,6 +85,7 @@ mod panes;
 mod picking;
 mod picking_query;
 mod ping;
+mod planner;
 mod presentation;
 mod profile;
 mod render_passes;
@@ -1039,7 +1040,11 @@ pub fn run<D: Dial + Send + 'static>(
                         dir
                     );
                 })
-                .ok();
+                .ok()
+                // Shared from here on, because a route is planned off this
+                // thread — see `planner.rs`, and `Ground::share` for the whole
+                // of the `Arc` argument this is the other half of.
+                .map(std::sync::Arc::new);
             checkpoint("navigation graph loaded");
 
             let interior_path = openshard_client_artscan::interiors::artifact_path(&artifacts, facet);
@@ -1324,6 +1329,14 @@ pub fn run<D: Dial + Send + 'static>(
                 path_journal.set_aside();
             }
             steer.keep_journal(path_journal);
+            // And the thread the searches run on, which goes to the same place
+            // for the same reason. A worker the operating system refuses is not
+            // a client that cannot walk: it plans on the frame thread, which is
+            // what every client did until now — slower, and correct.
+            match planner::Planner::start() {
+                Ok(planner) => steer.plan_elsewhere(planner),
+                Err(error) => eprintln!("routes are planned on the frame thread: {error}"),
+            }
             steer.set_always_running(movement.always_run);
             steer.set_leeway(Leeway::Eighth);
             // The other one, and here for the same reason: what a turn costs

@@ -12,7 +12,6 @@ use std::time::{
 
 use openshard_client_render::camera::RealPixel;
 use openshard_client_render::gump::GumpPixel;
-use openshard_movement::Bodies;
 use winit::application::ApplicationHandler;
 use winit::event::{
     ElementState,
@@ -30,10 +29,6 @@ use winit::window::WindowId;
 
 use crate::app::App;
 use crate::picking::SelectedIdentity;
-use crate::world::{
-    footing,
-    guide,
-};
 use crate::{
     DOUBLE_CLICK,
     PAGE_PIXELS,
@@ -42,7 +37,6 @@ use crate::{
     keys,
     panes,
     shell,
-    steer,
 };
 
 /// How far `App::last_advance` may lag behind the redraw cadence before
@@ -67,12 +61,7 @@ impl App {
             // replans: see `steer::Readings`. Built here rather than held, for
             // the reason the single terrain always was — they borrow the map
             // and the crowd, and the walk borrows `steer` mutably beside them.
-            let ground = steer::Readings {
-                live:   footing(&self.resources, self.walking_doors())
-                    .among(Bodies::standing(&self.world.bodies)),
-                guide:  guide(&self.resources),
-                coarse: self.resources.coarse.as_ref(),
-            };
+            let ground = crate::world::readings(&self.resources, &self.world.bodies, self.walking_doors());
             let motion = self.world.motion.planning_state();
             let Some(facing) = self
                 .steer
@@ -379,21 +368,17 @@ impl ApplicationHandler<()> for App {
                                 motion.position,
                                 Instant::now(),
                                 motion.facing.direction,
-                                steer::Readings {
-                                    // An enabled auto-door mode turns a shut
-                                    // leaf into a usable next step; `walk`
-                                    // sends its use before this step.
-                                    //
-                                    // The bodies in the way of this press. A
-                                    // held arrow never plans, but it does ask
-                                    // `Detour` for a way past whatever is ahead
-                                    // — and somebody standing there is one of
-                                    // the things it has to get past.
-                                    live:   footing(&self.resources, self.walking_doors())
-                                        .among(Bodies::standing(&self.world.bodies)),
-                                    guide:  guide(&self.resources),
-                                    coarse: self.resources.coarse.as_ref(),
-                                },
+                                // An enabled auto-door mode turns a shut leaf
+                                // into a usable next step; `walk` sends its use
+                                // before this step. A held arrow never plans,
+                                // but it does ask `Detour` for a way past
+                                // whatever is ahead — and somebody standing
+                                // there is one of the things it has to get past.
+                                crate::world::readings(
+                                    &self.resources,
+                                    &self.world.bodies,
+                                    self.walking_doors(),
+                                ),
                             )
                         }
                         ElementState::Released => {

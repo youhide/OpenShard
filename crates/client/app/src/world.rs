@@ -1207,6 +1207,52 @@ pub(crate) fn footing(
     openshard_movement::Footing::of(&resources.ground, &resources.tiledata, doors)
 }
 
+/// The ground a route is planned over and a step is decided against, as every
+/// asker on this end reads it.
+///
+/// # Why this exists at all
+///
+/// It was assembled by hand at each of four call sites — `event_loop`'s
+/// `advance_walk` and its held-arrow press, `ui_command`'s `walk_toward_cursor`,
+/// and `picking_query`'s `route_shown` — four copies of the same three fields,
+/// of which three read [`walking_doors`] and the fourth did not.
+/// `docs/world/README.md`'s finding 26 is what that cost: one click answered two
+/// ways a third of a second apart, and the player shown whichever came last. One
+/// constructor is what makes that divergence unspellable rather than merely
+/// untrue, and a fourth field to forget ([`steer::Shared`], which is what lets a
+/// route be planned off this thread) is what finally made it worth writing.
+///
+/// **A free function over the fields, not a method on `App`.** The ground
+/// borrows the facet and the crowd while the walk borrows `steer` mutably
+/// beside it, so a method taking `&self` would be a borrow of the whole app
+/// where two disjoint fields are what is wanted.
+///
+/// `doors` stays the caller's, because it is genuinely the caller's: a walk and
+/// the picture of a walk read the leaves the same way ([`drawn_route_doors`]),
+/// and a held arrow reads them as the step it is about to send does.
+pub(crate) fn readings<'a>(
+    resources: &'a resources::Resources,
+    bodies: &'a [openshard_protocol::world::Point],
+    doors: openshard_map::overlay::Doors,
+) -> crate::steer::Readings<'a> {
+    crate::steer::Readings {
+        // The bodies in the way, which an overlay has no idea about: a route
+        // planned through a bystander asks for a step the shard refuses, and the
+        // green line drawn from it is a picture of a walk that will not happen.
+        live:   footing(resources, doors).among(openshard_movement::Bodies::standing(bodies)),
+        guide:  guide(resources),
+        coarse: resources.coarse.as_deref(),
+        // And the same ground in the form another thread can be handed — see
+        // `planner.rs`. The handles, not the copies: what is copied is taken at
+        // the moment a question is actually asked, which is at most once a step.
+        shared: Some(crate::steer::Shared {
+            ground: &resources.ground,
+            tiles:  &resources.tiledata,
+            coarse: resources.coarse.as_ref(),
+        }),
+    }
+}
+
 /// Which reading of the shut doors this client's own steps are decided by.
 ///
 /// **This end's copy of `WorldState::walking_doors`**, and it is a copy because

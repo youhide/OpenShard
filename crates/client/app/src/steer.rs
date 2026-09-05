@@ -181,6 +181,7 @@
 //! comes due.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::{
     Duration,
     Instant,
@@ -189,6 +190,7 @@ use std::time::{
 use openshard_map::overlay::Doors;
 #[cfg(test)]
 use openshard_movement::find_path;
+use openshard_movement::ground::Ground;
 use openshard_movement::{
     Around,
     COARSE_MIN_DISTANCE,
@@ -221,8 +223,14 @@ use openshard_protocol::direction::{
     Facing,
 };
 use openshard_protocol::world::Point;
+use openshard_tiles::TileData;
 
 use crate::keys::Held;
+use crate::planner::{
+    Asking,
+    Planner,
+    Question,
+};
 
 /// The node budget handed to [`find_path`] for a click-to-walk plan.
 ///
@@ -289,6 +297,20 @@ pub const TURN_HOLD_FAST: Duration = Duration::from_millis(45);
 /// larger value would commit the player's input further ahead than a frame for
 /// no more smoothness, and a smaller one would not cover a frame's lateness.
 pub(crate) const LOOKAHEAD: Duration = crate::GLIDE_INTERVAL;
+
+/// How long a destination waits before looking again for a plan that is being
+/// worked out somewhere else.
+///
+/// One glide interval, because that is the grain the loop already wakes on and
+/// the soonest an answer can be noticed. A plan is tens of milliseconds
+/// (`coarse_bench`), so this is one or two looks and then the body sets off.
+///
+/// **Not [`Steering::interval`]**, which is what the same standing branch uses
+/// for a body that really has nowhere to walk. A whole walking beat here would
+/// put four hundred milliseconds between a click and the character moving —
+/// exactly the wait this module's opening section says must not exist — for an
+/// answer that is already on its way.
+const AWAITING_A_PLAN: Duration = crate::GLIDE_INTERVAL;
 
 /// What the mouse is asking for, which is not always a walk.
 ///
@@ -409,6 +431,41 @@ pub struct Readings<'a> {
     pub guide:  Footing<'a>,
     /// The map-only connectivity cache, absent in mapless/test callers.
     pub coarse: Option<&'a NavigationGraph>,
+    /// The same ground in the form a thread that is not this one can be handed
+    /// — see [`Shared`].
+    ///
+    /// `None` is a caller with no facet to share: every test in this file, and
+    /// a client before its first world arrives. Such a caller plans on its own
+    /// thread, which is what every caller did before there was another one.
+    pub shared: Option<Shared<'a>>,
+}
+
+/// What a plan needs that a borrow cannot cross a thread with.
+///
+/// The two halves the decision in `plans/world/pathfinding/PLAN.md`'s P3 split a
+/// query's ground into meet here. **The slow half is shared** — the facet's
+/// bedrock and the coarse graph, neither of which changes while a body walks —
+/// and this carries the handles to take a share of. **The fast half is copied**,
+/// and it is not in here at all, because it is already in [`Readings`]: the live
+/// overlay and the crowd are [`Readings::live`]'s own fields, and a copy of them
+/// is what the question carries.
+///
+/// Held as references so that [`Readings`] stays `Copy`; the shares themselves
+/// are taken at the moment a question is asked, which is at most once a step.
+#[derive(Clone, Copy)]
+pub struct Shared<'a> {
+    /// The facet, to take a share of its bedrock from —
+    /// [`Ground::share`](openshard_movement::ground::Ground::share).
+    pub ground: &'a Ground,
+    /// The install's tile table. Already shared, because a bake worker wanted
+    /// it before a planner did.
+    pub tiles:  &'a Arc<TileData>,
+    /// The coarse graph, to share rather than to borrow.
+    ///
+    /// The same graph [`Readings::coarse`] borrows, and both are here because
+    /// they are used for different things: one is read by a search happening
+    /// now, the other is handed to a search happening elsewhere.
+    pub coarse: Option<&'a Arc<NavigationGraph>>,
 }
 
 /// Why a route was not planned, in the words a person can be told.
@@ -604,6 +661,7 @@ impl<'a> Readings<'a> {
             live:   footing,
             guide:  footing,
             coarse: None,
+            shared: None,
         }
     }
 }
@@ -637,19 +695,79 @@ pub struct Plan {
     pub refusal:              Option<Refusal>,
 }
 
+/// Where the plan for one pair came from, this time round.
+///
+/// Three answers and not two, because "there is nobody to ask" and "the one I
+/// asked has not answered" send the caller to opposite places: the first plans
+/// here and now, the second walks what it already has.
+enum Asked {
+    /// A worker finished it.
+    Answered(Planned),
+    /// A worker is working on it, or has just been set to. Nothing new to walk
+    /// or to draw this beat.
+    Waiting,
+    /// There is no worker at all, so the search runs on this thread.
+    Nobody,
+}
+
+/// One question, as a thread that is not this one has to be given it.
+///
+/// The split the decision in `plans/world/pathfinding/PLAN.md`'s P3 made,
+/// spelled once: the slow half is shared and the fast half is copied. It is a
+/// free function rather than a method because it reads two values a caller
+/// already holds side by side and owns neither.
+fn question(shared: Shared<'_>, ground: Readings<'_>, from: Point, goal: Point) -> Question {
+    Question {
+        from,
+        goal,
+        // The walk's own reading, whatever the caller decided that is — an
+        // auto-door body's route goes through a shut leaf because its step
+        // does. See `world::walking_doors`.
+        doors: ground.live.doors,
+        bedrock: shared.ground.share(),
+        tiles: Arc::clone(shared.tiles),
+        coarse: shared.coarse.map(Arc::clone),
+        // Four microseconds for a castle in view, and the whole of what this
+        // question costs the frame — see `planner`'s header.
+        live: ground.live.overlay.clone(),
+        bodies: ground.live.bodies.feet().to_vec(),
+    }
+}
+
+/// The last plan, shared by the walk and the picture of it.
 #[derive(Clone, Debug)]
 struct CachedPlan {
     from:           Point,
     goal:           Point,
     plan:           Option<Plan>,
-    /// A preview has already performed this frame's query.  The next walk may
-    /// consume it once, but successful plans are never retained across live
-    /// terrain changes.
-    preview:        bool,
+    /// Whether a walk beat has already taken this plan.
+    ///
+    /// **The one thing the two askers do not share.** The picture redraws every
+    /// frame and is happy with the last answer there was; a walk asks once a
+    /// beat and must not be answered with the plan its *own previous beat*
+    /// made, because the world moves in between — the case that names this is a
+    /// body standing at a shut door, whose plan is "nowhere to walk" until
+    /// somebody opens it, and which has to pick the walk back up on its own
+    /// when they do (see `the_walk_resumes_the_moment_the_door_opens`).
+    ///
+    /// So a walk beat marks the plan it took, and the next one re-asks. It is
+    /// marked rather than dropped because the picture still wants something to
+    /// draw while the next answer is being worked out.
+    walked:         bool,
     /// A failed coarse search is expensive and cannot become more successful
     /// without a terrain update. Keep it from being retried every frame until
     /// the app explicitly invalidates the cache.
     suppress_retry: bool,
+}
+
+/// Which of the two asks for a plan — see [`CachedPlan::walked`], which is the
+/// whole of what they differ by.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Asker {
+    /// The walk, which is about to take a step along whatever comes back.
+    Walk,
+    /// The picture of the walk, which the HUD draws every frame.
+    Picture,
 }
 
 /// How many steps in a row may leave the body exactly where it was before a walk
@@ -678,18 +796,45 @@ pub struct Steering {
     /// all — every test in this file, and a client that has been told not to
     /// keep one is `Some` with the writing set aside instead, so that the F1
     /// window has something to show and to switch back on.
-    journal:     Option<Journal>,
-    /// How many searches this steering has run.
+    journal:       Option<Journal>,
+    /// The thread this steering's routes are planned on, when there is one.
+    ///
+    /// **Held here for [`Steering::journal`]'s reason**: this is the thing that
+    /// runs a search, so it is where the question of *where* a search runs
+    /// belongs. `None` is a caller that plans on its own thread — every test in
+    /// this file, and a client whose worker would not start.
+    ///
+    /// Absence is the answer and not a placeholder: a steering with no worker
+    /// plans inline, which is what every one of them did before there was
+    /// another thread to plan on. See [`Steering::plan_elsewhere`].
+    planner:       Option<Planner>,
+    /// Whether the last plan this asked for is still being worked out
+    /// elsewhere.
+    ///
+    /// **A body waiting for its answer is not a body walking on the spot**, and
+    /// the two look identical from the route alone: an empty route with a
+    /// destination still set. They are opposite things to the clock and to the
+    /// patience, though — see [`Steering::take`]'s standing branch. Standing at
+    /// a shut door is measured in walking beats and given up on after
+    /// [`STUCK_STEPS`] of them; waiting for a plan is measured in frames and is
+    /// no kind of stall, because nothing in the world has refused anything.
+    awaiting:      bool,
+    /// How many searches this steering has run **on the thread that asked**.
     ///
     /// Test-only, and on the *caller* rather than on the ground: "did a search
     /// run" is this module's own business, and the terrain has no way to say so
     /// any more. It used to be counted by a `CountingTerrain` double whose
     /// `can_step` incremented a cell — an instrument that existed only because
     /// the seam was a trait. See `docs/world/research/terrain_seam.md`'s node E.
+    ///
+    /// **On the asking thread and not anywhere**, which is the whole of what
+    /// P3 changed and therefore the whole of what wants counting: a plan the
+    /// worker made costs this thread the question and nothing else. See
+    /// `the_walk_path_runs_no_search_on_the_thread_that_asked`.
     #[cfg(test)]
-    plans:       std::cell::Cell<u32>,
+    searched_here: std::cell::Cell<u32>,
     /// The arrows, and shift.
-    keys:        Held,
+    keys:          Held,
     /// What a held right button (with no modifier) is asking for, recomputed
     /// from the body to the cursor on every move — see [`Steering::steer`].
     /// `None` when the mouse is not steering, which is not the same as
@@ -701,7 +846,7 @@ pub struct Steering {
     /// than one of eight sectors, since which side of the sector it is on is
     /// what decides a tie between two ways round an obstacle (see
     /// [`Detour::step`]).
-    mouse:       Option<Ask>,
+    mouse:         Option<Ask>,
     /// The place a Ctrl-held right button last asked for — a destination, not
     /// a heading; see [`Steering::go_to`].
     ///
@@ -720,7 +865,7 @@ pub struct Steering {
     /// surface: [`destination_place`] is what turns it into somewhere to stand,
     /// and both the search and the arrival test ask it rather than keeping a
     /// resolved copy that the ground could move out from under.
-    goal:        Option<Point>,
+    goal:          Option<Point>,
     /// The route planned to [`Steering::goal`], most-recent-plan first.
     ///
     /// Consumed one direction per step; emptied on a refusal and on every
@@ -733,11 +878,11 @@ pub struct Steering {
     /// the way, or as close to the destination as the ground ever gets. Then
     /// nothing is sent at all and the destination's patience is what ends the
     /// order; see [`Steering::take`].
-    route:       VecDeque<Direction>,
+    route:         VecDeque<Direction>,
     /// The last complete plan is shared by movement and the route preview.
     /// Both consumers ask the same question for the same world snapshot; do
     /// not make the expensive real/doors-open searches twice.
-    cached_plan: Option<CachedPlan>,
+    cached_plan:   Option<CachedPlan>,
     /// Why the last plan did not reach the place it was asked for, and which
     /// place that was — see [`Refusal`].
     ///
@@ -745,14 +890,14 @@ pub struct Steering {
     /// route is replanned every few steps and dropped whenever the ground
     /// changes, and the answer to "why is my body walking at that wall" has to
     /// stay on screen for as long as the order does.
-    refused:     Option<(Point, Refusal)>,
+    refused:       Option<(Point, Refusal)>,
     /// Whether [`Steering::refused`] has been said to the player yet.
     ///
     /// **A refusal is announced once per destination**, and this is the whole
     /// of that rule. A plan is remade on a cadence — every few steps, and again
     /// whenever the live layer moves — so a client that spoke on every plan
     /// would fill the journal with one sentence while the body stood still.
-    said:        bool,
+    said:          bool,
     /// The earliest the next step may leave: the deadline of the step in flight.
     ///
     /// The rate floor, and the queue rule's whole mechanism. Armed by every step
@@ -764,11 +909,11 @@ pub struct Steering {
     /// It is not a "the walk is running" flag, which is what it used to be:
     /// whether anything is being asked for is [`Steering::asking_for_anything`],
     /// and that is what decides whether the event loop is woken for it.
-    due:         Option<Instant>,
+    due:           Option<Instant>,
     /// Where the body stood when the last step was sent, for [`STUCK_STEPS`].
-    was:         Option<Point>,
+    was:           Option<Point>,
     /// How many steps in a row have left it there.
-    stalled:     u8,
+    stalled:       u8,
     /// Whether [`Steering::due`] is the deadline of a walk still under way,
     /// rather than one that has since stopped.
     ///
@@ -779,7 +924,7 @@ pub struct Steering {
     /// is not a cadence at all — the player pressed again some time later, and
     /// measuring from it would make the step after that one due a fraction of a
     /// hold away, which cuts the glide short and jumps the body.
-    walking:     bool,
+    walking:       bool,
     /// The direction of the last step sent, once one has been.
     ///
     /// Which way the body is *going* to face, which is a step ahead of the way
@@ -787,7 +932,7 @@ pub struct Steering {
     /// thread, and a second step decided from it would turn twice. Absent until
     /// this has asked for anything, and then the caller's facing is the only
     /// answer there is.
-    asked:       Option<Direction>,
+    asked:         Option<Direction>,
     /// Whether the free turn a direction change buys has been spent since the
     /// clock last actually armed.
     ///
@@ -810,7 +955,7 @@ pub struct Steering {
     /// still free, and every one after it — until a real, clock-arming step
     /// or turn-then-step pair actually leaves — is paced exactly like an
     /// ordinary step instead.
-    turned:      bool,
+    turned:        bool,
     /// Getting past whatever is directly in the way of a held direction.
     ///
     /// The rule itself is `common/movement`'s [`Detour`], not this module's:
@@ -820,14 +965,14 @@ pub struct Steering {
     /// is when to ask it — only for a held direction, never for a planned
     /// route, which answers for its own obstacles by replanning — and what to
     /// do with [`Step::Stuck`], which needs the facing this module tracks.
-    detour:      Detour,
+    detour:        Detour,
     /// How far a body may be turned off the way it was pointed to keep it
     /// moving — see [`Leeway`], and [`Steering::set_leeway`] for where this
     /// comes from.
-    leeway:      Leeway,
+    leeway:        Leeway,
     /// What a turn costs the step it precedes — see [`Turning`], and
     /// [`Steering::set_turning`].
-    turning:     Turning,
+    turning:       Turning,
     /// Whether [`Steering::due`] is the end of a crossing, rather than of a turn.
     ///
     /// What [`LOOKAHEAD`] is allowed against, and only that. Being early is worth
@@ -836,7 +981,7 @@ pub struct Steering {
     /// the earliness. A turn covers no ground and is drawn by nothing, so a turn
     /// let out a frame early would only be a turn that costs a frame less —
     /// [`TURN_HOLD`] is 80ms and a frame of it is a fifth.
-    crossing:    bool,
+    crossing:      bool,
     /// Whether the body is in a saddle, for [`Steering::interval`] alone.
     ///
     /// The one fact about the *shard's* answer that this module has to know: a
@@ -845,7 +990,7 @@ pub struct Steering {
     /// above it is not a preference — it is a fact off the wire, restated on
     /// every fold of the world view by [`Steering::set_mounted`], the same way
     /// [`crate::world::PlayerMotion::accept_local`] is told it per step.
-    mounted:     bool,
+    mounted:       bool,
 }
 
 impl Steering {
@@ -1010,7 +1155,22 @@ impl Steering {
     /// Start a new render frame. The movement step and the HUD may share one
     /// plan during that frame. A remembered coarse failure is kept separately
     /// so an impossible expensive query is not retried every frame.
+    ///
+    /// **A steering that plans elsewhere keeps its plan across frames**, and
+    /// that is the difference the worker makes rather than an oversight. This
+    /// per-frame drop is a conservative re-ask: a plan is a claim about a live
+    /// layer that anything on the wire may have moved, and re-running the search
+    /// each frame is how that was answered while the search was free to run
+    /// where it stood. Against a worker it is the opposite of conservative —
+    /// every frame would ask a question no frame is around to receive the answer
+    /// to, and no plan would ever land. What actually invalidates a plan is
+    /// [`clear_plan_cache`](Self::clear_plan_cache), which `net_command`'s
+    /// `entered` calls whenever the live terrain moves, and the pair moving,
+    /// which the cache compares outright.
     pub(crate) fn begin_frame(&mut self) {
+        if self.planner.is_some() {
+            return;
+        }
         if !self
             .cached_plan
             .as_ref()
@@ -1025,21 +1185,105 @@ impl Steering {
     /// frame, so a matching plan may have been produced by movement earlier in
     /// the current frame even though it is no longer marked as a preview.
     pub(crate) fn plan_for(&mut self, ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
-        if let Some(cached) = self.cached_plan.as_ref() {
-            if cached.from == from && cached.goal == goal {
+        self.plan_from(ground, from, goal, Asker::Picture)
+    }
+
+    /// The plan for this pair, from wherever this steering's plans come from.
+    ///
+    /// **`None` is two things and only the cache tells them apart**: a
+    /// destination there is no route to, and an answer that has not arrived yet.
+    /// Both mean the same to a caller — nothing to walk or to draw this beat —
+    /// which is why they are one return value. What they must *not* share is
+    /// [`remember_refusal`](Self::remember_refusal): a plan that has not come
+    /// back is not a refusal, and telling the player "there is no way there"
+    /// because a worker is still thinking would be a sentence about this
+    /// client's own latency. Only an answer that actually arrived reaches it.
+    fn plan_from(&mut self, ground: Readings<'_>, from: Point, goal: Point, asker: Asker) -> Option<Plan> {
+        if let Some(cached) = self.cached_plan.as_mut() {
+            // A plan for this pair, and a beat that is allowed to have it: the
+            // picture always is, and a walk is unless its own last beat already
+            // took this one — see `CachedPlan::walked`. A coarse failure is the
+            // exception both ways round, because re-asking it is expensive and
+            // cannot answer differently until the ground moves.
+            let mine = cached.from == from && cached.goal == goal;
+            if mine && (asker == Asker::Picture || !cached.walked || cached.suppress_retry) {
+                cached.walked |= asker == Asker::Walk;
                 return cached.plan.clone();
             }
         }
-        let planned = self.planned(ground, from, goal);
-        self.remember_refusal(goal, planned.as_ref());
+        let planned = match self.ask_elsewhere(ground, from, goal) {
+            Asked::Answered(planned) => {
+                self.awaiting = false;
+                planned
+            }
+            // Being worked out somewhere, or asked for and not answered yet.
+            // The walk holds what it has, which is the whole of why latency is
+            // affordable here.
+            Asked::Waiting => {
+                self.awaiting = true;
+                return None;
+            }
+            // Nobody else plans for this steering: the search runs here, in this
+            // call, the way every one of them used to.
+            Asked::Nobody => {
+                self.awaiting = false;
+                let planned = plan(ground, from, goal);
+                #[cfg(test)]
+                self.searched_here.set(self.searched_here.get() + 1);
+                self.wrote(from, goal, &planned);
+                planned
+            }
+        };
+        self.remember_refusal(goal, planned.plan.as_ref());
         self.cached_plan = Some(CachedPlan {
             from,
             goal,
-            preview: true,
-            suppress_retry: planned.is_none() && ground.coarse.is_some(),
-            plan: planned.clone(),
+            walked: asker == Asker::Walk,
+            suppress_retry: planned.plan.is_none() && ground.coarse.is_some(),
+            plan: planned.plan.clone(),
         });
-        planned
+        planned.plan
+    }
+
+    /// Take the worker's answer for this pair, or set it working on one.
+    ///
+    /// Every answer is written to the journal, including one about a pair the
+    /// body has since left: the plan was really made, and a replay that only saw
+    /// the ones this end acted on would be missing the searches that took the
+    /// time.
+    fn ask_elsewhere(&mut self, ground: Readings<'_>, from: Point, goal: Point) -> Asked {
+        let Some(shared) = ground.shared else {
+            return Asked::Nobody;
+        };
+        let Some(planner) = self.planner.as_mut() else {
+            return Asked::Nobody;
+        };
+        let answer = planner.collect();
+        if let Some(answer) = answer.as_ref() {
+            self.wrote(answer.from, answer.goal, &answer.planned);
+        }
+        // Stale answers fall through to a fresh question: the body walked on, or
+        // the destination moved, while this one was being worked out.
+        let mine = answer
+            .as_ref()
+            .is_some_and(|answer| answer.from == from && answer.goal == goal);
+        if mine {
+            return Asked::Answered(answer.expect("just checked").planned);
+        }
+        let planner = self
+            .planner
+            .as_mut()
+            .expect("the planner was here a statement ago");
+        match planner.ask(question(shared, ground, from, goal)) {
+            Asking::Working | Asking::Busy => Asked::Waiting,
+            // Its thread is gone, so nothing is ever coming back and a caller
+            // that waited would wait for ever. Let go of it and plan here, which
+            // is what a client with no worker does.
+            Asking::Gone => {
+                self.planner = None;
+                Asked::Nobody
+            }
+        }
     }
 
     /// Walk to `at`, from wherever the body is standing now, or as close to it
@@ -1325,38 +1569,23 @@ impl Steering {
             } else if self.route.is_empty() {
                 // `plan` answers for every way this can end — through, up to
                 // what is in the way, or as close as the ground gets — so an
-                // empty route after it means one thing only: there is nowhere
-                // left to walk from here. That is the branch below.
+                // empty route after it means one of two things: there is nowhere
+                // left to walk from here (the branch below), or the plan is
+                // being worked out on another thread and has not landed yet.
+                // Both stand still this beat and neither sends a step.
+                //
                 // The route preview may already have asked the same question
-                // during this frame.  Consume that plan once rather than
-                // searching live terrain a second time.  A plan built by a
-                // previous walk is not reusable: a door can have opened since
-                // then. Failed coarse searches remain held until invalidation.
-                let preview = self.cached_plan.as_ref().and_then(|cached| {
-                    (cached.from == from && cached.goal == at && (cached.preview || cached.suppress_retry))
-                        .then(|| cached.plan.clone())
-                });
-                let planned = match preview {
-                    Some(plan) => {
-                        if self.cached_plan.as_ref().is_some_and(|cached| cached.preview) {
-                            self.clear_plan_cache();
-                        }
-                        plan
-                    }
-                    None => {
-                        let planned = self.planned(ground, from, at);
-                        self.remember_refusal(at, planned.as_ref());
-                        self.cached_plan = Some(CachedPlan {
-                            from,
-                            goal: at,
-                            preview: false,
-                            suppress_retry: planned.is_none() && ground.coarse.is_some(),
-                            plan: planned.clone(),
-                        });
-                        planned
-                    }
-                };
-                self.route = planned.map(|plan| plan.open).unwrap_or_default().into();
+                // this frame, and [`plan_from`] hands that answer back rather
+                // than searching the live terrain a second time — the cache is
+                // keyed by the pair and nothing else. A plan built by a
+                // *previous* frame's walk is not reusable when the search runs
+                // here, because a door can have opened since; `begin_frame` is
+                // what drops it, and a failed coarse search is what it keeps.
+                self.route = self
+                    .plan_from(ground, from, at, Asker::Walk)
+                    .map(|plan| plan.open)
+                    .unwrap_or_default()
+                    .into();
             }
         }
 
@@ -1374,6 +1603,20 @@ impl Steering {
         // The keyboard is exempt, as it is for the stall check: an arrow held
         // while a destination is still set outranks it and is answered below.
         if self.keys.asking().is_none() && self.goal.is_some() && self.route.is_empty() {
+            // **Unless the answer is simply not back yet**, which is a different
+            // thing wearing the same empty route. The plan is being worked out
+            // on another thread and is milliseconds away, so the next look is a
+            // frame off rather than a whole walking beat — a click that waited
+            // a beat would put the four hundred milliseconds between the input
+            // and the character that this module's queue rule exists to
+            // prevent. And `was` is deliberately *not* set: a body that has not
+            // been told where to walk yet has not failed to get anywhere, and
+            // counting it toward [`STUCK_STEPS`] would abandon an order four
+            // frames after it was given.
+            if self.awaiting {
+                self.arm(AWAITING_A_PLAN, now, false);
+                return None;
+            }
             self.was = Some(from);
             // Nothing is being crossed — this is a destination waiting on a
             // corridor — so the beat that follows is not one to leave early for.
@@ -1713,12 +1956,17 @@ impl Steering {
 }
 
 impl Steering {
-    /// [`plan`], counted and journalled. The single place this module runs a
-    /// search.
-    fn planned(&mut self, ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
-        #[cfg(test)]
-        self.plans.set(self.plans.get() + 1);
-        plan(ground, from, goal, self.journal.as_mut())
+    /// Write a plan's line to the journal, wherever the plan was made.
+    ///
+    /// **The one place a plan reaches the file**, which is what lets the search
+    /// run somewhere else: a journal is an open file and a place in it, so the
+    /// thread that owns it does the writing and a plan made elsewhere arrives as
+    /// a line to write rather than as a file handle to share. `None` is a
+    /// session keeping no journal.
+    fn wrote(&mut self, from: Point, goal: Point, planned: &Planned) {
+        if let Some(journal) = self.journal.as_mut() {
+            record_plan(journal, from, goal, planned.plan.as_ref(), &planned.said);
+        }
     }
 
     /// Keep a journal of the routes this plans from now on.
@@ -1740,6 +1988,40 @@ impl Steering {
     /// The journal, for the switch that turns it off and on.
     pub fn journal_mut(&mut self) -> Option<&mut Journal> {
         self.journal.as_mut()
+    }
+
+    /// Plan routes on `planner`'s thread from now on rather than on this one.
+    ///
+    /// The client hands this over where it hands the journal over, and for the
+    /// same reason: this is the thing that runs a search, so this is what has to
+    /// be told where searches run. A steering that is never given one plans
+    /// inline, which is what all of them did before there was a second thread.
+    pub(crate) fn plan_elsewhere(&mut self, planner: Planner) {
+        self.planner = Some(planner);
+    }
+
+    /// Wait for whatever is being planned, because the ground under it is about
+    /// to be written.
+    ///
+    /// **The one thing the frame thread owes the worker**, and the whole of it:
+    /// a facet's map, its span bake and the coarse graph over it are taken back
+    /// exclusively when they are patched or rebaked, and a plan reading them at
+    /// that moment would be a plan over ground being rewritten under it. So
+    /// whoever is about to write one calls this. It costs at most one query, on
+    /// events — chunks arriving, a graph rebaked — that each cost more than one
+    /// on their own.
+    ///
+    /// The answer that comes back is written to the journal and dropped: the
+    /// pair it is about is on its way out with the ground it was planned over.
+    pub(crate) fn settle_plans(&mut self) {
+        let Some(planner) = self.planner.as_mut() else {
+            return;
+        };
+        let Some(answer) = planner.settle() else {
+            return;
+        };
+        self.wrote(answer.from, answer.goal, &answer.planned);
+        self.clear_plan_cache();
     }
 }
 
@@ -1796,9 +2078,13 @@ impl Steering {
 /// really there ([`openshard_movement::destination_place`]), so what this owes
 /// it is the height the player actually pointed at.
 ///
-/// The journal is the caller's, and is written to at every one of the four ways
-/// out below — see [`record_plan`]. `None` is a caller keeping none.
-pub fn plan(ground: Readings<'_>, from: Point, goal: Point, journal: Option<&mut Journal>) -> Option<Plan> {
+/// **Nothing here writes to the journal, and that is what lets the search
+/// travel.** A journal is an open file on the thread that owns it, and this
+/// function runs on whichever thread was asked — the client's planner worker,
+/// most of the time (`plans/world/pathfinding/PLAN.md`'s P3). So it hands back
+/// the line the journal owes along with the plan ([`Planned`]), and the holder
+/// of the journal writes it where it is: [`Steering::wrote`].
+pub fn plan(ground: Readings<'_>, from: Point, goal: Point) -> Planned {
     let started = Instant::now();
     // The two readings of one ground. Which one is "real" is the caller's —
     // `ground.live` as it was handed over — because an auto-door client walks
@@ -1807,6 +2093,12 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point, journal: Option<&mut
     // the way go if the door were opened" means.
     let real = ground.live;
     let doors_open = ground.live.reading(Doors::AllOpen);
+    // Where the destination really is, resolved once, against the same reading
+    // the search uses — a click carries a picture's height and the search
+    // compares against a place to stand. It travels in the answer because the
+    // journal's line needs it and the thread that writes that line no longer has
+    // the ground to ask. See [`record_plan`].
+    let resolved = destination_place(&real, from, goal);
     let (answer, live_probe) = ground.path(&real, from, goal);
     let refused = match answer {
         Ok(open) => {
@@ -1818,20 +2110,16 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point, journal: Option<&mut
                 refusal: None,
             });
             debug_plan(from, goal, started.elapsed(), result.as_ref());
-            record_plan(
-                journal,
-                &real,
-                from,
-                goal,
-                Answered {
-                    live:       &live_probe,
+            return Planned {
+                said: Answered {
+                    live: live_probe,
                     doors_open: None,
-                    refused:    None,
-                    plan:       result.as_ref(),
-                    elapsed:    started.elapsed(),
+                    refused: None,
+                    resolved,
+                    elapsed: started.elapsed(),
                 },
-            );
-            return result;
+                plan: result,
+            };
         }
         Err(refused) => refused,
     };
@@ -1850,20 +2138,16 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point, journal: Option<&mut
         // be too far" is the same answer said less usefully.
         let Some(open) = find_path_toward(&real, from, goal, PLAN_BUDGET, Weight::PLANNING) else {
             debug_plan(from, goal, started.elapsed(), None);
-            record_plan(
-                journal,
-                &real,
-                from,
-                goal,
-                Answered {
-                    live:       &live_probe,
-                    doors_open: Some(&open_probe),
-                    refused:    Some(refused),
-                    plan:       None,
-                    elapsed:    started.elapsed(),
+            return Planned {
+                said: Answered {
+                    live: live_probe,
+                    doors_open: Some(open_probe),
+                    refused: Some(refused),
+                    resolved,
+                    elapsed: started.elapsed(),
                 },
-            );
-            return None;
+                plan: None,
+            };
         };
         let result = Some(Plan {
             open_points: replay(&real, from, &open),
@@ -1873,20 +2157,16 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point, journal: Option<&mut
             refusal: Some(refused),
         });
         debug_plan(from, goal, started.elapsed(), result.as_ref());
-        record_plan(
-            journal,
-            &real,
-            from,
-            goal,
-            Answered {
-                live:       &live_probe,
-                doors_open: Some(&open_probe),
-                refused:    Some(refused),
-                plan:       result.as_ref(),
-                elapsed:    started.elapsed(),
+        return Planned {
+            said: Answered {
+                live: live_probe,
+                doors_open: Some(open_probe),
+                refused: Some(refused),
+                resolved,
+                elapsed: started.elapsed(),
             },
-        );
-        return result;
+            plan: result,
+        };
     };
     let mut open = Vec::new();
     let mut barred = Vec::new();
@@ -1930,20 +2210,32 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point, journal: Option<&mut
         barred_points,
     });
     debug_plan(from, goal, started.elapsed(), result.as_ref());
-    record_plan(
-        journal,
-        &real,
-        from,
-        goal,
-        Answered {
-            live:       &live_probe,
-            doors_open: Some(&open_probe),
-            refused:    Some(refused),
-            plan:       result.as_ref(),
-            elapsed:    started.elapsed(),
+    Planned {
+        said: Answered {
+            live: live_probe,
+            doors_open: Some(open_probe),
+            refused: Some(refused),
+            resolved,
+            elapsed: started.elapsed(),
         },
-    );
-    result
+        plan: result,
+    }
+}
+
+/// A plan, and the line the journal owes about it.
+///
+/// **Two halves because they are written down in two places.** The search runs
+/// wherever it was asked — the client's planner worker, or the asking thread
+/// itself — and a journal is an open file belonging to one thread. So the
+/// search produces the line and the journal's owner writes it; see
+/// [`Steering::wrote`], which is the only caller that does.
+#[derive(Debug)]
+pub struct Planned {
+    /// The route, in the two halves [`plan`] finds it in. `None` is a body with
+    /// nowhere to walk at all — see [`plan`].
+    pub plan: Option<Plan>,
+    /// What the searches said and what it cost, for [`record_plan`].
+    said:     Answered,
 }
 
 /// Write this plan to the path journal, when a session was started with one.
@@ -1954,28 +2246,19 @@ pub fn plan(ground: Readings<'_>, from: Point, goal: Point, journal: Option<&mut
 /// replan three steps later that did not. Filtering here would throw away the
 /// half of the report that says something changed.
 ///
-/// The destination is resolved once more, against the same reading the search
-/// used — a click carries a picture's height and the search compares against a
-/// place to stand, and a replay that did not know which is which would go
-/// looking for a bug in the difference. See
-/// [`destination_place`](openshard_movement::destination_place).
-fn record_plan(
-    journal: Option<&mut Journal>,
-    footing: &Footing<'_>,
-    from: Point,
-    goal: Point,
-    answered: Answered<'_>,
-) {
-    let Some(journal) = journal else {
-        return;
-    };
-    let plan = answered.plan;
+/// The destination is resolved against the same reading the search used — a
+/// click carries a picture's height and the search compares against a place to
+/// stand, and a replay that did not know which is which would go looking for a
+/// bug in the difference. It is resolved *in* [`plan`] and carried here, because
+/// the thread that writes this line is not always the one that held the ground.
+/// See [`destination_place`](openshard_movement::destination_place).
+fn record_plan(journal: &mut Journal, from: Point, goal: Point, plan: Option<&Plan>, answered: &Answered) {
     journal.record(record::Event::Plan(record::Plan {
         from:          record::Place::of(from),
         to:            record::Place::of(goal),
-        resolved:      record::Place::of(destination_place(footing, from, goal)),
+        resolved:      record::Place::of(answered.resolved),
         live:          answered.live.clone(),
-        doors_open:    answered.doors_open.cloned(),
+        doors_open:    answered.doors_open.clone(),
         open:          plan.map(|plan| recorded_steps(&plan.open)).unwrap_or_default(),
         barred:        plan.map(|plan| recorded_steps(&plan.barred)).unwrap_or_default(),
         open_points:   plan
@@ -1995,25 +2278,33 @@ fn record_plan(
     }));
 }
 
-/// One plan as the journal sees it: what the two searches said, what came back,
-/// and what it cost.
+/// One plan as the journal sees it: what the two searches said, where the
+/// destination turned out to be, and what it cost.
 ///
 /// Five values that travel together to one place, in the shape [`Rigour`] is in
 /// `common/movement`: separately they are five arguments on a function that
 /// already has three of its own, and every call site would have to remember
 /// their order.
 ///
+/// **Owned rather than borrowed**, unlike the version of this that lived inside
+/// one call: it crosses a channel now, from whichever thread ran the search to
+/// the one holding the journal.
+///
 /// [`Rigour`]: openshard_movement::Weight
-struct Answered<'a> {
+#[derive(Debug)]
+struct Answered {
     /// The world as it stands, which is what the body walks.
-    live:       &'a record::Probe,
+    live:       record::Probe,
     /// The same ground with the doors open — absent when the first search
     /// arrived and this one was never asked.
-    doors_open: Option<&'a record::Probe>,
+    doors_open: Option<record::Probe>,
     /// Why the live reading had no route, when it had none. Only read for a
     /// plan that came back `None`; a plan carries its own.
     refused:    Option<Refusal>,
-    plan:       Option<&'a Plan>,
+    /// Where the destination actually is — [`plan`]'s
+    /// [`destination_place`](openshard_movement::destination_place), taken over
+    /// the reading the search used.
+    resolved:   Point,
     elapsed:    Duration,
 }
 
@@ -2128,6 +2419,16 @@ mod tests {
     /// the height is only carried through.
     fn here() -> Point {
         Point::new(100, 100, 0)
+    }
+
+    /// [`plan`] as every test here asks it: the route alone.
+    ///
+    /// A plan comes back with the line the journal owes about it, because the
+    /// search may have run on another thread and a journal belongs to one — see
+    /// [`Planned`]. No test in this file keeps a journal, so none of them has
+    /// anything to do with that half.
+    fn routed(ground: Readings<'_>, from: Point, goal: Point) -> Option<Plan> {
+        plan(ground, from, goal).plan
     }
 
     #[test]
@@ -2488,7 +2789,7 @@ mod tests {
         let ground = over(&world);
         let under = Point::new(100, 100, 0);
 
-        let upstairs = plan(Readings::plain(ground), under, Point::new(100, 100, 4), None)
+        let upstairs = routed(Readings::plain(ground), under, Point::new(100, 100, 4))
             .expect("the mezzanine has a way up");
         assert_eq!(
             upstairs.open,
@@ -2504,7 +2805,7 @@ mod tests {
         assert_eq!(at, Point::new(100, 100, 4), "and it lands on the upper floor");
 
         assert_eq!(
-            plan(Readings::plain(ground), under, under, None)
+            routed(Readings::plain(ground), under, under)
                 .expect("a body is always somewhere")
                 .open,
             Vec::new(),
@@ -2824,7 +3125,7 @@ mod tests {
     fn a_way_through_the_world_as_it_stands_is_the_whole_plan() {
         let doorwall = doorwall();
         let open = over(&doorwall).reading(Doors::AllOpen);
-        let plan = plan(Readings::plain(open), here(), BEYOND, None).expect("the doorway is open");
+        let plan = routed(Readings::plain(open), here(), BEYOND).expect("the doorway is open");
         assert_eq!(plan.open, vec![Direction::East; 5]);
         assert!(
             plan.barred.is_empty(),
@@ -2848,8 +3149,8 @@ mod tests {
     fn a_route_goes_round_a_body_standing_in_it() {
         let bystander = [Point::new(here().x + 1, here().y, 0)];
         let ground = open_ground().among(Bodies::standing(&bystander));
-        let plan = plan(Readings::plain(ground), here(), BEYOND, None)
-            .expect("open ground has a way round one person");
+        let plan =
+            routed(Readings::plain(ground), here(), BEYOND).expect("open ground has a way round one person");
         assert!(
             plan.barred.is_empty(),
             "somebody in the way is a longer walk, not a barred one"
@@ -2890,7 +3191,7 @@ mod tests {
             .reading(Doors::AllOpen)
             .among(Bodies::standing(&standing));
         let plan =
-            plan(Readings::plain(ground), here(), BEYOND, None).expect("the walk goes as far as the doorway");
+            routed(Readings::plain(ground), here(), BEYOND).expect("the walk goes as far as the doorway");
         assert!(
             plan.barred.is_empty(),
             "a person standing in a doorway was reported to the player as a shut leaf"
@@ -2923,15 +3224,15 @@ mod tests {
             find_path(&open_ground(), from, goal, PLAN_BUDGET, Weight::PLANNING).is_none(),
             "the flat plan is intentionally too short"
         );
-        let plan = plan(
+        let plan = routed(
             Readings {
                 live:   open_ground(),
                 guide:  open_ground(),
                 coarse: Some(&router),
+                shared: None,
             },
             from,
             goal,
-            None,
         )
         .expect("the coarse graph reaches across the facet");
         assert_eq!(plan.open.len(), 701);
@@ -2946,15 +3247,15 @@ mod tests {
         let router = NavigationGraph::build(&open_ground(), 704, 32).expect("a representable map");
         let from = Point::new(1, 1, 0);
         let goal = Point::new(702, 1, 0);
-        let plan = plan(
+        let plan = routed(
             Readings {
                 live:   shut,
                 guide:  open,
                 coarse: Some(&router),
+                shared: None,
             },
             from,
             goal,
-            None,
         )
         .expect("the doors-open map still has a long route");
         assert!(!plan.barred.is_empty(), "the shut leaf remains a visible refusal");
@@ -2993,15 +3294,15 @@ mod tests {
             .is_none(),
             "the premise: as the world stands there is no way through at all"
         );
-        let plan = plan(
+        let plan = routed(
             Readings {
                 live:   shut,
                 guide:  open,
                 coarse: None,
+                shared: None,
             },
             here(),
             BEYOND,
-            None,
         )
         .expect("the map itself has a doorway");
         assert_eq!(
@@ -3050,15 +3351,15 @@ mod tests {
         // in it, so it is the same for both and is not what is under test.
         let guide = shut.reading(Doors::AllOpen);
         let verdict = |doors| {
-            plan(
+            routed(
                 Readings {
                     live: shut.reading(doors),
                     guide,
                     coarse: None,
+                    shared: None,
                 },
                 here(),
                 BEYOND,
-                None,
             )
             .expect("the map itself has a doorway")
         };
@@ -3115,15 +3416,15 @@ mod tests {
                 }
             }
         }
-        let plan = plan(
+        let plan = routed(
             Readings {
                 live:   over(&walls),
                 guide:  over(&walls),
                 coarse: None,
+                shared: None,
             },
             here(),
             Point::new(105, 100, 0),
-            None,
         )
         .expect("the body can still walk about inside its box");
         assert_eq!(
@@ -3148,11 +3449,10 @@ mod tests {
     /// real terrain.
     #[test]
     fn a_destination_past_the_budget_with_no_graph_says_so() {
-        let plan = plan(
+        let plan = routed(
             Readings::plain(open_ground()),
             here(),
             Point::new(here().x + 2_000, here().y, 0),
-            None,
         )
         .expect("open ground is walkable toward");
         assert_eq!(
@@ -3165,15 +3465,15 @@ mod tests {
     #[test]
     fn plan_replay_is_snapshot_data_after_terrain_mutates() {
         let mut door = long_door(DOORWAY.x, u16::MAX);
-        let plan = plan(
+        let plan = routed(
             Readings {
                 live:   over(&door),
                 guide:  open_ground(),
                 coarse: None,
+                shared: None,
             },
             here(),
             BEYOND,
-            None,
         )
         .expect("the open snapshot provides a route");
         assert_eq!(plan.open_points.len(), 2);
@@ -3194,15 +3494,15 @@ mod tests {
     #[test]
     fn a_thing_in_the_way_with_a_route_round_it_is_not_barred() {
         let wall = blocking(Tile::new(101, 100));
-        let plan = plan(
+        let plan = routed(
             Readings {
                 live:   over(&wall),
                 guide:  open_ground(),
                 coarse: None,
+                shared: None,
             },
             here(),
             Point::new(104, 100, 0),
-            None,
         )
         .expect("there is a way round a single tile");
         assert!(
@@ -3234,6 +3534,7 @@ mod tests {
             live:   shut,
             guide:  open,
             coarse: None,
+            shared: None,
         };
 
         assert_eq!(
@@ -3308,6 +3609,7 @@ mod tests {
                     live:   shut,
                     guide:  open,
                     coarse: None,
+                    shared: None,
                 },
             )
             .unwrap();
@@ -3319,6 +3621,7 @@ mod tests {
                 live:   shut,
                 guide:  open,
                 coarse: None,
+                shared: None,
             },
         );
         assert_eq!(
@@ -3330,6 +3633,7 @@ mod tests {
                     live:   shut,
                     guide:  open,
                     coarse: None,
+                    shared: None,
                 }
             ),
             None,
@@ -3346,6 +3650,244 @@ mod tests {
 
     /// Dragging the mouse across the ground restates the destination on every
     /// move, and must not send a step on every one of them.
+    /// A facet a worker can be handed: mapless, so every step is allowed, with
+    /// one blocking tile in the live layer for a route to have to go round.
+    ///
+    /// Written *into* the facet rather than passed beside it, because that is
+    /// how a shared ground carries its live half — see
+    /// [`Ground::shared`](openshard_movement::ground::Ground::shared), which is
+    /// what the worker rebuilds at the other end.
+    fn facet_with_a_wall(tiles: &TileData) -> Ground {
+        let mut facet = Ground::new(None, tiles);
+        facet
+            .live_mut()
+            .set(Tile::new(101, 100), vec![Cover::blocking(0, 20)]);
+        facet
+    }
+
+    /// The ground as all four of this client's askers read it, over a facet the
+    /// worker can also be given — `world::readings`' half of the bargain,
+    /// spelled here so the test asks the question the client asks.
+    fn over_facet<'a>(facet: &'a Ground, tiles: &'a Arc<TileData>) -> Readings<'a> {
+        Readings {
+            live:   Footing::of(facet, tiles, Doors::AsTheyStand),
+            guide:  Footing::guide(facet, tiles),
+            coarse: None,
+            shared: Some(Shared {
+                ground: facet,
+                tiles,
+                coarse: None,
+            }),
+        }
+    }
+
+    /// The whole of what a second thread must not change: **one order has one
+    /// route, whichever thread found it.**
+    ///
+    /// `plans/world/pathfinding/PLAN.md`'s P3 moves the search off the frame
+    /// thread and nothing else — not the ground it reads, not the budget, not
+    /// the two readings it takes of the doors. If the answer differed, the
+    /// repair would be a second policy about the same question, which is the
+    /// shape of finding 26 rather than a fix for finding 28.
+    #[test]
+    fn a_route_planned_on_another_thread_is_the_one_this_thread_would_have_found() {
+        let tiles = Arc::new(TileData::empty());
+        let facet = facet_with_a_wall(&tiles);
+        let goal = Point::new(104, 100, 0);
+
+        // Here, in the call that asked, which is what a client with no worker
+        // does and what every test above does.
+        let here_thread =
+            routed(over_facet(&facet, &tiles), here(), goal).expect("there is a way round one tile");
+
+        // And on a thread of its own.
+        let mut steering = Steering::default();
+        steering.plan_elsewhere(Planner::start().expect("a thread to plan on"));
+        assert!(
+            steering
+                .plan_for(over_facet(&facet, &tiles), here(), goal)
+                .is_none(),
+            "the answer cannot already be here: the question has only just been asked"
+        );
+        let elsewhere = wait_for_a_plan(&mut steering, &facet, &tiles, here(), goal);
+
+        assert_eq!(
+            elsewhere.open, here_thread.open,
+            "the same order answered two ways is two answers, which is the defect this repair is \
+             not allowed to introduce"
+        );
+        assert_eq!(elsewhere.barred, here_thread.barred);
+        assert_eq!(elsewhere.refusal, here_thread.refusal);
+    }
+
+    /// Poll the worker until its answer lands, or give up with a sentence that
+    /// says which of the two things went wrong.
+    ///
+    /// A bounded wait rather than a blocking one: a test that hangs tells
+    /// whoever is watching nothing at all, and the plan being waited for is
+    /// microseconds of search over four tiles.
+    fn wait_for_a_plan(
+        steering: &mut Steering,
+        facet: &Ground,
+        tiles: &Arc<TileData>,
+        from: Point,
+        goal: Point,
+    ) -> Plan {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if let Some(plan) = steering.plan_for(over_facet(facet, tiles), from, goal) {
+                return plan;
+            }
+            std::thread::yield_now();
+        }
+        panic!("no plan came back from the worker in five seconds");
+    }
+
+    /// **What P3 is.** A body walking to a destination runs no search on the
+    /// thread that asked — not on the click, not on any beat of the walk, and
+    /// not for the picture drawn beside it.
+    ///
+    /// `docs/world/README.md`'s finding 28 is three plans a step at 110–124 ms
+    /// on the frame thread, and this is the assertion that they are gone rather
+    /// than merely quicker. It is a count and not a duration on purpose: a
+    /// millisecond is a property of the host, and "how many searches did this
+    /// thread run" is a property of the code. What one of them *costs* is
+    /// `coarse_bench --handover`, on ground with a real graph over it.
+    #[test]
+    fn the_walk_path_runs_no_search_on_the_thread_that_asked() {
+        let tiles = Arc::new(TileData::empty());
+        let facet = facet_with_a_wall(&tiles);
+        let goal = Point::new(104, 100, 0);
+        let start = Instant::now();
+
+        let mut steering = Steering::default();
+        steering.plan_elsewhere(Planner::start().expect("a thread to plan on"));
+
+        // The click. Its plan is being worked out somewhere else, so the body
+        // stands where it is — for a fraction of one beat in a client, and here
+        // for however long it takes a thread to get going.
+        steering.go_to(goal, here(), start, Direction::East, over_facet(&facet, &tiles));
+        wait_for_a_plan(&mut steering, &facet, &tiles, here(), goal);
+
+        // Then a beat of walking for every step the route round the wall takes,
+        // each from wherever the last one landed — the cadence
+        // `Steering::take` is written against.
+        let mut standing = here();
+        for beat in 1..12 {
+            // The picture is drawn every frame, and it asks the same question:
+            // if either of them were still searching here, this is where it
+            // would show.
+            steering.plan_for(over_facet(&facet, &tiles), standing, goal);
+            // On the deadline rather than a frame before it: the beat a body
+            // spends waiting for its first plan is not a crossing, so there is
+            // nothing for [`LOOKAHEAD`] to be early against.
+            if let Some(step) = steering.due(
+                at(start, beat * 400),
+                standing,
+                Direction::East,
+                over_facet(&facet, &tiles),
+            ) {
+                standing =
+                    step_from(standing, step.direction).expect("a step this end asked for lands somewhere");
+            }
+            std::thread::yield_now();
+        }
+
+        assert_eq!(
+            steering.searched_here.get(),
+            0,
+            "the walk path ran a search on the thread that asked, which is the whole of what P3 is \
+             about"
+        );
+        assert_ne!(standing, here(), "the premise: the body actually walked");
+    }
+
+    /// A click whose plan is being worked out elsewhere waits a **frame**, not
+    /// a walking beat.
+    ///
+    /// This module's opening section is explicit that waiting a whole step
+    /// before the first one would put four hundred milliseconds between the
+    /// input and the character. Planning off this thread put a beat in exactly
+    /// that place, because the branch that stands still is shared with a body
+    /// that has nowhere to walk — and a body waiting for an answer has not been
+    /// refused anything. Nor is it stalling: four beats of standing is what ends
+    /// an order, and four *frames* of waiting must not.
+    #[test]
+    fn a_click_waiting_on_another_thread_looks_again_next_frame_not_next_beat() {
+        let tiles = Arc::new(TileData::empty());
+        let facet = facet_with_a_wall(&tiles);
+        let goal = Point::new(104, 100, 0);
+        let start = Instant::now();
+
+        let mut steering = Steering::default();
+        steering.plan_elsewhere(Planner::start().expect("a thread to plan on"));
+        assert_eq!(
+            steering.go_to(goal, here(), start, Direction::East, over_facet(&facet, &tiles)),
+            None,
+            "the plan is not back yet, so there is nothing to step along"
+        );
+        assert_eq!(
+            steering.deadline(),
+            Some(start + AWAITING_A_PLAN),
+            "a click waiting on a worker was told to look again a walking beat later"
+        );
+        assert!(
+            AWAITING_A_PLAN < WALK_HOLD,
+            "the premise: a frame is shorter than a beat"
+        );
+
+        // And once the answer is in, the very next look walks.
+        wait_for_a_plan(&mut steering, &facet, &tiles, here(), goal);
+        assert!(
+            steering
+                .due(
+                    start + AWAITING_A_PLAN,
+                    here(),
+                    Direction::East,
+                    over_facet(&facet, &tiles),
+                )
+                .is_some(),
+            "the plan was in hand and the body still did not set off"
+        );
+        assert_eq!(
+            steering.searched_here.get(),
+            0,
+            "and none of that ran a search on this thread"
+        );
+    }
+
+    /// The one thing the frame thread owes the worker: a facet's ground is
+    /// written while nothing is planning over it.
+    ///
+    /// [`Ground::rebake`](openshard_movement::ground::Ground::rebake) panics on
+    /// a bedrock somebody is reading — deliberately, so that a caller who
+    /// forgets finds out — and this is the seam that keeps that from happening:
+    /// settle first, then write.
+    #[test]
+    fn settling_the_planner_gives_the_ground_back_to_be_written() {
+        let tiles = Arc::new(TileData::empty());
+        let mut facet = facet_with_a_wall(&tiles);
+        let mut steering = Steering::default();
+        steering.plan_elsewhere(Planner::start().expect("a thread to plan on"));
+
+        // Ask, so that a share of the bedrock is out on another thread — in the
+        // question, in the worker, or in the answer on its way back.
+        steering.plan_for(over_facet(&facet, &tiles), here(), Point::new(104, 100, 0));
+        steering.settle_plans();
+
+        // Nobody else is holding one. Two is the facet's own and the one this
+        // line just took to count with, and the assertion is the contract
+        // itself: `Ground::rebake` below takes the bedrock back exclusively and
+        // panics on a share, so what has to be true is not "it worked" but
+        // "there is no other holder left".
+        assert_eq!(
+            Arc::strong_count(&facet.share()),
+            2,
+            "settling did not get the ground back from the thread planning over it"
+        );
+        facet.rebake(&tiles);
+    }
+
     #[test]
     fn restating_a_destination_does_not_restart_the_cadence() {
         let start = Instant::now();
@@ -3394,7 +3936,7 @@ mod tests {
                 Readings::plain(open_ground()),
             )
             .unwrap();
-        let after_click = steering.plans.get();
+        let after_click = steering.searched_here.get();
         assert_eq!(after_click, 1, "the click itself plans a route");
 
         for tick in 1..20 {
@@ -3407,7 +3949,7 @@ mod tests {
             );
         }
         assert_eq!(
-            steering.plans.get(),
+            steering.searched_here.get(),
             after_click,
             "restating the destination between steps must not run a search"
         );

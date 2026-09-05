@@ -154,7 +154,13 @@ pub struct Resources {
     /// Static long-distance connectivity over [`Resources::ground`]. It is built
     /// once, before the event loop starts, and only proposes a corridor; the
     /// live route still reads the map with the shard's clutter laid over it.
-    pub coarse:        Option<NavigationGraph>,
+    ///
+    /// **Shared**, for the reason
+    /// [`Ground::share`](openshard_movement::ground::Ground::share) is: a route
+    /// is planned on a thread of its own (`planner.rs`), the graph is ten
+    /// megabytes, and nothing changes it while a body walks — a rebake replaces
+    /// the whole of it.
+    pub coarse:        Option<Arc<NavigationGraph>>,
     /// Static positive building space, baked from the facet's wall catalogue.
     /// Unlike `coarse`, this is presentation topology: zero means the open
     /// world and a non-zero label is the whole house in the first pass.

@@ -337,6 +337,13 @@ impl App {
     fn ground_moved(&mut self, chunks: &[openshard_map::chunk::Chunk]) {
         use openshard_client_render::composite::MapBlockBounds;
 
+        // **Before anything below touches the ground.** A route is planned on a
+        // thread of its own and reads this facet's map, its span bake and the
+        // coarse graph over it; `Ground::take_chunks` and `coarse_follows` both
+        // take those back exclusively. So whatever is being planned is waited
+        // for first — at most one query, against a publish that has already
+        // cost a round trip and a chunk fetch. See `planner.rs`.
+        self.steer.settle_plans();
         let Some(first) = chunks.first() else {
             // `Fetch::moved` refuses an empty list and the shard does not send
             // one, so this is the belt rather than the braces.
@@ -476,6 +483,13 @@ impl App {
     /// bake of this graph makes: a door that happened to be shut when a publish
     /// landed is not a property of the ground, and every hop is refined through
     /// the live terrain at the query anyway.
+    ///
+    /// # Panics
+    ///
+    /// If a route is being planned over this graph — the same contract
+    /// [`Ground::share`](openshard_movement::ground::Ground::share) states for
+    /// the map beside it, and `App::ground_moved` settles the planner before it
+    /// gets here.
     fn coarse_follows(&mut self, moved: &[openshard_map::chunk::ChunkCoord]) {
         let Some(terrain) = self.resources.ground.terrain(&self.resources.tiledata) else {
             return;
@@ -483,6 +497,8 @@ impl App {
         let Some(coarse) = self.resources.coarse.as_mut() else {
             return;
         };
+        let coarse = std::sync::Arc::get_mut(coarse)
+            .expect("the coarse graph is rebaked while nothing is planning over it — see App::ground_moved");
         let nothing_placed = openshard_map::overlay::Overlay::default();
         let footing = openshard_movement::Footing::new(
             Some(terrain),
@@ -858,7 +874,10 @@ impl App {
                     edges,
                     path,
                 };
-                self.resources.coarse = Some(*graph);
+                // Shared from here on: a plan is made on a thread of its own and
+                // this is what it reads. Replaced whole rather than edited, so
+                // a plan under way finishes over the graph it started with.
+                self.resources.coarse = Some(std::sync::Arc::new(*graph));
                 // A route refused for want of a corridor is worth asking again
                 // now that there is one. A remembered refusal is kept across
                 // frames on purpose — see `Steering::begin_frame` — so nothing

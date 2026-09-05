@@ -54,7 +54,6 @@ use crate::net_command::project_motion;
 use crate::world::{
     advance_presentation_to,
     footing,
-    guide,
 };
 use crate::{
     DEAD_ZONE,
@@ -617,12 +616,7 @@ impl App {
         // every raw move (see `steer.rs`), and building the crowd here made a
         // `Vec` and a sort per move. A route planned through a body is one the
         // shard refuses a step at a time.
-        let ground = steer::Readings {
-            live:   footing(&self.resources, self.walking_doors())
-                .among(Bodies::standing(&self.world.bodies)),
-            guide:  guide(&self.resources),
-            coarse: self.resources.coarse.as_ref(),
-        };
+        let ground = crate::world::readings(&self.resources, &self.world.bodies, self.walking_doors());
         let motion = self.world.motion.planning_state();
         let facing = if self.input.ctrl_held {
             self.steer.go_to(

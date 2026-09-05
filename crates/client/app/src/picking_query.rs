@@ -88,14 +88,12 @@ use crate::picking::SelectedIdentity;
 use crate::world::{
     InteriorCache,
     footing,
-    guide,
     terrain,
 };
 use crate::{
     desk,
     frames,
     shell,
-    steer,
     tooltips,
 };
 
@@ -788,26 +786,22 @@ impl App {
         // is the plan itself and not a second opinion about it (`docs/render/design_frame_assembly.md`),
         // so a route drawn through a bystander would be a picture of a walk this
         // client is not going to take.
-        let ground = steer::Readings {
-            // The route the HUD draws is the one a step would take, so it reads
-            // the doors the way a step reads them — the body's own state, the
-            // auto-door setting included. This end plans through a shut leaf
-            // only where it is going to open one (`App::walk` sends the use
-            // before the step), so a route drawn stopped at that leaf would be a
-            // picture of a refusal that is not going to happen, which is
-            // `docs/render/design_frame_assembly.md`'s whole complaint and
-            // `docs/world/README.md`'s finding 26 in the field.
-            //
-            // The question has its own name because it used to have its own
-            // answer; the argument is on `crate::world::drawn_route_doors`.
-            live:   footing(
-                &self.resources,
-                crate::world::drawn_route_doors(self.world.dead(), self.auto_open_doors),
-            )
-            .among(openshard_movement::Bodies::standing(&self.world.bodies)),
-            guide:  guide(&self.resources),
-            coarse: self.resources.coarse.as_ref(),
-        };
+        // The route the HUD draws is the one a step would take, so it reads the
+        // doors the way a step reads them — the body's own state, the auto-door
+        // setting included. This end plans through a shut leaf only where it is
+        // going to open one (`App::walk` sends the use before the step), so a
+        // route drawn stopped at that leaf would be a picture of a refusal that
+        // is not going to happen, which is
+        // `docs/render/design_frame_assembly.md`'s whole complaint and
+        // `docs/world/README.md`'s finding 26 in the field.
+        //
+        // The question has its own name because it used to have its own answer;
+        // the argument is on `crate::world::drawn_route_doors`.
+        let ground = crate::world::readings(
+            &self.resources,
+            &self.world.bodies,
+            crate::world::drawn_route_doors(self.world.dead(), self.auto_open_doors),
+        );
         let route = self.steer.plan_for(ground, from, goal).map(|plan| {
             // The body's own tile leads the open half, so a route of one step is a
             // line and not a dot. The barred half carries on from wherever the open
