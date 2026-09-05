@@ -706,6 +706,40 @@ impl App {
         })
     }
 
+    /// The last route this drew, from wherever the body has got to since.
+    ///
+    /// **What the picture falls back on while the next answer is worked out**,
+    /// and the whole of why it is a fallback rather than nothing: the plan comes
+    /// from another thread now, so between a question and its answer there are
+    /// frames with no fresh route — and a Ctrl-drag asks a fresh question on
+    /// every mouse-move. A line that blinked out for each of those would be
+    /// missing more frames than it was drawn on, which is what a player reports
+    /// as flicker.
+    ///
+    /// It is trimmed to the body when the body is standing on it — the ordinary
+    /// case, since this is the route being walked — and drawn as it stands when
+    /// it is not, which is a preview of a destination the cursor has since moved
+    /// off. Either way it is the last thing that was true, and it is at most one
+    /// query old.
+    ///
+    /// Nothing is remembered here: the cache belongs to answers, and this is
+    /// what is shown *because* there is no answer yet.
+    fn held_route(&self, leaving: Point, from: Point) -> Option<Arc<Route>> {
+        let route = self.route_cache.as_ref()?.route.as_ref()?;
+        let Some(walked) = route
+            .open
+            .iter()
+            .position(|point| point.x == from.x && point.y == from.y)
+        else {
+            return Some(Arc::clone(route));
+        };
+        Some(Arc::new(Route {
+            open:    from_the_body(leaving, &route.open[walked..]),
+            barred:  route.barred.clone(),
+            refusal: route.refusal,
+        }))
+    }
+
     /// The way to wherever the body was last told to go, as the two-coloured
     /// line the player is owed for a Ctrl-drag — or, with no destination and the
     /// terrain overlay switched on, the way that *would* be walked to the tile
@@ -718,19 +752,31 @@ impl App {
     /// written here for the drawing alone would be a second policy about the
     /// same question, which `docs/render/design_frame_assembly.md` is the standing argument against.
     ///
-    /// **One plan per changed route, and only while there is something to
-    /// draw.** The walk plans on its own beat — at most once a step, by design,
-    /// since a drag restates the destination tens of times a second — so its
-    /// stored route is up to a step stale and is *cleared* the moment the
-    /// destination moves. Drawn from that, the line under a dragging cursor
-    /// would blink out and catch up a beat later, which is the opposite of what
-    /// a preview is for. The HUD therefore retains its last answer until its
-    /// start, destination, or world snapshot changes: a standing route costs
-    /// no A* searches per frame.
+    /// **One plan per changed route, and a line on every frame.** The walk plans
+    /// on its own beat — at most once a step, by design, since a drag restates
+    /// the destination tens of times a second — so its stored route is up to a
+    /// step stale. The HUD retains its last answer until its start, destination,
+    /// or world snapshot changes, and while the *next* answer is being worked
+    /// out somewhere else it draws [`held_route`](Self::held_route): a standing
+    /// route costs no A\* searches per frame, and a frame is never left without
+    /// a line to draw.
     pub(crate) fn route_shown(&mut self, hover: Option<&PickedTile>) -> Option<Arc<Route>> {
-        // The movement core names the route origin explicitly; the HUD does
-        // not infer it from either a renderer `Mobile` or Crowd's clock.
-        let from = self.world.motion.route_origin();
+        // **Two places, and the difference between them is one step in flight.**
+        // The movement core names both explicitly; the HUD infers neither from a
+        // renderer `Mobile` or Crowd's clock.
+        //
+        // `leaving` is the tile the body is visibly walking out of, and the line
+        // is drawn from there or it detaches from the character for the length
+        // of every stride. `from` is where the **walk** plans from — its own
+        // prediction, one step further on — and this used to plan from `leaving`
+        // instead. That made one order two questions: the picture asked about
+        // the tile behind the walk's, on every frame, and with one worker
+        // answering one question at a time each of them kept collecting an
+        // answer about the other's pair and throwing it away. Neither could
+        // land while the body moved, which is a route recomputed constantly and
+        // drawn intermittently.
+        let leaving = self.world.motion.route_origin();
+        let from = self.world.motion.planning_state().position;
         let goal = match self.steer.goal() {
             Some(at) => at,
             // No destination: the hover preview is the terrain overlay's own
@@ -749,7 +795,7 @@ impl App {
             }
         };
         if let Some(cached) = self.route_cache.as_ref().filter(|cached| cached.goal == goal) {
-            if cached.from == from {
+            if cached.from == from && cached.leaving == leaving {
                 return cached.route.clone();
             }
             // While a destination is being walked, the body advances along the
@@ -767,13 +813,14 @@ impl App {
                         .position(|point| point.x == from.x && point.y == from.y)
                     {
                         let route = Route {
-                            open:    route.open[index..].to_vec(),
+                            open:    from_the_body(leaving, &route.open[index..]),
                             barred:  route.barred.clone(),
                             refusal: route.refusal,
                         };
                         let route = Arc::new(route);
                         self.route_cache = Some(crate::app::RouteCache {
                             from,
+                            leaving,
                             goal,
                             route: Some(Arc::clone(&route)),
                         });
@@ -812,20 +859,28 @@ impl App {
         // is never drawn. That is `docs/world/README.md`'s finding 30 and the
         // reason the line blinked. Nothing is remembered for it — the next frame
         // asks again, and the frame the answer lands on draws it.
+        //
+        // And what is drawn in the meantime is the last line there was, because
+        // **a picture of a walk is owed on every frame**: a destination dragged
+        // under the cursor asks a new question on every raw mouse-move, and a
+        // line that went out between the question and its answer would be
+        // missing more frames than it was drawn on.
         if planned.is_none() && self.steer.awaiting() {
-            return None;
+            return self.held_route(leaving, from);
         }
         let route = planned.map(|plan| {
             // The body's own tile leads the open half, so a route of one step is a
-            // line and not a dot. The barred half carries on from wherever the open
-            // one stopped — the body's tile when nothing at all is walkable, which
-            // is a body standing at the shut door.
-            let mut open = vec![from];
-            open.extend(plan.open_points);
-            let from = *open.last().unwrap();
+            // line and not a dot — and the tile it is *leaving* leads that, for
+            // as long as a step is in flight. The barred half carries on from
+            // wherever the open one stopped — the body's tile when nothing at
+            // all is walkable, which is a body standing at the shut door.
+            let mut way = vec![from];
+            way.extend(plan.open_points);
+            let open = from_the_body(leaving, &way);
+            let stopped = *open.last().unwrap();
             let mut barred = plan.barred_points;
             if !barred.is_empty() {
-                barred.insert(0, from);
+                barred.insert(0, stopped);
             }
             Arc::new(Route {
                 open,
@@ -835,6 +890,7 @@ impl App {
         });
         self.route_cache = Some(crate::app::RouteCache {
             from,
+            leaving,
             goal,
             route: route.clone(),
         });
@@ -1765,6 +1821,31 @@ impl App {
     }
 }
 
+/// A drawn line that starts under the character: the tile the body is walking
+/// out of, and then the way on from there.
+///
+/// **The head of a line and the head of a plan are two different tiles while a
+/// step is in flight.** A route is planned from where the walk plans — the
+/// prediction, which is the tile the step in flight is arriving at — so a line
+/// drawn from the plan's own first tile leaves the character behind for the
+/// length of every stride. `leaving` is dropped rather than repeated when the
+/// way already starts there, which is every moment the body is standing still.
+///
+/// Compared by tile and not by place: the two are the same column and the z of a
+/// step in flight is the business of whoever is drawing it, not of the line.
+fn from_the_body(leaving: Point, way: &[Point]) -> Vec<Point> {
+    let already = way
+        .first()
+        .is_some_and(|head| head.x == leaving.x && head.y == leaving.y);
+    if already {
+        return way.to_vec();
+    }
+    let mut open = Vec::with_capacity(way.len() + 1);
+    open.push(leaving);
+    open.extend_from_slice(way);
+    open
+}
+
 #[cfg(test)]
 mod tests {
     use openshard_map::overlay::{
@@ -1785,6 +1866,30 @@ mod tests {
         let footing = Footing::new(None, &overlay, Doors::AsTheyStand);
 
         assert_eq!(standing_z(&footing, tile, 0, 0), 7);
+    }
+
+    /// A line drawn while a step is in flight starts under the character, and
+    /// one drawn while the body stands still does not repeat its tile.
+    ///
+    /// The route is planned from where the walk plans — a step ahead of the body
+    /// mid-stride — precisely so that the two of them ask one question; drawing
+    /// it is what puts the tile being left back on the front.
+    #[test]
+    fn a_line_starts_at_the_tile_the_body_is_leaving() {
+        let leaving = Point::new(100, 100, 0);
+        let arriving = Point::new(101, 100, 0);
+        let way = [arriving, Point::new(102, 100, 0)];
+
+        assert_eq!(
+            from_the_body(leaving, &way),
+            vec![leaving, way[0], way[1]],
+            "the line began at the tile the step is arriving at, a tile ahead of the character"
+        );
+        assert_eq!(
+            from_the_body(arriving, &way),
+            way.to_vec(),
+            "a body standing on the head of its own route had that tile drawn twice"
+        );
     }
 }
 

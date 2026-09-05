@@ -902,6 +902,22 @@ pub struct Steering {
     /// nothing is sent at all and the destination's patience is what ends the
     /// order; see [`Steering::take`].
     route:         VecDeque<Direction>,
+    /// Which destination the route in hand is the answer to.
+    ///
+    /// **What makes a route state rather than an answer to this beat's
+    /// question.** A route used to be dropped the moment the destination
+    /// changed, and a drag changes it on every mouse-move: the body was left
+    /// with nothing to walk tens of times a second, and — since the search
+    /// answers from another thread now — it stood still waiting each time. What
+    /// it holds is a route toward a place a fraction of a second out of date,
+    /// which is a far better thing to walk than nothing at all.
+    ///
+    /// So the route is kept until something *replaces* it, and this is what says
+    /// whether it needs replacing: a plan is asked for whenever this is not the
+    /// destination in force, and the answer takes over when it lands. Absent
+    /// means there is no route to anywhere in hand — nothing has been planned,
+    /// or what was planned has been walked, refused or abandoned.
+    planned_for:   Option<Point>,
     /// The last complete plan is shared by movement and the route preview.
     /// Both consumers ask the same question for the same world snapshot; do
     /// not make the expensive real/doors-open searches twice.
@@ -1178,8 +1194,18 @@ impl Steering {
     /// Discard a route made before dynamic courtesy obstacles changed. The
     /// destination remains, so the next due step plans from the current tile.
     pub(crate) fn clear_route(&mut self) {
-        self.route.clear();
+        self.drop_route();
         self.clear_plan_cache();
+    }
+
+    /// Let go of the route in hand, and of what it was a route to.
+    ///
+    /// One call rather than two statements because the two must not come apart:
+    /// steps left over with no destination against them would be walked as an
+    /// answer to whatever is asked next — see [`Steering::planned_for`].
+    fn drop_route(&mut self) {
+        self.route.clear();
+        self.planned_for = None;
     }
 
     /// Whether every step left of the route still lands somewhere, read against
@@ -1415,7 +1441,13 @@ impl Steering {
     ) -> Option<Facing> {
         self.mouse = None;
         if self.goal != Some(at) {
-            self.route.clear();
+            // **The route in hand is not dropped here**, and that is what keeps
+            // a dragged destination walking. It is a route to where the cursor
+            // was a moment ago; the body walks it while the answer to where the
+            // cursor is *now* is worked out, and [`Steering::take`] swaps it the
+            // instant that lands. Dropping it left the body with nothing to walk
+            // on every raw mouse-move — see [`Steering::planned_for`].
+            //
             // A *new* destination, which is what a person means by "I clicked
             // there". A drag restates the same one on every mouse-move and is
             // not one of these — a journal that wrote a line per raw event
@@ -1494,7 +1526,7 @@ impl Steering {
         }
         self.mouse = ask;
         self.goal = None;
-        self.route.clear();
+        self.drop_route();
         if ask.is_none() {
             if self.keys.asking().is_none() {
                 self.stand();
@@ -1628,7 +1660,7 @@ impl Steering {
                     }
                 }
                 self.goal = None;
-                self.route.clear();
+                self.drop_route();
             } else if self.stalled > 0 {
                 // The step just taken did not move the body: the plan's guess
                 // about the dynamic half of the world (a shut door, a placed
@@ -1636,7 +1668,7 @@ impl Steering {
                 // three more tries buys nothing. Drop it — replanned below,
                 // from where the body actually stands rather than where the
                 // old route assumed.
-                self.route.clear();
+                self.drop_route();
             }
         }
 
@@ -1665,8 +1697,8 @@ impl Steering {
                     }));
                 }
                 self.goal = None;
-                self.route.clear();
-            } else if self.route.is_empty() {
+                self.drop_route();
+            } else if self.planned_for != Some(at) || self.route.is_empty() {
                 // `plan` answers for every way this can end — through, up to
                 // what is in the way, or as close as the ground gets — so an
                 // empty route after it means one of two things: there is nowhere
@@ -1681,11 +1713,29 @@ impl Steering {
                 // *previous* frame's walk is not reusable when the search runs
                 // here, because a door can have opened since; `begin_frame` is
                 // what drops it, and a failed coarse search is what it keeps.
-                self.route = self
-                    .plan_from(ground, from, at, Asker::Walk)
-                    .map(|plan| plan.open)
-                    .unwrap_or_default()
-                    .into();
+                //
+                // **Asked whenever what is held is not this destination's
+                // answer, and the held route is walked until it arrives.** The
+                // two `None`s below are the reason this is not one line: an
+                // answer that has not come back is not a verdict about anywhere,
+                // and treating it as one is what left the body standing on every
+                // mouse-move of a drag.
+                match self.plan_from(ground, from, at, Asker::Walk) {
+                    Some(plan) => {
+                        self.route = plan.open.into();
+                        self.planned_for = Some(at);
+                    }
+                    // Still being worked out. The body walks what it has —
+                    // a route toward where the cursor was a fraction of a second
+                    // ago, or the remainder of the last plan for this same
+                    // destination — and this beat changes nothing.
+                    None if self.awaiting => {}
+                    // A verdict: from here there is nowhere to walk toward this
+                    // destination at all. Whatever is left in hand is a route to
+                    // a place nobody is asking for any more, so it goes, and the
+                    // standing branch below is what the body does instead.
+                    None => self.drop_route(),
+                }
             }
         }
 
@@ -4079,6 +4129,81 @@ mod tests {
         assert!(
             !steering.awaiting(),
             "the answer is in and the question is still reported as outstanding"
+        );
+    }
+
+    /// A destination dragged to a new place keeps walking the route in hand
+    /// until the new one lands.
+    ///
+    /// **What a Ctrl-drag is.** The destination is restated on every raw
+    /// mouse-move — tens of times a second — and the route used to be dropped on
+    /// each of those. While the search ran in the same call that dropped it, the
+    /// gap was invisible; against a worker it is a body standing still waiting
+    /// for an answer, over and over, which is what a player reports as a walk
+    /// that will not go smoothly. The route it holds is a route to where the
+    /// cursor was a fraction of a second ago, and walking that is strictly
+    /// better than walking nothing.
+    #[test]
+    fn a_destination_dragged_to_a_new_place_keeps_walking_the_route_in_hand() {
+        let tiles = Arc::new(TileData::empty());
+        let facet = Ground::new(None, &tiles);
+        let first = Point::new(110, 100, 0);
+        let dragged_to = Point::new(110, 101, 0);
+        let start = Instant::now();
+
+        let mut steering = Steering::default();
+        steering.plan_elsewhere(Planner::start().expect("a thread to plan on"));
+        steering.go_to(first, here(), start, Direction::East, over_facet(&facet, &tiles));
+        wait_for_a_plan(&mut steering, &facet, &tiles, here(), first);
+
+        // One beat of it, so there is a route part-walked rather than a fresh one.
+        let step = steering
+            .due(
+                at(start, 400),
+                here(),
+                Direction::East,
+                over_facet(&facet, &tiles),
+            )
+            .expect("the plan is in hand and the beat is due");
+        let standing = step_from(here(), step.direction).expect("a step this end asked for lands somewhere");
+
+        // The cursor moves. The answer for where it is now cannot be back yet —
+        // the question has not even been asked, since a drag never searches.
+        // A drag restates the destination between beats and may itself be free
+        // to send the step that is due; either way the body is walking, and
+        // where it stands has to follow — a beat asked from the tile the last
+        // one left is a body that did not move, which is a stall and drops the
+        // route for its own good reasons.
+        let standing = match steering.go_to(
+            dragged_to,
+            standing,
+            at(start, 410),
+            step.direction,
+            over_facet(&facet, &tiles),
+        ) {
+            Some(dragged) => {
+                step_from(standing, dragged.direction).expect("a step this end asked for lands somewhere")
+            }
+            None => standing,
+        };
+
+        // At the beat the walk had already armed — the drag does not re-time it.
+        let beat = steering.deadline().expect("a walk under way has a next beat");
+        let stepped = steering.due(beat, standing, step.direction, over_facet(&facet, &tiles));
+        assert!(
+            stepped.is_some(),
+            "the drag left the body standing still while it waited for the answer to a destination \
+             one tile from the one it already had a route to (route={}, planned for {:?}, \
+             awaiting={}, stalled={})",
+            steering.route.len(),
+            steering.planned_for,
+            steering.awaiting,
+            steering.stalled,
+        );
+        assert_eq!(
+            steering.searched_here.get(),
+            0,
+            "and none of that ran a search on this thread"
         );
     }
 

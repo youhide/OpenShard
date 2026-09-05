@@ -631,6 +631,36 @@ The tests are `steer.rs`'s `an_answer_one_step_late_is_trimmed_rather_than_asked
 plan in hand), `a_plan_that_has_not_arrived_says_so_rather_than_that_there_is_no_route`,
 and `a_body_beside_the_route_leaves_it_alone_and_one_standing_on_it_does_not`.
 
+**The flicker survived all three, and what was under it was bigger.** Reported
+again from play: the line still blinks, and a route "should be there on every
+frame". Two things were wrong and neither is a cache.
+
+- **One order was asking a worker two different questions.** The walk plans from
+  `WorldState::planning_state` — its own prediction, which is the tile a step in
+  flight is *arriving* at — and the drawn route planned from
+  `WorldState::route_origin`, the tile that step is *leaving*. While the body
+  moves those are never the same tile, so the picture asked once per frame about
+  one pair and the walk once per beat about another. With one worker answering
+  one question at a time, each of them kept collecting an answer about the
+  other's pair: the picture's trim could not use a route starting a tile ahead of
+  it, and the walk's could not use one starting a tile behind. Neither landed
+  while anybody walked. Both ask `planning_state` now, and the tile being left is
+  put back on the front of the *line* where it belongs (`from_the_body`) — so the
+  picture is a cache hit on the walk's own plan, and asks nothing at all while a
+  route holds.
+- **A route was an answer to this beat's question rather than state.** `go_to`
+  dropped the route whenever the destination changed, and a Ctrl-drag restates
+  the destination on every raw mouse-move. That was invisible while the search
+  ran in the same call that dropped it; against a worker it is a body left with
+  nothing to walk, tens of times a second. The route is now kept until something
+  *replaces* it: `Steering::planned_for` says which destination it answers, a
+  plan is asked for whenever that is not the destination in force, and what is in
+  hand is walked until the answer arrives. Only an arrival, an abandonment, a
+  stall or a verdict empties it.
+
+The tests for those are `a_destination_dragged_to_a_new_place_keeps_walking_the_route_in_hand`
+and `picking_query`'s `a_line_starts_at_the_tile_the_body_is_leaving`.
+
 What is still not read is a frame-time trace from a running client: `jank.rs`'s
 `ui_route` pass is wired and nobody has walked a session with it open, which is
 the reading P3 already named as the natural next one. **And what none of this

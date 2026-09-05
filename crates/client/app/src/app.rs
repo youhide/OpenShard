@@ -393,12 +393,29 @@ pub(crate) struct App {
 
 /// A route snapshot and the world positions that make it valid.
 pub(crate) struct RouteCache {
-    pub(crate) from:  Point,
+    /// Where the route was *planned* from — the walk's own prediction, which is
+    /// the tile a step in flight is arriving at.
+    ///
+    /// **The same tile the walk plans from, and that is the point of it.** The
+    /// drawn route used to be planned from [`leaving`](Self::leaving) instead,
+    /// so one order asked a worker two different questions — one per frame from
+    /// the picture, one per beat from the walk — and each answer came back about
+    /// the pair the other one was not asking. See `picking_query`'s
+    /// `route_shown`.
+    pub(crate) from:    Point,
+    /// The tile the body is visibly walking out of, which is where the line is
+    /// drawn from. Equal to [`from`](Self::from) whenever no step is in flight.
+    ///
+    /// Part of the key because it moves on its own clock: a stride ending
+    /// changes where the line starts without changing anything about the plan,
+    /// and the line is rebuilt from the plan already in hand rather than asked
+    /// for again.
+    pub(crate) leaving: Point,
     /// The place the route was planned to, height and all: two floors of one
     /// column are two destinations, and a cache keyed by the tile would hand a
     /// route to the street back for an order to the storey over it.
-    pub(crate) goal:  Point,
-    pub(crate) route: Option<Arc<Route>>,
+    pub(crate) goal:    Point,
+    pub(crate) route:   Option<Arc<Route>>,
 }
 
 /// A sight line, and the two points that make it valid.
