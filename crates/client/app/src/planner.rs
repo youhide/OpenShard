@@ -9,6 +9,52 @@
 //! that number: `without_folds` shortens the *route*, not the search that
 //! proposed it.
 //!
+//! # Who writes, and when — the short version
+//!
+//! **One thread writes and it is not this one.** Three threads touch a facet,
+//! and only the first of them ever writes to it:
+//!
+//! - the **frame thread** draws, pumps the wire and handles clicks. It is the
+//!   **only writer** of the map, the bake and the coarse graph, and it is also
+//!   the thread that asks for plans;
+//! - the **planner worker** below reads and never writes;
+//! - the **graph bake worker** writes nothing either. It builds a whole new
+//!   `NavigationGraph` from scratch and sends it over as a message, which the
+//!   frame thread installs.
+//!
+//! **So a read and a write cannot overlap, and not because anything checks.**
+//! Asking for a plan and writing the ground are two calls *by the same thread*:
+//! while it is inside `App::ground_moved` it is not inside `Steering::plan_from`,
+//! and the next question is asked after the write, by the same straight-line
+//! code that did it.
+//!
+//! ```text
+//! frame:  [ask]──draw──draw──[chunks! settle ▓▓waits▓▓][writes map + bake]──[ask again]
+//! worker:    └──── searching, ~23 ms ────┘ lets go
+//!                                        ↑ the share count is 1 from here
+//! ```
+//!
+//! The worker holds its share only from "took the question" to "let go", and it
+//! lets go *before* it sends the answer — so a `settle` that has received an
+//! answer is a facet nobody else is reading. [`Planner::settle`] waits out at
+//! most that one query.
+//!
+//! **What the layers are**, since the split below falls exactly between "huge
+//! and still" and "tiny and moving":
+//!
+//! | layer | the type | size | moves |
+//! |---|---|---|---|
+//! | land | `WorldMap` in `MapSnapshot` | 117.4 MiB | ~never |
+//! | statics | the same `WorldMap` | 29.5 MiB | ~never |
+//! | where a body may stand | `SpanIndex` | a projection of those two | when they do |
+//! | the corridor graph | `NavigationGraph` | 10.2 MB | on a rebake |
+//! | doors, crates, ships, houses the shard placed | `Overlay` | 311 tiles for a castle in view | constantly |
+//! | the crowd | `Vec<Point>` | tens of points | constantly |
+//!
+//! The first four are [`Bedrock`] and the graph beside it: **shared**. The last
+//! two are **copied per question**, so nothing that changes is shared and
+//! nothing shared changes — which is why no lock appears anywhere below.
+//!
 //! # What a worker is given, and why it is not a lock
 //!
 //! The search reads two grounds and they move on different clocks.

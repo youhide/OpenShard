@@ -529,6 +529,47 @@ option, and the reading said the cut costs four times what copying the whole
 thing does. So the guide is shared, the live half is copied, and the frame
 thread runs no search at all on the walk path.
 
+## What a reader of P3 could not get out of it
+
+Four attempts to explain the worker to somebody who had read this plan failed,
+and they failed the same way each time. The design was not what was in doubt —
+every question was about a hazard the design does not have. These are defects of
+how P3 is **written down**, and the remedy is a picture rather than more prose.
+
+1. **Nothing anywhere says which thread writes.** `planner.rs`'s header says
+   what the worker is *given*; `ground.rs`'s says what sharing costs. Neither
+   says the sentence a reader turns out to be missing: **the frame thread is the
+   only writer, the planner worker never writes at all, and the graph bake worker
+   writes nothing either** — it builds a whole new graph and hands it over as a
+   message. Without that line, "the guide is shared behind an `Arc`" reads as two
+   threads touching one value, and every safety argument after it reads as a
+   claim to be checked rather than a consequence.
+
+2. **Nothing says the reader and the writer are the same thread.** Asking for a
+   plan and writing the ground are two calls made *by the frame thread*, so they
+   cannot overlap — that is why the discipline holds at all, and it is on none of
+   the three pages. Once it is said, `settle_plans` stops looking like a lock and
+   becomes what it is: waiting out the one query that may be outstanding.
+
+3. **`Bedrock` does not say which layers it is.** A reader holds this world as
+   land, statics, the bake, and then the doors and crates over them; the name
+   defines itself by the invariant it guards instead. What is missing is one
+   table — layer, the type it is, its size, how often it moves — which is also
+   the whole argument for the split, since the line falls exactly between "huge
+   and still" and "tiny and moving".
+
+4. **`Arc::get_mut` reads as a synchronisation mechanism.** It is not one. It is
+   a check that a discipline was kept, and the discipline is the call order. The
+   `expect` says what a caller should do about a failure but never what the count
+   *means*: one is "nothing is planning over this", two is "the worker is on this
+   map right now".
+
+Written up as a layer table and a frame-thread-against-worker timeline at the top
+of [`planner.rs`](../../../crates/client/app/src/planner.rs). What is still not
+written anywhere is the same picture for a reader who is not opening that file.
+
+---
+
 All four are done. What the track leaves open is written where it belongs:
 finding 22's flickering destination stays where it was measured (it waits on the
 client's memory of what it has been shown, not on anything about a search), the

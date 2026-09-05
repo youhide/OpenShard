@@ -272,6 +272,17 @@ impl Ground {
 
     /// The bedrock, to write.
     ///
+    /// **This is not a lock, and the count is not a synchronisation.** Nothing
+    /// here arbitrates between a reader and a writer, because there is never
+    /// both at once: the thread that writes a facet is the thread that asks for
+    /// plans over it, so it is inside one call or the other and never both — see
+    /// `planner.rs`'s header for that timeline. What [`Arc::get_mut`] does is
+    /// *check that the call order was kept*, and the share count reads as a
+    /// sentence: **one** is "nothing is planning over this facet", **two** is
+    /// "a worker is on this map right now". The second is a caller that forgot
+    /// to settle first, and it is a panic rather than a wait because waiting
+    /// here would hide the mistake at the one seam where it is cheap to see.
+    ///
     /// # Panics
     ///
     /// If somebody is planning over this facet — see [`share`](Self::share).
