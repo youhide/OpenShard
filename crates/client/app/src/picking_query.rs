@@ -794,7 +794,14 @@ impl App {
                 self.walk_destination(tile)
             }
         };
-        if let Some(cached) = self.route_cache.as_ref().filter(|cached| cached.goal == goal) {
+        // A stale entry answers nothing — the ground under it moved — but it is
+        // still what gets drawn while its replacement is worked out, which is
+        // `held_route` at the bottom. See `RouteCache::stale`.
+        if let Some(cached) = self
+            .route_cache
+            .as_ref()
+            .filter(|cached| cached.goal == goal && !cached.stale)
+        {
             if cached.from == from && cached.leaving == leaving {
                 return cached.route.clone();
             }
@@ -823,6 +830,7 @@ impl App {
                             leaving,
                             goal,
                             route: Some(Arc::clone(&route)),
+                            stale: false,
                         });
                         return Some(route);
                     }
@@ -893,6 +901,7 @@ impl App {
             leaving,
             goal,
             route: route.clone(),
+            stale: false,
         });
         route
     }

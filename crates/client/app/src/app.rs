@@ -416,6 +416,20 @@ pub(crate) struct RouteCache {
     /// route to the street back for an order to the storey over it.
     pub(crate) goal:    Point,
     pub(crate) route:   Option<Arc<Route>>,
+    /// Whether the ground has moved under this since it was answered.
+    ///
+    /// **Not the same as forgetting it, and the difference is a frame with no
+    /// line on it.** A stale route is not served as an answer — every frame asks
+    /// again until a fresh one lands — but it is still the last true picture
+    /// there was, and `route_shown` draws it while it waits. Dropping the whole
+    /// cache instead blanked the line for however long the next plan took, which
+    /// against a worker is a frame or two of flicker for every door that opens
+    /// in view.
+    ///
+    /// A *replaced facet* is the case that still forgets outright: that is a
+    /// different world rather than a moved one, and a line across it is about
+    /// nowhere.
+    pub(crate) stale:   bool,
 }
 
 /// A sight line, and the two points that make it valid.

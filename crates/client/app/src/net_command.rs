@@ -1382,8 +1382,23 @@ impl App {
         // it is cleared wherever the route cache is, both being readings of one
         // ground.
         self.steer.clear_route();
-        self.route_cache = None;
+        self.route_drawn_went_stale();
         self.sight_cache = None;
+    }
+
+    /// The drawn route is not an answer any more, but it is still the last
+    /// picture there was.
+    ///
+    /// **Marked rather than forgotten**, which is the difference between a line
+    /// that keeps up and a line that blinks: the ground it was planned over has
+    /// moved, so no frame may be answered with it, and every frame asks again
+    /// until the replacement lands — but there is nothing else to draw in the
+    /// meantime, and drawing nothing is what a player sees as flicker. See
+    /// `RouteCache::stale` and `picking_query`'s `held_route`.
+    fn route_drawn_went_stale(&mut self) {
+        if let Some(cached) = self.route_cache.as_mut() {
+            cached.stale = true;
+        }
     }
 
     /// Redraw from what the server has shown us.
@@ -1414,7 +1429,10 @@ impl App {
         });
         if items_changed {
             self.steer.clear_plan_cache();
-            self.route_cache = None;
+            // Stale and not forgotten: the terrain moved, so nothing may be
+            // answered with the line in hand, but it stays drawn until its
+            // replacement arrives — see `route_drawn_went_stale`.
+            self.route_drawn_went_stale();
             // A door that has just opened or shut is the live half of a look,
             // and the only half of it this client keeps.
             self.sight_cache = None;
@@ -1938,7 +1956,10 @@ impl App {
             return;
         };
         self.steer.clear_plan_cache();
-        self.route_cache = None;
+        // A house arriving is the ground moving, not a different world: the line
+        // in hand stops being an answer and stays a picture — see
+        // `route_drawn_went_stale`.
+        self.route_drawn_went_stale();
         self.sight_cache = None;
         self.terrain_cache = None;
         self.occluder_cache = None;
