@@ -270,47 +270,56 @@ again (currently 0.7.18, `postgres-protocol` 0.6.12).
 
 ## What holds the MSRV, measured
 
-`rust-version = "1.96"`, and **the client is what sets it**. Measured rather than
-assumed, by reading `rust_version` off every package in `cargo metadata`: the
-highest demand in the tree is `wesl` 0.4.2 at **1.96.0**, a build-dependency of
-`crates/client/render` (`puffin` and `egui` follow at 1.92, also the client). The
-server crates build on **1.95**, the oldest toolchain to hand; the true server
-floor is at or below that and was not bisected further.
+`rust-version = "1.97.1"`, and **the client is what sets it**. Measured rather
+than assumed, by reading `rust_version` off every package in `cargo metadata`:
+the highest demand in the tree is the `wesl` 0.4.4 family — `wesl`,
+`wesl-macros`, `wgsl-parse`, `wgsl-types` — at **1.97.1**, a build-dependency of
+`crates/client/render` (`puffin` and `egui` follow at 1.92, also the client).
+Nothing else in the tree, this workspace's own crates included, asks for more
+than 1.96. The server crates build on **1.95**, the oldest toolchain to hand; the
+true server floor is at or below that and was not bisected further.
 
 It used to say 1.88, and `deno_core` was the reason. That reason is gone, and it
-did not free anything — the client's shader toolchain had quietly overtaken it, so
-the declared 1.88 had already stopped being true. Whoever wants the workspace back
-below 1.96 should start at `wesl`.
+did not free anything — the client's shader toolchain had quietly overtaken it,
+so the declared 1.88 had already stopped being true. It then said 1.96, for
+`wesl` 0.4.2. Whoever wants the workspace back below its current number should
+start at `wesl`; that is where the last three raises came from.
 
-**A live instance of exactly this, found 2026-08-07 and not yet pinned.**
-`crates/client/render`'s build-dependency `wesl = "0.4"` (the WESL-to-WGSL
-shader compiler, see [`lighting_raymarch.md`](archive/render/lighting_raymarch.md)) resolves
-today to `wesl` 0.4.2 in `Cargo.lock`, and 0.4.2's own `Cargo.toml` states
-`rust-version = "1.96.0"` — above this workspace's `1.88`, confirmed by
-reading the crate's manifest directly
-(`~/.cargo/registry/src/*/wesl-0.4.2/Cargo.toml`). `wesl` 0.4.0, the version
-current when it was first vendored, declared `1.87.0`. Not caught by CI
-because the toolchain actually in use here is newer than both numbers — the
-drift is latent, not a build failure yet. Not fixed here (found while
-rewriting the lighting docs, out of scope for that pass): if a future
-`cargo update` or a clean environment on an older toolchain hits this, pin
-`wesl` the way `tokio-postgres` was pinned above.
+**The 2026-09-05 raise is that pattern once more, and it is why the number moved
+rather than the lock.** `wesl` 0.4.3 raised its own `rust-version` to `1.97.1`,
+so once the lock had drifted to 0.4.4 the declared 1.96 was again a number the
+lock could not honour. MSRV-aware resolution then makes the choice concrete: a
+bare `cargo update` against `rust-version = "1.96"` *downgrades* the shader
+compiler back to 0.4.2 rather than failing, which is a silent regression in the
+one dependency the client's shaders are compiled by. Raising the declared MSRV
+to `1.97.1` keeps `wesl` at the version the tree is actually built and tested
+against, and restores the invariant the section above states — the lock respects
+`rust-version`. Pinning `wesl` the way `tokio-postgres` was pinned is the other
+half of the trade and stays available: it buys back 1.96 at the price of an
+older shader compiler.
+
+**Nothing verifies the number, which is why it drifts.** `rust-toolchain.toml`
+pins `nightly`, and rustup honours it over whatever a CI step installed, so
+`.github/workflows/ci.yml`'s `dtolnay/rust-toolchain@stable` does not put the
+workspace on stable — every CI job builds on the same nightly this machine does,
+far above the stated floor. A build on the declared MSRV would catch this drift
+on the commit that introduced it instead of on the next `cargo update`; there is
+no such job today.
 
 ## The toolchain is newer than the lints the tree was written against
 
 `cargo clippy --workspace --all-targets` is expected to be silent — it is what
-CI runs — and on the local toolchain it is not, as of 2026-08-11. The warnings
-are all one shape: lints that did not exist when the code was written, firing on
-code nobody has touched.
+CI runs — and as of 2026-09-05 it is, on the nightly this tree pins. The last
+inherited backlog was one shape, `chunks_exact_to_as_chunks` across
+`crates/common/protocol/src/{codec,speech}.rs` and
+`crates/client/render/src/png.rs`, and it was swept.
 
-```
-chunks_exact_to_as_chunks   crates/common/protocol/src/{codec,speech}.rs,
-                            crates/client/render/src/png.rs, and several tests
-```
-
-Nothing here is a defect, and none of it is a reason to edit a file a session is
-not otherwise in: a sweep like this belongs to one pass over the workspace with
-one commit, not to whichever session happens to run clippy next. **What matters
-while it lasts is reading the output rather than the exit code** — a session's
-own warning is easy to miss in a list of a dozen inherited ones, so check the
-paths, not the count.
+The shape is what recurs, not that instance: a toolchain bump turns on lints
+that did not exist when the code was written, and they fire on code nobody has
+touched. Nothing of that kind is a defect, and none of it is a reason to edit a
+file a session is not otherwise in — a sweep like that belongs to one pass over
+the workspace with one commit, not to whichever session happens to run clippy
+next. So when the list comes back non-empty, record it here rather than fixing
+it in passing, and **read the output rather than the exit code**: a session's own
+warning is easy to miss in a list of a dozen inherited ones, so check the paths,
+not the count.
