@@ -24,6 +24,7 @@ use openshard_client_render::{
     items,
     mobiles,
 };
+use openshard_map::overlay::Cover;
 use openshard_movement::{
     Bodies,
     Footing,
@@ -31,6 +32,8 @@ use openshard_movement::{
     Lean,
     PLAYER_HEIGHT,
     arrival_z,
+    can_stand,
+    static_top,
 };
 use openshard_protocol::direction::{
     Direction,
@@ -40,12 +43,9 @@ use openshard_protocol::target::{
     TargetKind,
     TargetResponse,
 };
-use openshard_protocol::wire::{
-    Graphic,
-    Layer,
-};
+use openshard_protocol::wire::Layer;
 use openshard_protocol::world::Point;
-use openshard_tiles::TileData;
+use openshard_tiles::StaticTile;
 use winit::window::CursorIcon;
 
 use crate::app::App;
@@ -65,12 +65,55 @@ use crate::{
 /// route destination.
 ///
 /// A sprite can be drawn at any z, but only a platform or stair is a place the
-/// movement rules let a body stand. Walls and roofs deliberately return false:
-/// their frame pick is visual cover, not the point a Ctrl-click should route
-/// toward.
-fn is_walk_surface(tiledata: &TileData, graphic: Graphic) -> bool {
-    let flags = tiledata.static_tile(graphic.0).flags;
-    flags.is_platform() || flags.is_climbable()
+/// movement rules let a body stand. A wall deliberately returns false: its frame
+/// pick is visual cover, not the point a Ctrl-click should route toward. A roof
+/// never reaches here at all — [`destination_on_roof`] answers for it before
+/// this is asked, because a walkable roof and the storey under an unwalkable one
+/// are the same question about one column.
+fn is_walk_surface(art: &StaticTile) -> bool {
+    art.flags.is_platform() || art.flags.is_climbable()
+}
+
+/// Where a click on a building's roof sends the body: the highest place on the
+/// roof's **own column** a body can stand, at or below the roof itself.
+///
+/// A roof is not cover the way a wall is. A wall stands between the cursor and
+/// a place behind it, so a click through one means that place; a roof stands
+/// over the building it belongs to, and the ground the cursor unprojects to
+/// past it is the street, which is how a click on a house's roof used to walk
+/// to the pavement outside its front door. What a player pointing at a roof
+/// means is *that building*, so the question is asked of the column the roof
+/// piece itself stands on.
+///
+/// One rule answers both halves of what a player expects there. A roof that can
+/// be walked on is a surface of its own column, and being the topmost one at or
+/// below `top_z` it is what this picks — the click lands on the roof. A roof
+/// nobody can stand on is no surface at all, so the highest one under it is
+/// found instead, which is the building's top storey.
+///
+/// `fallback` is the old under-cover answer, kept for a roof with nothing
+/// standable beneath it: an eave over the street, a porch roof over open
+/// ground. Better the place behind the art than no order at all.
+fn destination_on_roof(
+    footing: &Footing<'_>,
+    at: openshard_map::grid::Tile,
+    top_z: i32,
+    fallback: Point,
+) -> Point {
+    let mut surfaces: Vec<i32> = footing
+        .map
+        .map(|map| map.surfaces(at.x, at.y))
+        .unwrap_or_default();
+    // A user house is dynamic cover rather than map statics, so its storeys are
+    // in the live overlay and only there — the same pair of layers `arrival_z`
+    // reads, for the same reason.
+    surfaces.extend(footing.overlay.surfaces_at(at).map(Cover::surface));
+    surfaces
+        .into_iter()
+        .filter(|&z| z <= top_z && can_stand(footing, at, z, PLAYER_HEIGHT))
+        .max()
+        .and_then(|z| i8::try_from(z).ok())
+        .map_or(fallback, |z| Point::new(at.x, at.y, z))
 }
 
 /// Resolve a cursor tile behind visual cover to the actual floor the live
@@ -572,21 +615,45 @@ impl App {
     /// it.
     ///
     /// A floor or staircase carries its own height: that is how a click can
-    /// name a house's upper storey instead of the street beneath it. A wall or
-    /// roof is not a destination, though. It is cover in front of the point the
-    /// cursor unprojected to, so Ctrl-click passes through it and asks the live
-    /// footing for the walkable surface there. User houses are dynamic items,
-    /// not map statics, and their expanded multi pieces are in that same live
-    /// footing; treating their wall and roof art this way makes their interior
-    /// routeable without changing ordinary selection, use or target clicks.
+    /// name a house's upper storey instead of the street beneath it. A wall is
+    /// not a destination, though. It is cover in front of the point the cursor
+    /// unprojected to, so Ctrl-click passes through it and asks the live footing
+    /// for the walkable surface there. User houses are dynamic items, not map
+    /// statics, and their expanded multi pieces are in that same live footing;
+    /// treating their wall art this way makes their interior routeable without
+    /// changing ordinary selection, use or target clicks.
+    ///
+    /// A roof is neither: nothing stands behind it at the height the cursor
+    /// unprojected to except the street, so passing through it walked to the
+    /// pavement outside the house. It names the building it caps, and
+    /// [`destination_on_roof`] resolves that to a place on the roof's own
+    /// column — the roof itself where it can be walked on, the top storey under
+    /// it where it cannot.
     pub(crate) fn walk_destination(&self, tile: &PickedTile) -> Point {
         let footing = footing(&self.resources, self.walking_doors());
-        match (self.picking.hover.static_, self.picking.hover.item) {
-            (Some(picked), _) if is_walk_surface(&self.resources.tiledata, picked.graphic) => picked.at,
-            (None, Some(item)) if is_walk_surface(&self.resources.tiledata, item.graphic) => item.at,
-            (Some(picked), _) => destination_under_cover(&footing, tile.at, tile.stand_z.0, picked.at.z),
-            (None, Some(item)) => destination_under_cover(&footing, tile.at, tile.stand_z.0, item.at.z),
-            (None, None) => destination_under_cover(&footing, tile.at, tile.stand_z.0, tile.stand_z.0),
+        // At most one of the two is `Some` — see `picking::Hover` — so this is
+        // the whole of "what did the cursor hit", not a shortlist to re-rank.
+        let hit = match (self.picking.hover.static_, self.picking.hover.item) {
+            (Some(picked), _) => Some((picked.graphic, picked.at)),
+            (None, Some(item)) => Some((item.graphic, item.at)),
+            (None, None) => None,
+        };
+        let Some((graphic, at)) = hit else {
+            return destination_under_cover(&footing, tile.at, tile.stand_z.0, tile.stand_z.0);
+        };
+        let art = self.resources.tiledata.static_tile(graphic.0);
+        let cover = destination_under_cover(&footing, tile.at, tile.stand_z.0, at.z);
+        if art.flags.is_roof() {
+            return destination_on_roof(
+                &footing,
+                openshard_map::grid::Tile::new(at.x, at.y),
+                static_top(art, i32::from(at.z)),
+                cover,
+            );
+        }
+        match is_walk_surface(art) {
+            true => at,
+            false => cover,
         }
     }
 
@@ -954,6 +1021,7 @@ mod tests {
         Overlay,
     };
     use openshard_movement::scene::Scene;
+    use openshard_protocol::wire::Graphic;
     use openshard_tiles::TileFlags;
 
     use super::*;
@@ -978,12 +1046,98 @@ mod tests {
         );
         let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
 
-        assert!(is_walk_surface(scene.tiles(), FLOOR));
-        assert!(!is_walk_surface(scene.tiles(), ROOF));
+        assert!(is_walk_surface(scene.tiles().static_tile(FLOOR.0)));
+        assert!(!is_walk_surface(scene.tiles().static_tile(ROOF.0)));
         assert_eq!(
             destination_under_cover(&footing, tile, 0, 37),
             Point::new(5, 5, 7),
             "the roof was kept as cover instead of becoming the path target"
+        );
+    }
+
+    /// A three-storey house of map statics, capped by a roof nobody can stand
+    /// on. Clicking that roof means the building, and the highest place in the
+    /// building is its top storey — not the ground floor, and not the street the
+    /// cursor unprojects to past the eaves.
+    #[test]
+    fn a_click_on_an_unwalkable_roof_routes_to_the_top_storey() {
+        const ROOF: Graphic = Graphic(0x05E3);
+        let tile = Tile::new(5, 5);
+        let mut scene = Scene::flat(0);
+        scene.floor(tile.x, tile.y, 0, 0);
+        scene.floor(tile.x, tile.y, 20, 0);
+        scene.floor(tile.x, tile.y, 40, 0);
+        // A roof of its own art, so the pick can name it: `Scene::wall` and
+        // friends mint a graphic per shape and this test needs the flags.
+        scene.art(ROOF.0, TileFlags::ROOF | TileFlags::BLOCK, 3);
+        scene.put(tile.x, tile.y, 60, ROOF.0);
+        let live = Overlay::default();
+        let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
+
+        assert_eq!(
+            destination_on_roof(
+                &footing,
+                tile,
+                static_top(scene.tiles().static_tile(ROOF.0), 60),
+                Point::new(tile.x, tile.y, 0),
+            ),
+            Point::new(5, 5, 40),
+            "a roof click must name the storey under the roof, not the ground floor"
+        );
+    }
+
+    /// The same house with a roof that *is* a platform — a flat roof, a walkway.
+    /// The click lands on the roof itself, because it is the topmost place on
+    /// that column a body can stand.
+    #[test]
+    fn a_click_on_a_walkable_roof_routes_onto_the_roof() {
+        const ROOF: Graphic = Graphic(0x05E3);
+        let tile = Tile::new(5, 5);
+        let mut scene = Scene::flat(0);
+        scene.floor(tile.x, tile.y, 0, 0);
+        scene.floor(tile.x, tile.y, 20, 0);
+        scene.art(ROOF.0, TileFlags::ROOF | TileFlags::PLATFORM, 3);
+        scene.put(tile.x, tile.y, 40, ROOF.0);
+        let live = Overlay::default();
+        let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
+
+        assert_eq!(
+            destination_on_roof(
+                &footing,
+                tile,
+                static_top(scene.tiles().static_tile(ROOF.0), 40),
+                Point::new(tile.x, tile.y, 0),
+            ),
+            Point::new(5, 5, 43),
+            "a roof you can stand on is where the click goes"
+        );
+    }
+
+    /// An eave over open ground: the roof's own column holds nothing standable
+    /// under it, so the click keeps the old under-cover answer rather than
+    /// naming a place nobody can be.
+    #[test]
+    fn a_roof_over_nothing_keeps_the_under_cover_answer() {
+        const ROOF: Graphic = Graphic(0x05E3);
+        let tile = Tile::new(5, 5);
+        let mut scene = Scene::flat(0);
+        // Solid from the ground up to the roof: no surface fits a body.
+        scene.wall(tile.x, tile.y, 0, 60);
+        scene.art(ROOF.0, TileFlags::ROOF | TileFlags::BLOCK, 3);
+        scene.put(tile.x, tile.y, 60, ROOF.0);
+        let live = Overlay::default();
+        let footing = Footing::new(Some(scene.terrain()), &live, Doors::AsTheyStand);
+
+        let fallback = Point::new(6, 6, 0);
+        assert_eq!(
+            destination_on_roof(
+                &footing,
+                tile,
+                static_top(scene.tiles().static_tile(ROOF.0), 60),
+                fallback,
+            ),
+            fallback,
+            "nothing standable under the roof means the click keeps its old target"
         );
     }
 }

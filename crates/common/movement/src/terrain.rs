@@ -76,7 +76,7 @@ fn platform_surface(base: i32, height: i32, climbable: bool) -> (i32, i32) {
 /// column it is holding the entries for — see [`crate::spans`]. Two readings of
 /// "how tall is this" would be a wall the step rule and the layer under it
 /// disagreed about.
-pub(crate) fn static_top(tile: &StaticTile, base: i32) -> i32 {
+pub fn static_top(tile: &StaticTile, base: i32) -> i32 {
     match tile.flags.is_platform() {
         true => platform_surface(base, i32::from(tile.height), tile.flags.is_climbable()).1,
         false => base + i32::from(tile.height).max(1),

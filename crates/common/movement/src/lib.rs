@@ -127,6 +127,7 @@ pub use terrain::{
     MAX_STEP_UP,
     MapTerrain,
     PLAYER_HEIGHT,
+    static_top,
 };
 pub use walk::{
     Heading,
