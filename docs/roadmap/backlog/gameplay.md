@@ -527,6 +527,25 @@ they are crewed, which changes the failure's shape (the anchor keeps sliding
 past the boundary rather than sitting near it), and nobody has reported it.
 Worth `design_reaches_view`-style treatment if it ever is.
 
+## A click through a wall still names the tile the cursor unprojected to
+
+`App::pick_tile` (`crates/client/app/src/picking_query.rs:339`) unprojects the
+cursor at the *body's* own height, so a pixel on anything tall resolves to a
+tile behind that art rather than the column the art stands on. `walk_destination`
+(`crates/client/app/src/ui_command.rs`) now works around that for roofs — a roof
+click is asked of the roof piece's own column — but a wall click still goes to
+`destination_under_cover` with the unprojected tile, which is the tile *past* the
+wall as seen from the camera rather than the room behind it. It usually looks
+right because a house's interior is a couple of tiles deep and the route ends up
+inside anyway; on a one-tile-thick structure over open ground it names ground on
+the far side of the building.
+
+The honest fix is a pick that carries the column its art came from all the way to
+the destination, the way `PickedStatic::at` and `HoveredItem::at` already do, so
+no caller has to re-derive a tile from a pixel and a guessed height. Not done
+here: it touches selection, use and target clicks, which read the same pick and
+are correct as they stand.
+
 ## ~~An animal below body 200 is animated out of the monster table~~ — the table is read
 
 `BodyKind::of` (`crates/common/uofiles/src/anim.rs`) decides which of the three
